@@ -9,6 +9,22 @@
    thing everywhere they appear — the logo wedges, the stacked bar, the row
    icons, the legend dots and the tables.
    ========================================================================== */
+/* --------------------------------------------------------------------------
+   `hidden` has to actually hide.
+
+   The browser's own rule is `[hidden] { display: none }`, which any class
+   selector outranks — and half this app's classes set `display`. So `.field`,
+   `.notice`, `.ghost-btn`, `.tally-cell` and `.dialog` all stayed on screen
+   with the attribute set, and the JS toggling them looked broken for reasons
+   that were never in the JS. Symptoms were "Into" showing on a plain expense,
+   Cancel showing when nothing was being edited, and an empty dialog that could
+   not be dismissed.
+
+   `!important` is the right tool exactly once, and this is the once: nothing
+   should ever out-argue an element being hidden.
+   -------------------------------------------------------------------------- */
+[hidden] { display: none !important; }
+
 :root {
     --canvas:      #eff3f0;
     --paper:       #ffffff;
@@ -1060,18 +1076,120 @@ input[type="date"]:hover::-webkit-calendar-picker-indicator { opacity: .85; }
 }
 
 /* ====================================================================
-   WHEN THE DATABASE IS OUT OF REACH
-   There is no sign-in screen to fail on any more, so trouble has to
-   announce itself somewhere. A strip above everything: readable, and
-   in the way of nothing.
+   BACKUP
+   Two quiet buttons in the topbar, and one dialog that has to be read
+   before it is agreed to — importing throws away what is here.
    ==================================================================== */
 
-.conn-error {
+.backup {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin-left: 16px;
+    flex: 0 0 auto;
+}
+
+.backup button {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 8px 12px;
+    border: 1px solid var(--line);
+    border-radius: var(--radius-sm);
+    background: var(--paper);
+    color: var(--ink-2);
+    font: inherit;
+    font-size: 12.5px;
+    font-weight: 600;
+    cursor: pointer;
+    transition: border-color .16s ease, color .16s ease;
+}
+.backup button:hover { border-color: var(--jade); color: var(--jade); }
+
+@media (max-width: 1080px) {
+    .backup button span { display: none; }
+}
+
+.dialog {
+    position: fixed;
+    inset: 0;
+    z-index: 100;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 24px;
+    background: rgba(9, 30, 26, .55);
+}
+
+.dialog-card {
+    width: 100%;
+    max-width: 420px;
+    padding: 26px 28px;
+    border-radius: var(--radius);
+    background: var(--paper);
+    box-shadow: var(--shadow-hero);
+}
+
+.dialog-card h2 {
+    margin: 0 0 12px;
+    font-size: 17px;
+    font-weight: 700;
+    color: var(--ink);
+}
+
+.dialog-card p {
     margin: 0;
-    padding: 11px 20px;
-    background: var(--red-soft);
-    color: var(--red);
+    font-size: 13.5px;
+    line-height: 1.55;
+    color: var(--ink-2);
+}
+
+.dialog-actions {
+    display: flex;
+    justify-content: flex-end;
+    gap: 10px;
+    margin-top: 22px;
+}
+
+.dialog-actions button {
+    padding: 10px 16px;
+    border: 1px solid var(--line);
+    border-radius: var(--radius-sm);
+    background: var(--paper);
+    color: var(--ink-2);
+    font: inherit;
     font-size: 13px;
-    line-height: 1.45;
-    text-align: center;
+    font-weight: 600;
+    cursor: pointer;
+    transition: border-color .16s ease, color .16s ease, background .16s ease;
+}
+.dialog-actions button:hover { border-color: var(--ink-3); color: var(--ink); }
+
+/* The destructive one is the one that looks like a decision. */
+#backupConfirm {
+    border-color: var(--red);
+    background: var(--red);
+    color: #fff;
+}
+#backupConfirm:hover { border-color: var(--red); background: #b8322d; color: #fff; }
+
+/* The Drive copy sits ahead of the file buttons, with the one piece of status
+   worth carrying in a topbar: when it last went up. */
+.drive-stamp {
+    font-size: 12px;
+    font-weight: 600;
+    color: var(--ink-3);
+    white-space: nowrap;
+}
+.drive-stamp.is-stale { color: var(--red); }
+
+.backup-sep {
+    width: 1px;
+    height: 20px;
+    background: var(--line);
+    flex: 0 0 auto;
+}
+
+@media (max-width: 1200px) {
+    .drive-stamp { display: none; }
 }

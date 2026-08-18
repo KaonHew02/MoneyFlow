@@ -2127,6 +2127,262 @@ function resetForm(which) {
     }
 }
 
+/**
+ * ====================================================================
+ * BACKUP — the only copy of this data you actually control
+ * --------------------------------------------------------------------
+ * Everything MoneyFlow remembers lives in this browser's localStorage, which
+ * means it lives in one browser, on one address, on one machine. Clearing
+ * browsing data wipes it. There is no server holding a second copy and nobody
+ * to ask for one.
+ *
+ * So: a file. Export writes every store into one .json you can keep in Drive
+ * or email to yourself; Import reads it back, here or on a different computer.
+ * That file is the backup, the way to move to a new machine, and the way out
+ * of this app if you ever want your figures somewhere else.
+ *
+ * Import replaces rather than merges. Merging two ledgers means deciding what
+ * counts as the same entry, and getting that wrong quietly doubles a balance —
+ * worse than the honest thing, which is to say plainly that the file wins and
+ * everything here goes.
+ * ====================================================================
+ */
+
+const BACKUP_FORMAT  = 'moneyflow.backup';
+const BACKUP_VERSION = 1;
+
+/** Every store the app persists. A new module adds its key here or it is not backed up. */
+const BACKUP_STORES = [LEDGER_KEY, BUDGET_KEY, CARD_KEY];
+
+/**
+ * Reads the stores as they sit on disk. `storedRaw` is used rather than the
+ * module state so an export copies what is written down, not what happens to
+ * be on screen — those differ mid-edit, and the written one is the truth.
+ */
+function backupEnvelope() {
+    const stores = {};
+    BACKUP_STORES.forEach((key) => {
+        const raw = storedRaw(key);
+        if (!raw) return;
+        try { stores[key] = JSON.parse(raw); } catch (err) { /* unreadable: leave it out */ }
+    });
+
+    return {
+        format: BACKUP_FORMAT,
+        version: BACKUP_VERSION,
+        app: 'MoneyFlow',
+        exportedAt: new Date().toISOString(),
+        stores,
+    };
+}
+
+/** "27 entries across 4 accounts", or "nothing recorded yet" — for the dialog. */
+function backupSummary(envelope) {
+    const ledger = (envelope.stores && envelope.stores[LEDGER_KEY]) || {};
+    const entries  = Array.isArray(ledger.entries)  ? ledger.entries.length  : 0;
+    const accounts = Array.isArray(ledger.accounts) ? ledger.accounts.length : 0;
+
+    if (!entries) {
+        return accounts ? accounts + ' accounts and nothing recorded yet' : 'nothing recorded yet';
+    }
+    return entries + (entries === 1 ? ' entry' : ' entries')
+        + ' across ' + accounts + (accounts === 1 ? ' account' : ' accounts');
+}
+
+function backupFilename() {
+    return 'moneyflow-' + todayIso() + '.json';
+}
+
+/* -------------------------------------------------------------------- */
+
+function backupExport(btn) {
+    try {
+        const blob = new Blob([JSON.stringify(backupEnvelope(), null, 2)], { type: 'application/json' });
+        const url = URL.createObjectURL(blob);
+        const link = document.createElement('a');
+        link.href = url;
+        link.download = backupFilename();
+        document.body.appendChild(link);
+        link.click();
+        link.remove();
+
+        // Revoking immediately can cancel the download in some browsers; a
+        // beat later is safe, and the object is tiny either way.
+        setTimeout(() => URL.revokeObjectURL(url), 4000);
+
+        flashButton(btn, '<i class="bi bi-check-lg"></i><span>Saved</span>');
+    } catch (err) {
+        backupSay('Could not save the file',
+            'The browser refused to write the download. If this is a private window, '
+            + 'try again in a normal one.');
+    }
+}
+
+/**
+ * The chosen file, checked before anything is destroyed. Everything that can
+ * be wrong with it is named, because "invalid file" does not tell you whether
+ * you picked the wrong file or the right one has gone bad.
+ */
+function backupRead(file) {
+    return file.text().then((text) => {
+        let data;
+        try {
+            data = JSON.parse(text);
+        } catch (err) {
+            throw new Error('That file is not readable as JSON. Pick the .json file MoneyFlow exported.');
+        }
+
+        if (!data || typeof data !== 'object' || data.format !== BACKUP_FORMAT) {
+            throw new Error('That is not a MoneyFlow backup. The file should have come from Export, '
+                + 'and its name starts with "moneyflow-".');
+        }
+        if (Number(data.version) > BACKUP_VERSION) {
+            throw new Error('That backup was made by a newer version of MoneyFlow than this one. '
+                + 'Update the app first, or it would read the file wrongly.');
+        }
+        if (!data.stores || typeof data.stores !== 'object') {
+            throw new Error('That backup is empty — it carries no records at all.');
+        }
+        if (!Object.keys(data.stores).some((key) => BACKUP_STORES.includes(key))) {
+            throw new Error('That backup holds nothing this version of MoneyFlow recognises.');
+        }
+
+        return data;
+    });
+}
+
+/**
+ * Writes the file in, then reloads. Reloading rather than re-rendering is
+ * deliberate: every module reads its store once at start-up and then keeps
+ * state in its own variables, so a reload is the one way to be certain nothing
+ * survives from before the import.
+ */
+function backupApply(envelope) {
+    try {
+        BACKUP_STORES.forEach((key) => {
+            if (Object.prototype.hasOwnProperty.call(envelope.stores, key)) {
+                localStorage.setItem(key, JSON.stringify(envelope.stores[key]));
+            } else {
+                // Absent from the backup means absent afterwards. Leaving the
+                // old value would blend two books, which is the one thing
+                // replacing is meant to prevent.
+                localStorage.removeItem(key);
+            }
+        });
+        location.reload();
+    } catch (err) {
+        backupSay('Could not restore the backup',
+            'The browser refused to write to storage, so nothing was changed. That usually '
+            + 'means private browsing, or storage being full.');
+    }
+}
+
+/* ------------------------------- dialog ------------------------------ */
+
+/**
+ * What the confirm button will do if it is pressed, or null when the dialog is
+ * only carrying a message. Anything that can destroy records goes through here
+ * — the backup import, and the Drive layer in drive.js — so there is exactly
+ * one place in the app where "are you sure" is asked, and it is always asked.
+ */
+let dialogAction = null;
+
+function backupShow() {
+    const box = $('backupDialog');
+    if (box) box.hidden = false;
+}
+
+function backupClose() {
+    const box = $('backupDialog');
+    if (box) box.hidden = true;
+    dialogAction = null;
+}
+
+/** A message with nothing to confirm — the one button becomes the way out. */
+function backupSay(title, body) {
+    dialogAction = null;
+    $('backupTitle').textContent = title;
+    $('backupBody').textContent = body;
+    $('backupConfirm').hidden = true;
+    $('backupCancel').textContent = 'Close';
+    backupShow();
+}
+
+/** A message that has to be agreed to before `action` runs. */
+function askConfirm(title, body, label, action) {
+    dialogAction = action;
+    $('backupTitle').textContent = title;
+    $('backupBody').textContent = body;
+    $('backupConfirm').hidden = false;
+    $('backupConfirm').textContent = label;
+    $('backupCancel').textContent = 'Cancel';
+    backupShow();
+}
+
+function backupAsk(envelope) {
+    const when = envelope.exportedAt ? String(envelope.exportedAt).slice(0, 10) : 'an unknown date';
+
+    askConfirm(
+        'Replace everything with this backup?',
+        'The file holds ' + backupSummary(envelope) + ', saved on ' + when + '. '
+        + 'This browser currently holds ' + backupSummary(backupEnvelope()) + ', and all of it '
+        + 'will be replaced. There is no undo — if you want to keep what is here, cancel and Export first.',
+        'Replace everything',
+        () => backupApply(envelope));
+}
+
+/** Brief label swap, the same way the copy buttons report themselves. */
+function flashButton(btn, html) {
+    if (!btn) return;
+    const idle = btn.innerHTML;
+    btn.innerHTML = html;
+    setTimeout(() => { btn.innerHTML = idle; }, 1800);
+}
+
+function wireBackup() {
+    const exportBtn = $('backupExport');
+    if (exportBtn) exportBtn.addEventListener('click', () => backupExport(exportBtn));
+
+    const importBtn = $('backupImport');
+    const picker = $('backupFile');
+
+    if (importBtn && picker) {
+        importBtn.addEventListener('click', () => picker.click());
+
+        picker.addEventListener('change', () => {
+            const file = picker.files && picker.files[0];
+            // Clearing the input now means picking the same file twice in a row
+            // still fires this handler the second time.
+            picker.value = '';
+            if (!file) return;
+
+            backupRead(file)
+                .then(backupAsk)
+                .catch((err) => backupSay('That backup could not be read', err.message));
+        });
+    }
+
+    const confirmBtn = $('backupConfirm');
+    if (confirmBtn) {
+        confirmBtn.addEventListener('click', () => {
+            const action = dialogAction;
+            backupClose();          // closes first, so a failing action can reopen it with its own message
+            if (action) action();
+        });
+    }
+
+    const cancelBtn = $('backupCancel');
+    if (cancelBtn) cancelBtn.addEventListener('click', backupClose);
+
+    // The backdrop and Escape both cancel. A dialog dismissable only by one
+    // small button is a dialog people click through without reading.
+    const box = $('backupDialog');
+    if (box) box.addEventListener('click', (event) => { if (event.target === box) backupClose(); });
+    document.addEventListener('keydown', (event) => {
+        if (event.key === 'Escape' && box && !box.hidden) backupClose();
+    });
+}
+
 function setSegment(seg, value) {
     seg.dataset.value = value;
     seg.querySelectorAll('button').forEach((btn) => {
@@ -2300,6 +2556,8 @@ document.addEventListener('DOMContentLoaded', () => {
             if (btn) showModule(btn.dataset.module);
         });
     }
+
+    wireBackup();
 
     renderLedger();
     renderSplit();

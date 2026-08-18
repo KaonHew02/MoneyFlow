@@ -13,10 +13,6 @@
 
 <div class="app">
 
-    <!-- Only ever seen when the database cannot be reached. The app keeps
-         working; this says what is not being saved and why. -->
-    <p class="conn-error" id="connError" hidden></p>
-
     <header class="topbar">
         <a class="brand" href="#" aria-label="MoneyFlow — Understand Your Money. Manage Your Future.">
             <img src="logo.svg" alt="MoneyFlow">
@@ -36,6 +32,23 @@
                 <i class="bi bi-credit-card-2-front-fill"></i><span>Card Payoff</span>
             </button>
         </nav>
+        <div class="backup">
+            <span class="drive-stamp" id="driveStamp"></span>
+            <button type="button" id="drivePush" title="Save a copy into your Google Drive folder">
+                <i class="bi bi-cloud-arrow-up"></i><span>To Drive</span>
+            </button>
+            <button type="button" id="drivePull" title="Replace what is here with the copy in Drive">
+                <i class="bi bi-cloud-arrow-down"></i><span>From Drive</span>
+            </button>
+            <span class="backup-sep"></span>
+            <button type="button" id="backupExport" title="Save everything to a file you keep">
+                <i class="bi bi-download"></i><span>Export</span>
+            </button>
+            <button type="button" id="backupImport" title="Restore everything from a file you exported">
+                <i class="bi bi-upload"></i><span>Import</span>
+            </button>
+            <input type="file" id="backupFile" accept=".json,application/json" hidden>
+        </div>
     </header>
 
     <main class="main">
@@ -710,13 +723,26 @@
     </main>
 </div>
 
-<!-- Supabase's browser library, then our own four files in dependency order:
-     config (your project's address) → api (the only door to the data) →
-     session (gets one, silently) → app (the modules). -->
-<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
-<script src="config.js"></script>
-<script src="api.js"></script>
-<script src="session.js"></script>
+<!-- Import replaces what is here, so it asks first — and says exactly what is
+     in the file and what is about to go. -->
+<div class="dialog" id="backupDialog" hidden>
+    <div class="dialog-card">
+        <h2 id="backupTitle"></h2>
+        <p id="backupBody"></p>
+        <div class="dialog-actions">
+            <button type="button" id="backupCancel">Cancel</button>
+            <button type="button" id="backupConfirm">Replace everything</button>
+        </div>
+    </div>
+</div>
+
+<!-- app.js is the app, and it is complete on its own: localStorage is the
+     working store and every screen runs without a network. The three below it
+     add the Drive copy on top, and are allowed to fail without taking the app
+     with them — which is why they load last. -->
 <script src="app.js"></script>
+<script src="https://accounts.google.com/gsi/client" async defer></script>
+<script src="drive-config.js"></script>
+<script src="drive.js"></script>
 </body>
 </html>

@@ -17,8 +17,7 @@
  *
  * On security: the key in config.js is public and is meant to be. It grants
  * nothing by itself. Every table has Row Level Security, so a request can only
- * ever reach rows belonging to the session doing the asking — which the app
- * obtains anonymously, without a login screen. That is enforced by the
+ * ever reach rows belonging to whoever is logged in. That is enforced by the
  * database, not by this file — nothing here can be bypassed by editing it.
  */
 
@@ -76,7 +75,7 @@ const MF = (() => {
         const text = String(error.message || '');
 
         if (/row-level security/i.test(text)) {
-            throw new ApiError('That record belongs to a different session. Reload the page.', error);
+            throw new ApiError('You are not signed in, or that record is not yours.', error);
         }
         if (/txn_check|to_account_id/i.test(text)) {
             throw new ApiError('A transfer needs two different accounts, and only a transfer has a destination.', error);
@@ -104,54 +103,57 @@ const MF = (() => {
     }
 
     /* ------------------------------------------------------------------ *
-     * The session — obtained without asking
+     * Signing in
      * ------------------------------------------------------------------ */
 
     /**
-     * There is no sign-in screen, and no account to create. Row Level Security
-     * still needs a *who* to match rows against, so on first load the app
-     * quietly claims an anonymous account: a real row in `auth.users`, seeded
-     * with the starter categories and accounts like any other, but with no
-     * email and no password in front of it.
-     *
-     * What that buys: nothing to remember, nothing to type, and the database
-     * still refuses to hand this browser anybody else's rows — the published
-     * anon key on its own opens nothing.
-     *
-     * What it costs, and it is worth knowing: the session lives in this
-     * browser's storage. Clear the site data, or open the app on another
-     * device, and Supabase issues a fresh anonymous account — which means an
-     * empty book. Same app, different reader, as far as the database knows.
+     * The project has a switch for this, and it is off by default. Saying only
+     * "disabled" leaves you hunting through the dashboard, so the message names
+     * the setting.
      */
-    const ANON_OFF =
-        'Anonymous sign-ins are switched off for this project. In Supabase, go to ' +
-        'Authentication → Sign In / Providers and turn on "Allow anonymous sign-ins".';
+    const PROVIDER_OFF =
+        'Email logins are switched off for this project. In Supabase, go to ' +
+        'Authentication → Sign In / Providers → Email and turn on "Enable email provider".';
 
     const auth = {
-        /**
-         * Called once at start-up, and the only entry point. Returns a user
-         * either way: the stored session if this browser has been here before,
-         * a newly issued anonymous one if it has not.
-         */
-        async ensure() {
-            const existing = await auth.user();
-            if (existing) return existing;
-
-            const { data, error } = await client().auth.signInAnonymously();
-
-            if (error && /anonymous.*(disabled|not enabled|not allowed)/i.test(error.message)) {
-                throw new ApiError(ANON_OFF, error);
+        async signUp(email, password) {
+            const { data, error } = await client().auth.signUp({ email, password });
+            if (error && /already registered/i.test(error.message)) {
+                throw new ApiError('That email already has an account — sign in instead.', error);
+            }
+            if (error && /(logins?|signups?) are disabled/i.test(error.message)) {
+                throw new ApiError(PROVIDER_OFF, error);
             }
             // Supabase reports a failing signup trigger as this, which sounds
             // like its own fault and is almost always ours: seed_new_user()
             // threw, so creating the user was rolled back with it.
             if (error && /Database error saving new user/i.test(error.message)) {
                 throw new ApiError(
-                    'The session could not be created because the new-user seed failed. ' +
-                    'Re-run supabase/schema.sql in the SQL editor (Step 1) and reload.', error);
+                    'The account could not be created because the new-user seed failed. ' +
+                    'Re-run supabase/schema.sql in the SQL editor (Step 1) and try again.', error);
             }
-            fail(error, 'Could not start a session');
+            fail(error, 'Could not create the account');
             return data.user;
+        },
+
+        async signIn(email, password) {
+            const { data, error } = await client().auth.signInWithPassword({ email, password });
+            if (error && /Invalid login/i.test(error.message)) {
+                throw new ApiError('That email and password do not match.', error);
+            }
+            if (error && /(logins?|signups?) are disabled/i.test(error.message)) {
+                throw new ApiError(PROVIDER_OFF, error);
+            }
+            if (error && /Email not confirmed/i.test(error.message)) {
+                throw new ApiError('Check your email and click the confirmation link first.', error);
+            }
+            fail(error, 'Could not sign in');
+            return data.user;
+        },
+
+        async signOut() {
+            cache = null;
+            await client().auth.signOut();
         },
 
         async user() {
@@ -160,12 +162,19 @@ const MF = (() => {
             return (data && data.session && data.session.user) || null;
         },
 
-        /** Fires when a session is restored, refreshed, or newly issued. */
+        /** Fires on sign in, sign out, and when a stored session is restored. */
         onChange(handler) {
             client().auth.onAuthStateChange((event, session) => {
                 if (event === 'SIGNED_OUT') cache = null;
                 handler((session && session.user) || null, event);
             });
+        },
+
+        async sendReset(email) {
+            const { error } = await client().auth.resetPasswordForEmail(email, {
+                redirectTo: location.origin + location.pathname,
+            });
+            fail(error, 'Could not send the reset email');
         },
     };
 
@@ -615,7 +624,7 @@ const MF = (() => {
 
             if (savedAccounts.length) {
                 const { count } = await run(db.from('txn').select('id', { count: 'exact', head: true }));
-                // The seeded starter accounts only exist so a fresh session works.
+                // The seeded starter accounts only exist so a fresh login works.
                 if (!count) await run(db.from('account').delete().neq('id', 0), 'Clearing starter accounts');
 
                 const made = await run(db.from('account').insert(savedAccounts.map((a, i) => ({

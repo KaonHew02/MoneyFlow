@@ -14,14 +14,9 @@
 --
 --   Every table carries `user_id` and has Row Level Security switched on. The
 --   key shipped in the browser is public by design; it grants nothing on its
---   own. A request can only ever see rows where `user_id` matches the session
---   making it. Without these policies a public site would be a public database
---   — they are the security, not a formality.
---
---   The app has no login screen: it obtains that session anonymously on first
---   load. Nothing below changes because of it. An anonymous user is a real row
---   in `auth.users` holding the `authenticated` role, so the policies, the
---   defaults and the seed trigger all apply to it exactly as written.
+--   own. A logged-in request can only ever see rows where `user_id` matches
+--   the person making it. Without these policies a public site would be a
+--   public database — they are the security, not a formality.
 -- =============================================================================
 
 -- =============================================================================
@@ -383,13 +378,12 @@ end $$;
 -- =============================================================================
 -- NEW USER SEED
 --
--- A brand new user gets the starter categories, payment methods and accounts,
--- so the app is usable on its first load rather than presenting an empty form
--- with nowhere to file anything. Anonymous sessions come through here too —
--- the trigger is on `auth.users`, and that is where they land.
+-- A brand new account gets the starter categories, payment methods and
+-- accounts, so the app is usable the moment you first log in rather than
+-- presenting an empty form with nowhere to file anything.
 --
--- security definer, because it runs as the user row is created, before there
--- is an established session whose policies would let it write.
+-- security definer, because it runs as the signup happens, before there is a
+-- logged-in session whose policies would let it write.
 -- =============================================================================
 
 create or replace function public.seed_new_user()

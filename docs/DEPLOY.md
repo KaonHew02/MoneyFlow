@@ -19,9 +19,9 @@ Two things follow, and both are fatal for a finance app:
 This is not a limitation of how the app is written. Any application that saves
 data needs somewhere that runs code and can write. Pages is neither.
 
-## The three real options
+## The options that were on the table
 
-### Option A — Keep it local (what you have now)
+### Option A — Keep it local (where this started)
 
 Runs on your PC. Free, completely private, already working, no accounts to
 create. Your data never leaves the machine.
@@ -56,58 +56,61 @@ works from any device, and someone else handles the backups.
 
 Costs: real rework. The schema ports to Postgres nearly verbatim — the table
 design carries over — but every `db.all(...)` call becomes a Supabase call, so
-the API layer is rewritten rather than moved. You also need a session on every
-request, because a public site whose rows belong to nobody is a public
-database.
+the API layer is rewritten rather than moved. You also need a login, because a
+public site with no login is a public database.
 
-## What was chosen — Option C, on 2026-08-18
+## What was chosen — Option D, on 2026-08-18
 
-Pages + Supabase as the only database. Step-by-step setup is in
-[LAUNCH.md](LAUNCH.md).
+**GitHub Pages for the screens, and this browser's `localStorage` for the
+data.** No database, no accounts, no server, no keys. The site is live at
+https://kaonhew02.github.io/MoneyFlow/ and the whole app is `index.html`,
+`style.css` and `app.js`.
 
-Sign-in started as email and password and was taken back out on the same day:
-for an app one person uses, a login screen was a lock on a door only its owner
-knocks at. What replaced it is an **anonymous session** — Supabase issues the
-browser a real user row with no email and no password, and every policy below
-keeps working untouched, because they compare rows against a session, and never
-cared how that session was obtained.
+That was not the plan at the start of the day. The route was Option C, and it
+got built: a Postgres schema with fourteen tables and row-level security, an
+`api.js` client, and an email-and-password gate. Then the gate came out (a
+login felt like a lock on a door only its owner knocks at), went back in (a
+device-bound session cannot follow you to your phone) — and the whole database
+came out behind it.
 
-The swap cost exactly what it was supposed to: `api.js` was rewritten and the
-modules were not touched. That is the whole return on having built a client
-layer in the first place.
+The reasoning that settled it: **`app.js` had never been wired to `api.js`.**
+Every module still read and wrote `localStorage`, so Supabase was holding
+nothing. The choice was not "move the data" but "do the migration at all", and
+it stopped being worth doing for one person's ledger on one machine.
 
-What changed:
+What that costs, stated plainly, because it is the whole trade:
 
-| | Before | After |
-|---|---|---|
-| Database | SQLite file on your PC | Postgres at Supabase |
-| Schema | `server/schema.sql` | `supabase/schema.sql` — same design, plus `user_id` and row-level security |
-| API | `server/api/*.js` over `node:http` | gone; the browser queries Supabase directly |
-| Security | nothing could reach it but you | an anonymous session, and a policy on every table |
-| Running it | `MoneyFlow.cmd` | any static web server, or the live Pages URL |
+- **The records live in one browser, on one address.** `localhost:4780` and the
+  Pages URL are separate stores. Your phone is a third.
+- **Clearing browsing data deletes everything** unless a copy is elsewhere —
+  which is what Export and the Drive buttons are for. See [DRIVE.md](DRIVE.md).
+- **`localStorage` caps at about 5 MB** — thousands of entries, not millions.
+- Nothing syncs, nothing backs up, and nobody can recover it for you.
 
-The old build is kept in `legacy-sqlite/`, database and all, as a working
-fallback that needs no internet. It is not part of the live app.
+**Export and Import in the topbar are what make this survivable.** Export
+writes every store into one `moneyflow-YYYY-MM-DD.json`; Import reads it back,
+on this machine or another one. That file is the backup, the way onto a new
+laptop, and the way out of MoneyFlow entirely if you ever want your figures
+elsewhere. Import replaces rather than merges — merging two ledgers means
+guessing which entries are the same, and guessing wrong doubles a balance
+quietly — so it states what is in the file and what is about to go, and waits.
+
+The Supabase build is archived intact in `legacy-supabase/` — schema, client,
+gate and setup guide — and the old Node/SQLite build in `legacy-sqlite/`. Both
+are out of the running app; neither is deleted. If MoneyFlow ever needs to
+follow you between devices, Option C is written and waiting rather than
+imagined.
 
 ## What this route costs you
 
-**The session is not optional, even without a login.** A static site has no
-secrets — the Supabase key is in the JavaScript and anyone can read it. It
-grants nothing on its own, because every table carries `user_id` and a policy
-restricting rows to the session asking for them. That policy *is* the security,
-which is why the gate could go and the policies could not. Which is also why
-`supabase/schema.sql`
-enables row-level security on all fourteen tables and why the balance view is
-declared `security_invoker` — a view without it would run with its owner's
-rights and hand every user everyone's balances.
+**Your data has exactly one copy, and you are holding it.** No server means no
+backup, no sync, and nobody to ask. Export regularly, or accept that a cleared
+browser is a cleared ledger.
 
-**The session is the only key, and it lives in one browser.** No password means
-no password reset. Cleared site data, a different device, or a different
-address is a different book. Export `txn` to CSV now and then.
+**A public repo is still public.** Nothing sensitive ships in the app now —
+there are no keys left to leak — but `legacy-sqlite/data/` holds your real
+figures and is in `.gitignore`. Leave it there.
 
-**The free tier pauses after 7 days of no activity.** The app will fail to load
-until you restore it from the dashboard. If you use MoneyFlow most weeks you
-will not notice; if you go quiet for a month, expect one extra click.
-
-**Never commit `legacy-sqlite/data/`.** A Pages repo is public. That folder has
-your real figures in it and is in `.gitignore` — leave it there.
+**If you ever want it on your phone**, that is Option C again, and the pieces
+are in `legacy-supabase/`. The one piece that was never written is the part
+that connects the modules to `api.js`.

@@ -3,9 +3,8 @@
  *
  * Both values here are safe to publish. The anon key is designed to be visible
  * in the browser; it grants nothing on its own, because every table is
- * protected by Row Level Security and only ever returns rows belonging to the
- * session asking for them — which this app obtains anonymously, with no login
- * screen and no password to keep anywhere.
+ * protected by Row Level Security and only ever returns rows belonging to
+ * whoever is logged in. Your password is never in this file.
  *
  * The one value that must NEVER go in here is the `service_role` key. That one
  * bypasses every policy. It belongs on a server, and this app has none. If you

@@ -1,10 +1,11 @@
 /**
  * MoneyFlow — a tiny static web server for working on the app locally.
  *
- * Why this exists at all: opening index.html by double-clicking gives the page
- * a `file://` address, and a page loaded that way has no web origin. Supabase
- * refuses to talk to it, so the app would load with a red strip across the top
- * and save nothing. Served over http:// it behaves exactly as it will on
+ * Why this still exists now that nothing talks to a server: a page opened by
+ * double-clicking has a `file://` address, and browsers treat that as a single
+ * shared origin for every local file — so `localStorage` there is not really
+ * yours, and some browsers refuse it outright in private windows. Served over
+ * http:// the app gets its own origin, and behaves exactly as it will on
  * GitHub Pages.
  *
  * No dependencies and nothing to install — `node:http` is in the runtime. This
@@ -32,8 +33,8 @@ const MIME = {
     '.woff2': 'font/woff2',
 };
 
-/** Never serve the archived SQLite database, whatever the URL asks for. */
-const FORBIDDEN = ['legacy-sqlite', 'data', '.git'];
+/** Never serve the archived builds or their data, whatever the URL asks for. */
+const FORBIDDEN = ['legacy-sqlite', 'legacy-supabase', 'data', '.git'];
 
 const server = http.createServer((req, res) => {
     const url = new URL(req.url, `http://localhost:${PORT}`);
