@@ -2054,11 +2054,1167 @@ function copySummary(btn, text, idleLabel) {
 
 /**
  * ====================================================================
+ * DASHBOARD — M1, UNDERSTAND
+ * --------------------------------------------------------------------
+ * The one screen that reads every other module and writes nothing of its
+ * own. Every figure here is computed from the ledger at the moment it is
+ * painted — "record once, analyze many times". There is no dashboard
+ * store and there must never be one: a saved total is a second version of
+ * the truth, and it goes stale the moment an entry is edited.
+ *
+ * Three of the ten KPIs have no module behind them yet — investments
+ * (Grow), instalments and upcoming payments (Commit). They are drawn as
+ * pending rather than as zero, because "RM 0.00" is a claim about your
+ * money and "—" is not.
+ *
+ * Sub-category and payment method are the same story one level down: the
+ * spec asks the breakdown to split by them, the ledger does not record
+ * them yet, so the breakdown offers the three dimensions that are real
+ * and says plainly what is missing.
+ * ====================================================================
+ */
+const DASH_DIMS = {
+    category: 'Category',
+    bucket:   'Bucket',
+    account:  'Account',
+};
+
+/** "3 categories" reads; "3 categorys" does not. */
+const DASH_DIM_PLURAL = {
+    category: 'categories',
+    bucket:   'buckets',
+    account:  'accounts',
+};
+
+/** How far back each grain of the trend chart looks. Twelve months is a
+ *  year of seasons; fourteen days is a fortnight either side of payday. */
+const DASH_TREND_SPAN = { daily: 14, weekly: 12, monthly: 12, yearly: 5 };
+
+/** The account whose history is open, if any. Everything else the
+ *  dashboard needs is read off the controls at paint time. */
+let dashState = { account: null };
+
+/**
+ * --------------------------------------------------------------------
+ * Dates, continued. Same rule as the ledger: 'YYYY-MM-DD' strings split
+ * by hand, never handed to `new Date()` whole, or every figure lands a
+ * day out east of Greenwich. ISO strings also sort and compare as text,
+ * which is what makes every range filter a plain `>=` / `<=`.
+ * --------------------------------------------------------------------
+ */
+const isoNums   = (iso) => (iso || '').split('-').map(Number);
+const isoOf     = (y, m, d) => y + '-' + pad2(m) + '-' + pad2(d);
+const isoOfDate = (dt) => isoOf(dt.getFullYear(), dt.getMonth() + 1, dt.getDate());
+
+function isoShift(iso, days) {
+    const [y, m, d] = isoNums(iso);
+    return isoOfDate(new Date(y, m - 1, d + days));
+}
+
+/** Weeks start on Monday — a spending week that splits the weekend across
+ *  two rows tells you nothing useful about weekends. */
+function weekStart(iso) {
+    const [y, m, d] = isoNums(iso);
+    const weekday = new Date(y, m - 1, d).getDay();      // 0 = Sunday
+    return isoShift(iso, weekday === 0 ? -6 : 1 - weekday);
+}
+
+const monthFirst = (y, m) => isoOf(y, m, 1);
+const monthLast  = (y, m) => isoOfDate(new Date(y, m, 0));   // day 0 of next month
+
+function dayLabel(iso) {
+    const [y, m, d] = isoNums(iso);
+    if (!y || !m || !d) return '—';
+    return d + ' ' + MONTH_NAMES[m - 1] + ' ' + y;
+}
+
+function dayShort(iso) {
+    const [, m, d] = isoNums(iso);
+    return m ? d + ' ' + MONTH_NAMES[m - 1] : '—';
+}
+
+function rangeDays(from, to) {
+    const [ay, am, ad] = isoNums(from);
+    const [by, bm, bd] = isoNums(to);
+    if (!ay || !by) return 1;
+    const span = new Date(by, bm - 1, bd) - new Date(ay, am - 1, ad);
+    return Math.max(1, Math.round(span / 86400000) + 1);
+}
+
+const quarterOf = (month) => Math.floor((month - 1) / 3) + 1;
+
+/**
+ * --------------------------------------------------------------------
+ * The selected period
+ * --------------------------------------------------------------------
+ */
+const dashPeriod = () => (($('dashPeriod') || {}).dataset || {}).value || 'month';
+
+function monthRange(y, m, label) {
+    return {
+        from: monthFirst(y, m), to: monthLast(y, m), label,
+        sub: MONTH_NAMES[m - 1] + ' ' + y,
+        monthly: true,
+    };
+}
+
+function dashRange() {
+    const today = todayIso();
+    const [ty, tm] = isoNums(today);
+    const period = dashPeriod();
+
+    if (period === 'today') {
+        return { from: today, to: today, label: 'Today', sub: dayLabel(today) };
+    }
+
+    if (period === 'week') {
+        const from = weekStart(today);
+        return { from, to: isoShift(from, 6), label: 'This week', sub: dayShort(from) + ' – ' + dayLabel(isoShift(from, 6)) };
+    }
+
+    if (period === 'month') return monthRange(ty, tm, 'This month');
+
+    if (period === 'lastmonth') {
+        const prev = new Date(ty, tm - 2, 1);
+        return monthRange(prev.getFullYear(), prev.getMonth() + 1, 'Last month');
+    }
+
+    if (period === 'year')     return { from: isoOf(ty, 1, 1),     to: isoOf(ty, 12, 31),     label: 'This year', sub: String(ty) };
+    if (period === 'lastyear') return { from: isoOf(ty - 1, 1, 1), to: isoOf(ty - 1, 12, 31), label: 'Last year', sub: String(ty - 1) };
+
+    // Custom. An empty side means "open ended on that side", which in practice
+    // is the other side — a range needs two ends to be a range at all. Ends
+    // entered backwards are swapped rather than refused: the intent is never in
+    // doubt, and an empty dashboard would be the only other answer.
+    let from = ($('dashFrom') || {}).value || '';
+    let to   = ($('dashTo')   || {}).value || '';
+    if (!from && !to) return monthRange(ty, tm, 'Custom range');
+    if (!from) from = to;
+    if (!to)   to   = from;
+    if (from > to) { const held = from; from = to; to = held; }
+
+    return {
+        from, to, label: 'Custom range',
+        sub: from === to ? dayLabel(from) : dayLabel(from) + ' – ' + dayLabel(to),
+        custom: true,
+    };
+}
+
+/** Every entry the period covers, newest day first. */
+function dashEntriesIn(from, to) {
+    return ledgerState.entries
+        .filter((entry) => entry.date >= from && entry.date <= to)
+        .sort((a, b) => (a.date === b.date ? b.seq - a.seq : (a.date < b.date ? 1 : -1)));
+}
+
+const dashAccountLabel = (id) => {
+    const account = accountById(id);
+    if (!account) return 'Closed account';
+    return account.name.trim() || 'Unnamed account';
+};
+
+/**
+ * --------------------------------------------------------------------
+ * The whole dashboard in one pass over the book
+ * --------------------------------------------------------------------
+ */
+function dashCompute() {
+    const range    = dashRange();
+    const entries  = dashEntriesIn(range.from, range.to);
+    const totals   = ledgerTotals(entries);
+    const balances = accountBalances();
+
+    // Balances are all-time by nature — an account holds what it holds, not
+    // what it held during a fortnight — so they stay outside the period.
+    let assetsSen = 0, owingSen = 0, savingsSen = 0, creditOwingSen = 0, creditCount = 0;
+    ledgerState.accounts.forEach((account) => {
+        const balance = balances[account.id] || 0;
+        if (balance >= 0) assetsSen += balance; else owingSen -= balance;
+        if (account.group === 'savings') savingsSen += balance;
+        if (account.group === 'credit') {
+            creditCount++;
+            if (balance < 0) creditOwingSen -= balance;
+        }
+    });
+
+    // Credit card outstanding: the ledger's own credit accounts are the record
+    // of what is owed. With none on the books, the Card Payoff module's balance
+    // is the only figure this app holds — so it stands in, and says so, rather
+    // than the dashboard reporting nothing owed on a card being paid off.
+    const cardBalanceSen = Math.max(0, toSen(num('cardBalance')));
+    const creditFromCard = creditCount === 0 && cardBalanceSen > 0;
+
+    const plan = budgetCompute();
+
+    return {
+        range, entries, balances,
+        days: rangeDays(range.from, range.to),
+
+        incomeSen:  totals.incomeSen,
+        expenseSen: totals.expenseSen,
+        movedSen:   totals.movedSen,
+        netSen:     totals.netSen,
+
+        assetsSen, owingSen, savingsSen,
+        totalSen: assetsSen - owingSen,
+        accountCount: ledgerState.accounts.length,
+
+        creditSen: creditFromCard ? cardBalanceSen : creditOwingSen,
+        creditFromCard, creditCount,
+
+        plannedSen: plan.plannedSen,
+        budgetLeftSen: plan.plannedSen - totals.expenseSen,
+    };
+}
+
+/**
+ * --------------------------------------------------------------------
+ * Expense breakdown
+ * --------------------------------------------------------------------
+ * Transfers never appear here. Moving RM500 from Maybank into savings is
+ * not RM500 of shopping, and counting it once as spending is exactly how a
+ * ledger starts disagreeing with the bank.
+ */
+function dashBreakdown(entries, dim) {
+    const rows = new Map();
+
+    entries.filter((entry) => entry.type === 'expense').forEach((entry) => {
+        const sen = entrySen(entry);
+        if (!sen) return;
+
+        let key, label, tone;
+        if (dim === 'account') {
+            key   = entry.account;
+            label = dashAccountLabel(entry.account);
+            tone  = 'jade';
+        } else if (dim === 'bucket') {
+            key   = categoryOf(entry).bucket;
+            label = BUDGET_BUCKETS[key].label;
+            tone  = BUDGET_BUCKETS[key].tone;
+        } else {
+            const cat = categoryOf(entry);
+            key   = cat.id;
+            label = cat.label;
+            tone  = BUDGET_BUCKETS[cat.bucket].tone;
+        }
+
+        const row = rows.get(key) || { key, label, tone, sen: 0, count: 0 };
+        row.sen += sen;
+        row.count++;
+        rows.set(key, row);
+    });
+
+    const list = Array.from(rows.values()).sort((a, b) => b.sen - a.sen);
+    paintPalette(list);
+    return list;
+}
+
+/** The daylight values, used only if the stylesheet cannot be read. */
+const TONE_FALLBACK = { jade: '#0e7c66', amber: '#b8800f', indigo: '#4f46c9', red: '#cc3a34' };
+
+/**
+ * A bucket's colour, taken from the stylesheet rather than repeated here —
+ * so switching to the dark theme moves the charts along with everything
+ * else, instead of leaving eight daylight slices on a near-black card.
+ */
+function toneHex(tone) {
+    const value = getComputedStyle(document.documentElement)
+        .getPropertyValue('--' + tone).trim();
+    return /^#[0-9a-f]{6}$/i.test(value) ? value : (TONE_FALLBACK[tone] || TONE_FALLBACK.jade);
+}
+
+const hex2 = (v) => (v < 16 ? '0' : '') + v.toString(16);
+
+/**
+ * Later slices of the same bucket are mixed toward white. A donut can then
+ * hold eight categories without inventing a ninth meaning for a colour —
+ * jade is still "needs" whatever shade of it you are looking at, and red
+ * stays reserved for being over budget.
+ */
+function toneShade(tone, index, count) {
+    const hex = toneHex(tone);
+    if (count <= 1 || index === 0) return hex;
+
+    const t = Math.min(0.58, (index / count) * 0.78);
+    const n = parseInt(hex.slice(1), 16);
+    const mix = (channel) => Math.round(channel + (255 - channel) * t);
+    return '#' + hex2(mix((n >> 16) & 255)) + hex2(mix((n >> 8) & 255)) + hex2(mix(n & 255));
+}
+
+function paintPalette(rows) {
+    const total = {};
+    rows.forEach((row) => { total[row.tone] = (total[row.tone] || 0) + 1; });
+
+    const seen = {};
+    rows.forEach((row) => {
+        const index = seen[row.tone] || 0;
+        seen[row.tone] = index + 1;
+        row.color = toneShade(row.tone, index, total[row.tone]);
+    });
+}
+
+/**
+ * --------------------------------------------------------------------
+ * Spending trend
+ * --------------------------------------------------------------------
+ * The trend runs backwards from the end of the selected period rather than
+ * being cut to fit inside it — a period of "Today" holds one day, and one
+ * point is not a trend. Moving the period still moves the whole chart.
+ */
+const dashGrain = () => (($('dashTrend') || {}).dataset || {}).value || 'monthly';
+
+function dashTrend(grain, endIso) {
+    const count = DASH_TREND_SPAN[grain] || DASH_TREND_SPAN.monthly;
+    const [ey, em] = isoNums(endIso);
+    const buckets = [];
+
+    for (let step = count - 1; step >= 0; step--) {
+        if (grain === 'daily') {
+            const day = isoShift(endIso, -step);
+            buckets.push({ from: day, to: day, label: dayShort(day) });
+        } else if (grain === 'weekly') {
+            const from = isoShift(weekStart(endIso), -step * 7);
+            buckets.push({ from, to: isoShift(from, 6), label: dayShort(from) });
+        } else if (grain === 'yearly') {
+            const year = ey - step;
+            buckets.push({ from: isoOf(year, 1, 1), to: isoOf(year, 12, 31), label: String(year) });
+        } else {
+            const walk = new Date(ey, em - 1 - step, 1);
+            const y = walk.getFullYear(), m = walk.getMonth() + 1;
+            buckets.push({
+                from: monthFirst(y, m), to: monthLast(y, m),
+                // The year is stamped on January and on the leftmost column, so
+                // a twelve-month run reading Sep…Aug says which Sep it started.
+                label: MONTH_NAMES[m - 1] + (m === 1 || step === count - 1 ? " '" + String(y).slice(2) : ''),
+            });
+        }
+    }
+
+    buckets.forEach((bucket) => {
+        bucket.sen = ledgerState.entries.reduce((sum, entry) =>
+            (entry.type === 'expense' && entry.date >= bucket.from && entry.date <= bucket.to)
+                ? sum + entrySen(entry) : sum, 0);
+    });
+
+    return buckets;
+}
+
+/**
+ * --------------------------------------------------------------------
+ * Historical comparison
+ * --------------------------------------------------------------------
+ * Any two periods of the same grain: Aug vs Jul, Q3 vs Q2, 2026 vs 2025,
+ * January vs December. Both dropdowns hold the same list, so nothing stops
+ * you comparing a period with itself — the answer is then "no change",
+ * which is honest and needs no special case.
+ */
+const dashCmpGrain = () => (($('dashCmpGrain') || {}).dataset || {}).value || 'month';
+
+/** Every period of this grain the book could sensibly be asked about,
+ *  newest first: back to the oldest entry, and never less than a year. */
+function dashComparePeriods(grain) {
+    const today = todayIso();
+    const [ty, tm] = isoNums(today);
+
+    const dates = ledgerState.entries.map((entry) => entry.date).filter(Boolean);
+    const earliest = dates.length ? dates.reduce((a, b) => (a < b ? a : b)) : today;
+    const [oy, om] = isoNums(earliest);
+
+    const list = [];
+
+    if (grain === 'year') {
+        for (let year = Math.min(oy, ty - 1); year <= ty; year++) {
+            list.push({ key: String(year), label: String(year), from: isoOf(year, 1, 1), to: isoOf(year, 12, 31) });
+        }
+    } else if (grain === 'quarter') {
+        let year = Math.min(oy, ty - 1);
+        let quarter = year === oy ? quarterOf(om) : 1;
+        const lastQuarter = quarterOf(tm);
+        while (year < ty || (year === ty && quarter <= lastQuarter)) {
+            const firstMonth = (quarter - 1) * 3 + 1;
+            list.push({
+                key:   year + '-Q' + quarter,
+                label: 'Q' + quarter + ' ' + year,
+                from:  monthFirst(year, firstMonth),
+                to:    monthLast(year, firstMonth + 2),
+            });
+            if (++quarter > 4) { quarter = 1; year++; }
+        }
+    } else {
+        // Months: from the oldest entry, but always at least the last twelve,
+        // and capped at five years so the dropdown stays a dropdown.
+        const oldest = new Date(oy, om - 1, 1);
+        const floor  = new Date(ty - 5, tm - 1, 1);
+        const twelve = new Date(ty, tm - 12, 1);
+        let walk = new Date(Math.max(Math.min(oldest.getTime(), twelve.getTime()), floor.getTime()));
+        walk = new Date(walk.getFullYear(), walk.getMonth(), 1);
+
+        while (walk.getFullYear() < ty || (walk.getFullYear() === ty && walk.getMonth() + 1 <= tm)) {
+            const y = walk.getFullYear(), m = walk.getMonth() + 1;
+            list.push({
+                key:   y + '-' + pad2(m),
+                label: MONTH_NAMES[m - 1] + ' ' + y,
+                from:  monthFirst(y, m), to: monthLast(y, m),
+            });
+            walk.setMonth(walk.getMonth() + 1);
+        }
+    }
+
+    return list.reverse();
+}
+
+/** Income, expenses and net for one side of the comparison, by category. */
+function dashSideTotals(period) {
+    const entries = dashEntriesIn(period.from, period.to);
+    const totals  = ledgerTotals(entries);
+
+    const byCategory = {};
+    entries.filter((entry) => entry.type === 'expense').forEach((entry) => {
+        const cat = categoryOf(entry);
+        byCategory[cat.id] = (byCategory[cat.id] || 0) + entrySen(entry);
+    });
+
+    return {
+        period, entries, byCategory,
+        incomeSen: totals.incomeSen, expenseSen: totals.expenseSen,
+        movedSen: totals.movedSen, netSen: totals.netSen,
+    };
+}
+
+/** How far B moved from A, and whether that counts as a move at all. Under
+ *  one percent either way — or under a ringgit — reads as unchanged; calling
+ *  RM2,150 against RM2,148 an increase is technically true and useless. */
+function dashDelta(fromSen_, toSen_) {
+    const diffSen  = toSen_ - fromSen_;
+    const pctMoved = fromSen_ > 0 ? (diffSen / fromSen_) * 100 : null;
+    const flat = Math.abs(diffSen) < 100 || (pctMoved !== null && Math.abs(pctMoved) < 1);
+
+    return {
+        diffSen, pct: pctMoved,
+        direction: flat ? 'same' : diffSen > 0 ? 'up' : 'down',
+        word: flat ? 'about the same' : diffSen > 0 ? 'increased' : 'decreased',
+        // Spending more is the bad direction, so up is red and down is green —
+        // the opposite of what a share price would want.
+        tone: flat ? 'is-muted' : diffSen > 0 ? 'is-minus' : 'is-plus',
+    };
+}
+
+const signedMoney = (sen) => (sen < 0 ? '− ' : '') + money(Math.abs(fromSen(sen)));
+const diffMoney   = (sen) => (sen > 0 ? '+ ' : sen < 0 ? '− ' : '') + money(Math.abs(fromSen(sen)));
+const diffPct     = (value) => (value === null ? '—' : (value > 0 ? '+' : value < 0 ? '−' : '') + pct(Math.abs(value), 2));
+
+/**
+ * --------------------------------------------------------------------
+ * Charts. Hand-written SVG, because the whole app is still a folder you
+ * can copy — no bundler, no chart library, no CDN to outlive us. Every
+ * segment and every point carries a <title>, which is the tooltip on a
+ * mouse and the label to a screen reader.
+ * --------------------------------------------------------------------
+ */
+const moneyTight = (sen) => 'RM ' + fmt(fromSen(sen), Math.abs(sen) >= 100000 ? 0 : 2);
+
+function donutSvg(rows, totalSen) {
+    const R = 52, CIRC = 2 * Math.PI * R;
+    let offset = 0, arcs = '';
+
+    rows.forEach((row) => {
+        const len = (row.sen / totalSen) * CIRC;
+        arcs +=
+            '<circle cx="66" cy="66" r="' + R + '" fill="none" stroke="' + row.color + '" stroke-width="19"' +
+            ' stroke-dasharray="' + len.toFixed(2) + ' ' + Math.max(0, CIRC - len).toFixed(2) + '"' +
+            ' stroke-dashoffset="' + (-offset).toFixed(2) + '" transform="rotate(-90 66 66)">' +
+            '<title>' + escapeHtml(row.label) + ' · ' + money(fromSen(row.sen)) +
+            ' · ' + pct((row.sen / totalSen) * 100) + '</title></circle>';
+        offset += len;
+    });
+
+    return '<svg class="donut" viewBox="0 0 132 132" role="img" aria-label="Spending by share">' +
+        '<circle cx="66" cy="66" r="' + R + '" fill="none" stroke="var(--line-2)" stroke-width="19"></circle>' +
+        arcs +
+        '<text class="donut-value" x="66" y="63">' + moneyTight(totalSen) + '</text>' +
+        '<text class="donut-note" x="66" y="80">spent</text>' +
+        '</svg>';
+}
+
+function barsHtml(rows, totalSen) {
+    const topSen = rows.reduce((max, row) => Math.max(max, row.sen), 0) || 1;
+
+    return rows.map((row) =>
+        '<div class="dash-bar">' +
+            '<span class="dash-bar-label">' + escapeHtml(row.label) + '</span>' +
+            '<span class="dash-bar-track">' +
+                '<span class="dash-bar-fill" style="width:' + ((row.sen / topSen) * 100).toFixed(2) +
+                '%;background:' + row.color + '"></span>' +
+            '</span>' +
+            '<b>' + money(fromSen(row.sen)) + '</b>' +
+            '<small>' + pct((row.sen / totalSen) * 100) + '</small>' +
+        '</div>'
+    ).join('');
+}
+
+/**
+ * The trend chart, as a line or as columns. Both are drawn against the same
+ * scale and the same grid, so switching between them changes the shape on
+ * screen and nothing about what is being claimed.
+ */
+function trendSvg(points, mode) {
+    const W = 720, H = 230, L = 62, R = 14, T = 16, B = 30;
+    const plotW = W - L - R, plotH = H - T - B;
+
+    const peakSen = points.reduce((max, p) => Math.max(max, p.sen), 0);
+    const scaleSen = peakSen || 100;
+    const n = points.length;
+
+    const yOf = (sen) => T + plotH - (sen / scaleSen) * plotH;
+    const xLine = (i) => (n === 1 ? L + plotW / 2 : L + (i / (n - 1)) * plotW);
+    const xBand = (i) => L + ((i + 0.5) / n) * plotW;
+    const xOf = mode === 'bar' ? xBand : xLine;
+
+    let svg = '<svg class="trend" viewBox="0 0 ' + W + ' ' + H + '" preserveAspectRatio="none"' +
+        ' role="img" aria-label="Spending trend">';
+
+    // Grid and the ringgit scale down the left.
+    [0, 0.25, 0.5, 0.75, 1].forEach((step) => {
+        const y = T + plotH - step * plotH;
+        svg += '<line class="trend-grid" x1="' + L + '" y1="' + y.toFixed(1) + '" x2="' + (W - R) +
+               '" y2="' + y.toFixed(1) + '"></line>' +
+               '<text class="trend-axis" x="' + (L - 8) + '" y="' + (y + 3.5).toFixed(1) + '">' +
+               fmt(fromSen(scaleSen * step), 0) + '</text>';
+    });
+
+    if (mode === 'bar') {
+        const width = Math.max(4, (plotW / n) * 0.58);
+        points.forEach((point, i) => {
+            const y = yOf(point.sen);
+            svg += '<rect class="trend-bar" x="' + (xBand(i) - width / 2).toFixed(1) + '" y="' + y.toFixed(1) +
+                   '" width="' + width.toFixed(1) + '" height="' + Math.max(0, T + plotH - y).toFixed(1) + '" rx="3">' +
+                   '<title>' + escapeHtml(point.label) + ' · ' + money(fromSen(point.sen)) + '</title></rect>';
+        });
+    } else {
+        const line = points.map((point, i) => xOf(i).toFixed(1) + ',' + yOf(point.sen).toFixed(1)).join(' ');
+        svg += '<polygon class="trend-area" points="' + xOf(0).toFixed(1) + ',' + (T + plotH) + ' ' + line +
+               ' ' + xOf(n - 1).toFixed(1) + ',' + (T + plotH) + '"></polygon>' +
+               '<polyline class="trend-line" points="' + line + '"></polyline>';
+
+        points.forEach((point, i) => {
+            svg += '<circle class="trend-dot" cx="' + xOf(i).toFixed(1) + '" cy="' + yOf(point.sen).toFixed(1) +
+                   '" r="4"><title>' + escapeHtml(point.label) + ' · ' + money(fromSen(point.sen)) +
+                   '</title></circle>';
+        });
+    }
+
+    // Crowded axes are unreadable, so labels thin out rather than overlap.
+    const every = Math.ceil(n / 9);
+    points.forEach((point, i) => {
+        if (i % every && i !== n - 1) return;
+        svg += '<text class="trend-tick" x="' + xOf(i).toFixed(1) + '" y="' + (H - 9) + '">' +
+               escapeHtml(point.label) + '</text>';
+    });
+
+    return svg + '</svg>';
+}
+
+/**
+ * --------------------------------------------------------------------
+ * Painting
+ * --------------------------------------------------------------------
+ */
+function paintDashHero(book) {
+    set('dashPeriodLabel', book.range.label);
+    set('dashRangeLabel', book.range.sub);
+
+    set('dashTotal', signedMoney(book.totalSen));
+    set('dashTotalFoot', book.accountCount
+        ? book.accountCount + (book.accountCount === 1 ? ' account' : ' accounts') +
+          (book.owingSen ? ' · ' + money(fromSen(book.owingSen)) + ' of it owed' : ' · nothing owed')
+        : 'No accounts yet — add one under Expenses');
+
+    set('dashIn', money(fromSen(book.incomeSen)));
+    set('dashInFoot', book.incomeSen ? book.range.sub : 'Nothing came in');
+
+    set('dashOut', money(fromSen(book.expenseSen)));
+    set('dashOutFoot', book.expenseSen
+        ? money(fromSen(Math.round(book.expenseSen / book.days))) + ' a day'
+        : 'Nothing went out');
+}
+
+function kpiTile(kpi) {
+    const tile = document.createElement('div');
+    tile.className = 'kpi' + (kpi.pending ? ' is-pending' : '');
+    tile.innerHTML =
+        '<span class="kpi-label"><i class="bi ' + kpi.icon + '"></i>' + escapeHtml(kpi.label) + '</span>' +
+        '<b class="kpi-value ' + (kpi.tone || '') + '">' + kpi.value + '</b>' +
+        '<small class="kpi-foot">' + escapeHtml(kpi.foot) + '</small>';
+    return tile;
+}
+
+function paintDashKpis(book) {
+    const host = $('dashKpis');
+    if (!host) return;
+    host.innerHTML = '';
+
+    const monthly = book.range.monthly;
+
+    const kpis = [
+        {
+            label: 'Total balance', icon: 'bi-wallet2',
+            value: signedMoney(book.totalSen),
+            tone: book.totalSen < 0 ? 'is-minus' : '',
+            foot: 'Every account, all time',
+        },
+        {
+            label: 'Total income', icon: 'bi-arrow-down-left-circle',
+            value: money(fromSen(book.incomeSen)), tone: book.incomeSen ? 'is-plus' : '',
+            foot: book.range.label.toLowerCase(),
+        },
+        {
+            label: 'Total expenses', icon: 'bi-arrow-up-right-circle',
+            value: money(fromSen(book.expenseSen)), tone: book.expenseSen ? 'is-minus' : '',
+            foot: book.range.label.toLowerCase(),
+        },
+        {
+            label: 'Net cash flow', icon: 'bi-arrow-left-right',
+            value: signedMoney(book.netSen),
+            tone: book.netSen < 0 ? 'is-minus' : book.netSen > 0 ? 'is-plus' : '',
+            foot: book.incomeSen
+                ? pct((book.netSen / book.incomeSen) * 100) + ' of what came in'
+                : 'Income − expenses',
+        },
+        {
+            label: 'Total savings', icon: 'bi-piggy-bank',
+            value: money(fromSen(book.savingsSen)),
+            foot: 'Accounts marked Savings',
+        },
+        {
+            label: 'Investment value', icon: 'bi-graph-up-arrow',
+            value: '—', pending: true,
+            foot: 'Arrives with Grow (M7)',
+        },
+        {
+            label: 'Outstanding instalments', icon: 'bi-calendar2-check',
+            value: '—', pending: true,
+            foot: 'Arrives with Commit (M5)',
+        },
+        {
+            label: 'Credit card outstanding', icon: 'bi-credit-card-2-front',
+            value: money(fromSen(book.creditSen)),
+            tone: book.creditSen ? 'is-minus' : '',
+            foot: book.creditFromCard ? 'From Card Payoff — no credit account on the books'
+                : book.creditCount ? book.creditCount + (book.creditCount === 1 ? ' credit account' : ' credit accounts')
+                : 'No credit account recorded',
+        },
+        {
+            label: 'Upcoming payments', icon: 'bi-hourglass-split',
+            value: '—', pending: true,
+            foot: 'Needs due dates — Commit (M5)',
+        },
+        {
+            label: 'Budget remaining', icon: 'bi-clipboard-check',
+            value: book.plannedSen ? signedMoney(book.budgetLeftSen) : '—',
+            tone: !book.plannedSen ? '' : book.budgetLeftSen < 0 ? 'is-minus' : 'is-plus',
+            pending: !book.plannedSen,
+            foot: !book.plannedSen ? 'Nothing planned in Budget Planner yet'
+                : monthly ? 'of ' + money(fromSen(book.plannedSen)) + ' planned'
+                : 'monthly plan of ' + money(fromSen(book.plannedSen)) + ' vs this period',
+        },
+    ];
+
+    kpis.forEach((kpi) => host.appendChild(kpiTile(kpi)));
+}
+
+/** Income against expenses, with transfers named but kept out of both. */
+function paintDashFlow(book) {
+    set('dashFlowIn',  money(fromSen(book.incomeSen)));
+    set('dashFlowOut', money(fromSen(book.expenseSen)));
+    set('dashFlowNet', signedMoney(book.netSen));
+
+    const net = $('dashFlowNet');
+    if (net) net.className = book.netSen < 0 ? 'is-minus' : '';
+
+    set('dashFlowNote', book.movedSen
+        ? money(fromSen(book.movedSen)) + ' moved between accounts — not counted either side'
+        : 'Transfers are excluded from both sides');
+
+    const dist = $('dashFlowDist');
+    if (!dist) return;
+    dist.innerHTML = '';
+
+    const base = Math.max(book.incomeSen, book.expenseSen);
+    if (!base) {
+        dist.innerHTML = '<span class="dist-left" style="width:100%"></span>';
+        set('dashFlowVerdict', 'Nothing recorded in this period.');
+        return;
+    }
+
+    const spent = document.createElement('span');
+    spent.className = book.expenseSen > book.incomeSen ? 'dist-red' : 'dist-jade';
+    spent.style.width = ((book.expenseSen / base) * 100) + '%';
+    spent.title = 'Spent · ' + money(fromSen(book.expenseSen));
+    dist.appendChild(spent);
+
+    const kept = document.createElement('span');
+    kept.className = 'dist-left';
+    kept.style.width = (100 - (book.expenseSen / base) * 100) + '%';
+    dist.appendChild(kept);
+
+    set('dashFlowVerdict',
+        !book.incomeSen ? 'Spending only — no income recorded to measure it against.'
+        : book.netSen < 0 ? 'Spent ' + money(fromSen(-book.netSen)) + ' more than came in.'
+        : 'Kept ' + pct((book.netSen / book.incomeSen) * 100) + ' of what came in.');
+}
+
+/**
+ * Accounts, grouped the way the ledger groups them, and each one a button:
+ * clicking it opens that account's history for the selected period.
+ */
+function paintDashAccounts(book) {
+    const host = $('dashAccounts');
+    if (!host) return;
+    host.innerHTML = '';
+
+    if (!ledgerState.accounts.length) {
+        host.innerHTML = '<p class="split-empty">No accounts yet. Add them under Expenses → Accounts.</p>';
+        set('dashAccountsTotal', money(0));
+        paintDashHistory(book);
+        return;
+    }
+
+    Object.entries(ACCOUNT_GROUPS).forEach(([key, label]) => {
+        const inGroup = ledgerState.accounts.filter((account) => account.group === key);
+        if (!inGroup.length) return;
+
+        const groupSen = inGroup.reduce((sum, account) => sum + (book.balances[account.id] || 0), 0);
+
+        const head = document.createElement('div');
+        head.className = 'acct-group';
+        head.innerHTML = '<span>' + label + '</span><b>' + signedMoney(groupSen) + '</b>';
+        host.appendChild(head);
+
+        inGroup.forEach((account, index) => {
+            const balance = book.balances[account.id] || 0;
+            const row = document.createElement('button');
+            row.type = 'button';
+            row.className = 'acct-pick' + (dashState.account === account.id ? ' is-on' : '');
+            row.dataset.account = account.id;
+            row.innerHTML = '<span></span><b class="' + (balance < 0 ? 'is-minus' : '') + '">' +
+                signedMoney(balance) + '</b><i class="bi bi-chevron-right"></i>';
+            row.querySelector('span').textContent = account.name.trim() || 'Account ' + (index + 1);
+            host.appendChild(row);
+        });
+    });
+
+    const total = document.createElement('div');
+    total.className = 'acct-group is-total';
+    total.innerHTML = '<span>Total</span><b>' + signedMoney(book.totalSen) + '</b>';
+    host.appendChild(total);
+
+    set('dashAccountsTotal', signedMoney(book.totalSen));
+    paintDashHistory(book);
+}
+
+/** One account's entries inside the selected period, and what each did to it. */
+function paintDashHistory(book) {
+    const panel = $('dashHistory');
+    const list  = $('dashHistoryList');
+    if (!panel || !list) return;
+
+    const account = dashState.account ? accountById(dashState.account) : null;
+    if (!account) {
+        panel.hidden = true;
+        return;
+    }
+
+    panel.hidden = false;
+    set('dashHistoryTitle', (account.name.trim() || 'Account') + ' — ' + book.range.sub);
+
+    const touching = book.entries.filter((entry) =>
+        entry.account === account.id || entry.toAccount === account.id);
+
+    // What each entry did to *this* account, which is not the same as what it
+    // did to the book: a transfer is a minus on one side and a plus on the other.
+    const effect = (entry) => {
+        const sen = entrySen(entry);
+        if (entry.type === 'income')  return sen;
+        if (entry.type === 'expense') return -sen;
+        return entry.toAccount === account.id ? sen : -sen;
+    };
+
+    const movedSen = touching.reduce((sum, entry) => sum + effect(entry), 0);
+    set('dashHistoryNote', touching.length
+        ? touching.length + (touching.length === 1 ? ' entry' : ' entries') + ' · ' +
+          diffMoney(movedSen) + ' over the period · balance now ' +
+          signedMoney(book.balances[account.id] || 0)
+        : 'Balance ' + signedMoney(book.balances[account.id] || 0));
+
+    list.innerHTML = '';
+
+    if (!touching.length) {
+        list.innerHTML = '<p class="split-empty">Nothing touched this account in ' +
+            escapeHtml(book.range.sub) + '.</p>';
+        return;
+    }
+
+    touching.forEach((entry) => {
+        const moved = effect(entry);
+        const cat = categoryOf(entry);
+        const label = entry.type === 'transfer'
+            ? (entry.toAccount === account.id
+                ? 'From ' + dashAccountLabel(entry.account)
+                : 'To ' + dashAccountLabel(entry.toAccount))
+            : cat.label;
+
+        const row = document.createElement('div');
+        row.className = 'hist-row';
+        row.innerHTML =
+            '<span class="hist-date">' + dayShort(entry.date) + '</span>' +
+            '<span class="hist-what"><b></b><small></small></span>' +
+            '<b class="hist-amount ' + (moved < 0 ? 'is-out' : 'is-in') + '">' + diffMoney(moved) + '</b>';
+        row.querySelector('.hist-what b').textContent = label;
+        row.querySelector('.hist-what small').textContent =
+            (entry.note || '').trim() || (entry.type === 'transfer' ? 'Transfer' : cat.label);
+        list.appendChild(row);
+    });
+}
+
+function paintDashBreakdown(book) {
+    const chart  = $('dashBreakdownChart');
+    const legend = $('dashLegend');
+    const body   = $('dashBreakdownBody');
+    if (!chart || !legend || !body) return;
+
+    const dim  = (($('dashDim') || {}).dataset || {}).value || 'category';
+    const view = (($('dashDimChart') || {}).dataset || {}).value || 'donut';
+    const rows = dashBreakdown(book.entries, dim);
+
+    chart.innerHTML = '';
+    legend.innerHTML = '';
+    body.innerHTML = '';
+
+    set('dashDimHead', DASH_DIMS[dim] || 'Category');
+
+    if (!rows.length) {
+        chart.innerHTML = '<p class="split-empty">Nothing spent in this period, so there is nothing to break down.</p>';
+        legend.innerHTML = '<span class="legend-empty">No spending in ' + escapeHtml(book.range.sub) + '.</span>';
+        set('dashBreakdownNote', '—');
+        body.appendChild(emptyRow('No spending recorded.', 4));
+        return;
+    }
+
+    set('dashBreakdownNote', rows.length + ' ' +
+        (rows.length === 1 ? (DASH_DIMS[dim] || 'Category').toLowerCase() : DASH_DIM_PLURAL[dim] || 'categories') +
+        ' · biggest is ' + rows[0].label);
+
+    chart.innerHTML = view === 'bar'
+        ? '<div class="dash-bars">' + barsHtml(rows, book.expenseSen) + '</div>'
+        : donutSvg(rows, book.expenseSen);
+
+    rows.forEach((row) => {
+        const item = document.createElement('span');
+        item.className = 'legend-item';
+        item.innerHTML =
+            '<i class="dot" style="background:' + row.color + '"></i>' +
+            '<span>' + escapeHtml(row.label) + ' <b>' + money(fromSen(row.sen)) + '</b> ' +
+            '<small>' + pct((row.sen / book.expenseSen) * 100) + '</small></span>';
+        legend.appendChild(item);
+    });
+
+    rows.forEach((row) => {
+        const tr = document.createElement('tr');
+        tr.appendChild(cell('<strong><i class="dot" style="background:' + row.color + '"></i>' +
+            escapeHtml(row.label) + '</strong>'));
+        tr.appendChild(cell(fmt(fromSen(row.sen)), 'is-strong'));
+        tr.appendChild(cell(pct((row.sen / book.expenseSen) * 100), 'is-muted'));
+        tr.appendChild(cell(String(row.count), 'is-muted'));
+        body.appendChild(tr);
+    });
+
+    const total = document.createElement('tr');
+    total.className = 'total-row';
+    total.appendChild(cell('Spent'));
+    total.appendChild(cell(fmt(fromSen(book.expenseSen))));
+    total.appendChild(cell('100.0%'));
+    total.appendChild(cell(String(rows.reduce((sum, row) => sum + row.count, 0))));
+    body.appendChild(total);
+}
+
+function paintDashTrend(book) {
+    const host = $('dashTrendChart');
+    if (!host) return;
+
+    const grain = dashGrain();
+    const view  = (($('dashTrendView') || {}).dataset || {}).value || 'line';
+
+    // The current month runs past today, and a fortnight of days that have not
+    // happened yet reads as a spending collapse. Periods that are wholly in the
+    // past keep their own end.
+    const today  = todayIso();
+    const endIso = book.range.to > today ? today : book.range.to;
+    const points = dashTrend(grain, endIso);
+
+    host.innerHTML = trendSvg(points, view);
+
+    const spent = points.filter((point) => point.sen > 0);
+    if (!spent.length) {
+        set('dashTrendNote', 'Nothing spent across these ' + points.length + ' periods');
+        set('dashTrendFoot', '—');
+        return;
+    }
+
+    const peak = spent.reduce((top, point) => (point.sen > top.sen ? point : top), spent[0]);
+    const low  = spent.reduce((bottom, point) => (point.sen < bottom.sen ? point : bottom), spent[0]);
+    const meanSen = Math.round(points.reduce((sum, point) => sum + point.sen, 0) / points.length);
+
+    set('dashTrendNote', points.length + ' periods ending ' + dayShort(endIso));
+    set('dashTrendFoot', 'Highest ' + peak.label + ' · ' + money(fromSen(peak.sen)) +
+        '  ·  Lowest ' + low.label + ' · ' + money(fromSen(low.sen)) +
+        '  ·  Average ' + money(fromSen(meanSen)));
+}
+
+/**
+ * The comparison. Both sides are recomputed from the ledger, never from
+ * anything the dashboard has already drawn — the same figure derived twice
+ * from the same records is the only way it stays one figure.
+ */
+function paintDashCompare() {
+    const grain   = dashCmpGrain();
+    const periods = dashComparePeriods(grain);
+    const selA = $('dashCmpA'), selB = $('dashCmpB');
+    if (!selA || !selB) return;
+
+    // A grain change invalidates the keys, so the pair falls back to the two
+    // most recent periods — B the later one, A the one before it.
+    const known = periods.map((period) => period.key);
+    if (!known.includes(dashState.cmpB)) dashState.cmpB = known[0] || '';
+    if (!known.includes(dashState.cmpA)) dashState.cmpA = known[1] || known[0] || '';
+
+    [[selA, dashState.cmpA], [selB, dashState.cmpB]].forEach(([select, chosen]) => {
+        select.innerHTML = '';
+        periods.forEach((period) => {
+            const option = document.createElement('option');
+            option.value = period.key;
+            option.textContent = period.label;
+            if (period.key === chosen) option.selected = true;
+            select.appendChild(option);
+        });
+    });
+
+    const findPeriod = (key) => periods.find((period) => period.key === key) || periods[0];
+    const a = dashSideTotals(findPeriod(dashState.cmpA));
+    const b = dashSideTotals(findPeriod(dashState.cmpB));
+    const delta = dashDelta(a.expenseSen, b.expenseSen);
+
+    set('dashCmpALabel', a.period.label);
+    set('dashCmpBLabel', b.period.label);
+    set('dashCmpAValue', money(fromSen(a.expenseSen)));
+    set('dashCmpBValue', money(fromSen(b.expenseSen)));
+    set('dashCmpDiff', diffMoney(delta.diffSen));
+    set('dashCmpPct', diffPct(delta.pct));
+
+    const diffCell = $('dashCmpDiff');
+    if (diffCell) diffCell.className = delta.tone;
+    const pctCell = $('dashCmpPct');
+    if (pctCell) pctCell.className = delta.tone;
+
+    set('dashCmpAHead', a.period.label);
+    set('dashCmpBHead', b.period.label);
+
+    const verdict = $('dashCmpVerdict');
+    if (verdict) {
+        const icon = delta.direction === 'up' ? 'bi-graph-up-arrow'
+            : delta.direction === 'down' ? 'bi-graph-down-arrow' : 'bi-dash-circle';
+        verdict.className = 'notice is-' + delta.direction;
+        verdict.innerHTML = '<i class="bi ' + icon + '"></i><span></span>';
+        verdict.querySelector('span').textContent =
+            'Spending ' + delta.word + ' from ' + a.period.label + ' to ' + b.period.label +
+            (delta.direction === 'same' ? '.' : ' — ' + money(fromSen(Math.abs(delta.diffSen))) +
+            (delta.pct === null ? '' : ', ' + diffPct(delta.pct)) + '.');
+    }
+
+    set('dashCmpFlow',
+        'Income ' + money(fromSen(a.incomeSen)) + ' → ' + money(fromSen(b.incomeSen)) +
+        '  ·  Net ' + signedMoney(a.netSen) + ' → ' + signedMoney(b.netSen));
+
+    // One row per category either side recorded — a category that stopped
+    // being spent on is exactly the row worth seeing.
+    const body = $('dashCmpBody');
+    if (!body) return;
+    body.innerHTML = '';
+
+    const ids = Array.from(new Set(Object.keys(a.byCategory).concat(Object.keys(b.byCategory))));
+    if (!ids.length) {
+        body.appendChild(emptyRow('No spending recorded in either period.', 4));
+        return;
+    }
+
+    ids.map((id) => {
+        const cat = LEDGER_CATEGORIES.find((c) => c.id === id);
+        return {
+            label: cat ? cat.label : 'Other',
+            tone:  cat ? BUDGET_BUCKETS[cat.bucket].tone : 'jade',
+            aSen:  a.byCategory[id] || 0,
+            bSen:  b.byCategory[id] || 0,
+        };
+    })
+    .sort((x, y) => (y.bSen - y.aSen === x.bSen - x.aSen
+        ? y.bSen - x.bSen
+        : Math.abs(y.bSen - y.aSen) - Math.abs(x.bSen - x.aSen)))
+    .forEach((row) => {
+        const moved = row.bSen - row.aSen;
+        const tr = document.createElement('tr');
+        tr.appendChild(cell('<strong><i class="dot dot-' + row.tone + '"></i>' + escapeHtml(row.label) + '</strong>'));
+        tr.appendChild(cell(fmt(fromSen(row.aSen)), 'is-muted'));
+        tr.appendChild(cell(fmt(fromSen(row.bSen)), 'is-strong'));
+        tr.appendChild(cell(moved === 0 ? 'RM 0.00' : diffMoney(moved),
+            moved === 0 ? 'is-muted' : moved > 0 ? 'is-minus' : 'is-plus'));
+        body.appendChild(tr);
+    });
+
+    const total = document.createElement('tr');
+    total.className = 'total-row';
+    total.appendChild(cell('Spent'));
+    total.appendChild(cell(fmt(fromSen(a.expenseSen))));
+    total.appendChild(cell(fmt(fromSen(b.expenseSen))));
+    total.appendChild(cell(delta.diffSen === 0 ? 'RM 0.00' : diffMoney(delta.diffSen)));
+    body.appendChild(total);
+}
+
+/** The custom date fields only mean anything on a custom range. */
+function syncDashPeriod() {
+    const custom = $('dashCustom');
+    if (custom) custom.hidden = dashPeriod() !== 'custom';
+}
+
+function renderDash() {
+    // Account rows are typed into directly under Expenses; read them back so a
+    // rename made over there is already true by the time this paints.
+    readLedgerAccounts();
+    syncDashPeriod();
+
+    const book = dashCompute();
+
+    // An account deleted since it was opened must not leave a stale panel up.
+    if (dashState.account && !accountById(dashState.account)) dashState.account = null;
+
+    paintDashHero(book);
+    paintDashKpis(book);
+    paintDashFlow(book);
+    paintDashAccounts(book);
+    paintDashBreakdown(book);
+    paintDashTrend(book);
+    paintDashCompare();
+}
+
+function dashSummaryText() {
+    const book = dashCompute();
+    const rows = dashBreakdown(book.entries, (($('dashDim') || {}).dataset || {}).value || 'category');
+
+    const lines = [
+        'MoneyFlow — ' + book.range.label + ' (' + book.range.sub + ')',
+        '',
+        'Total balance     ' + signedMoney(book.totalSen),
+        'Income            ' + money(fromSen(book.incomeSen)),
+        'Expenses          ' + money(fromSen(book.expenseSen)),
+        'Net cash flow     ' + signedMoney(book.netSen),
+        'Savings           ' + money(fromSen(book.savingsSen)),
+        'Card outstanding  ' + money(fromSen(book.creditSen)),
+    ];
+
+    if (book.plannedSen) lines.push('Budget remaining  ' + signedMoney(book.budgetLeftSen));
+    if (book.movedSen)   lines.push('Moved between accounts ' + money(fromSen(book.movedSen)));
+
+    if (rows.length) {
+        lines.push('', 'Where it went');
+        rows.forEach((row) => {
+            lines.push('  ' + row.label.padEnd(18) + money(fromSen(row.sen)).padStart(12) +
+                '  ' + pct((row.sen / book.expenseSen) * 100));
+        });
+    }
+
+    return lines.join('\n');
+}
+
+/**
+ * ====================================================================
+ * THEME
+ * ====================================================================
+ * Three settings, not two: light, dark, and whatever this device is set
+ * to. The third is the default and the only one that can change while
+ * you are looking at the page, so it is the only one that needs a
+ * listener.
+ *
+ * The attribute is stamped on <html> by the inline script in the page
+ * head, before the first paint — everything here only keeps it in step.
+ * It is deliberately not in BACKUP_STORES: how this screen looks is a
+ * property of the screen, not of your records, and restoring a backup
+ * onto a different machine should not change its brightness.
+ * ====================================================================
+ */
+const THEME_KEY = 'moneyflow.theme.v1';
+const THEME_ORDER = ['system', 'light', 'dark'];
+
+const THEME_FACE = {
+    system: { icon: 'bi-circle-half',  label: 'System' },
+    light:  { icon: 'bi-sun',          label: 'Light'  },
+    dark:   { icon: 'bi-moon-stars',   label: 'Dark'   },
+};
+
+let themeChoice = 'system';
+
+const prefersDark = () =>
+    !!(window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches);
+
+const themeIsDark = () => themeChoice === 'dark' || (themeChoice === 'system' && prefersDark());
+
+function applyTheme() {
+    const dark = themeIsDark();
+    document.documentElement.setAttribute('data-theme', dark ? 'dark' : 'light');
+
+    const face = THEME_FACE[themeChoice] || THEME_FACE.system;
+    const btn  = $('themeToggle');
+    if (btn) {
+        const icon = btn.querySelector('i');
+        if (icon) icon.className = 'bi ' + face.icon;
+        // The label is hidden on a narrow topbar, so the title carries it.
+        btn.title = face.label + (themeChoice === 'system' ? ' (' + (dark ? 'dark' : 'light') + ' right now)' : '') +
+            ' — click for ' + THEME_FACE[THEME_ORDER[(THEME_ORDER.indexOf(themeChoice) + 1) % THEME_ORDER.length]].label.toLowerCase();
+    }
+    set('themeLabel', face.label);
+
+    // The wordmark is a file, not markup, and its "Money" is set in near-black
+    // — invisible on a dark topbar. The dark file is the same mark, lifted.
+    const mark = document.querySelector('.brand img');
+    if (mark) mark.setAttribute('src', dark ? 'logo-dark.svg' : 'logo.svg');
+}
+
+/** The charts take their colours from the stylesheet at paint time, so a
+ *  theme change has to redraw whichever of them is on screen. */
+function repaintTheme() {
+    applyTheme();
+    const dash = $('module-dash');
+    if (dash && !dash.hidden) renderDash();
+}
+
+function loadTheme() {
+    let saved = null;
+    try { saved = localStorage.getItem(THEME_KEY); } catch (err) { saved = null; }
+    themeChoice = THEME_ORDER.includes(saved) ? saved : 'system';
+    applyTheme();
+}
+
+function cycleTheme() {
+    themeChoice = THEME_ORDER[(THEME_ORDER.indexOf(themeChoice) + 1) % THEME_ORDER.length];
+    try { localStorage.setItem(THEME_KEY, themeChoice); } catch (err) { /* storage unavailable */ }
+    repaintTheme();
+}
+
+/**
+ * ====================================================================
  * WIRING
  * ====================================================================
  */
 /** Each module owns a <section class="module"> of the same name and a render. */
 const MODULES = {
+    dash:   { render: renderDash },
     ledger: { render: renderLedger },
     split:  { render: renderSplit },
     budget: { render: renderBudget },
@@ -2066,6 +3222,12 @@ const MODULES = {
 };
 
 const FORM_DEFAULTS = {
+    dash: {
+        dashPeriod: 'month', dashFrom: '', dashTo: '',
+        dashDim: 'category', dashDimChart: 'donut',
+        dashTrend: 'monthly', dashTrendView: 'line',
+        dashCmpGrain: 'month',
+    },
     ledger: { ledgerType: 'expense', ledgerAmount: '', ledgerNote: '' },
     split:  { splitCharges: 'none', splitService: '0', splitTax: '0', splitDiscount: '' },
     budget: { budgetIncome: '', budgetExtra: '', budgetRule: '502030' },
@@ -2117,6 +3279,13 @@ function resetForm(which) {
     }
 
     if (which === 'card') renderCard();
+
+    // The dashboard writes nothing, so "reset" is only ever about the view:
+    // back to this month, and close whatever account was opened.
+    if (which === 'dash') {
+        dashState.account = null;
+        renderDash();
+    }
 
     // "Clear" empties the entry form and drops out of edit mode. It must never
     // touch what is already written down.
@@ -2391,6 +3560,9 @@ function setSegment(seg, value) {
 }
 
 document.addEventListener('DOMContentLoaded', () => {
+    // --- theme: first, so nothing paints in the wrong palette ---
+    loadTheme();
+
     // --- bill split ---
     buildSplitPeople();
     buildSplitShared();
@@ -2421,6 +3593,8 @@ document.addEventListener('DOMContentLoaded', () => {
             if (seg.id === 'cardTier' && $('cardRate')) $('cardRate').value = btn.dataset.val;
             if (seg.id === 'cardTier' || seg.id === 'cardView') renderCard();
             if (seg.id === 'ledgerType') { syncLedgerForm(); renderLedger(); }
+            if (['dashPeriod', 'dashDim', 'dashDimChart', 'dashTrend', 'dashTrendView', 'dashCmpGrain']
+                .includes(seg.id)) renderDash();
         });
     });
 
@@ -2549,6 +3723,54 @@ document.addEventListener('DOMContentLoaded', () => {
         btn.addEventListener('click', () => resetForm(btn.dataset.reset));
     });
 
+    // The dashboard reads; its controls only ever change what is being asked.
+    ['dashFrom', 'dashTo'].forEach((id) => {
+        const el = $(id);
+        if (el) el.addEventListener('change', renderDash);
+    });
+
+    ['dashCmpA', 'dashCmpB'].forEach((id) => {
+        const el = $(id);
+        if (!el) return;
+        el.addEventListener('change', () => {
+            dashState[id === 'dashCmpA' ? 'cmpA' : 'cmpB'] = el.value;
+            renderDash();
+        });
+    });
+
+    const dashAccounts = $('dashAccounts');
+    if (dashAccounts) {
+        dashAccounts.addEventListener('click', (event) => {
+            const row = event.target.closest('button[data-account]');
+            if (!row) return;
+            // Clicking the account already open closes it, so the same row is
+            // both the way in and the way out.
+            dashState.account = dashState.account === row.dataset.account ? null : row.dataset.account;
+            renderDash();
+        });
+    }
+
+    const dashHistoryClose = $('dashHistoryClose');
+    if (dashHistoryClose) dashHistoryClose.addEventListener('click', () => {
+        dashState.account = null;
+        renderDash();
+    });
+
+    const themeToggle = $('themeToggle');
+    if (themeToggle) themeToggle.addEventListener('click', cycleTheme);
+
+    // On "System", the answer can change under us — at sunset, on a schedule,
+    // or because someone flipped a switch in another window.
+    if (window.matchMedia) {
+        const watch = window.matchMedia('(prefers-color-scheme: dark)');
+        const onSystemChange = () => { if (themeChoice === 'system') repaintTheme(); };
+        if (watch.addEventListener) watch.addEventListener('change', onSystemChange);
+        else if (watch.addListener) watch.addListener(onSystemChange);   // older Safari
+    }
+
+    const dashCopy = $('dashCopy');
+    if (dashCopy) dashCopy.addEventListener('click', () => copySummary(dashCopy, dashSummaryText(), 'Copy summary'));
+
     const tabs = $('tabs');
     if (tabs) {
         tabs.addEventListener('click', (event) => {
@@ -2563,4 +3785,7 @@ document.addEventListener('DOMContentLoaded', () => {
     renderSplit();
     renderBudget();
     renderCard();
+
+    // Last, because it reads what every other module has just put on screen.
+    renderDash();
 });

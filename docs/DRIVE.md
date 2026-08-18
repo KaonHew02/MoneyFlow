@@ -126,8 +126,7 @@ Pressing **From Drive** on the other machine then throws away that machine's
 work. The safe habit is one machine editing, the others only pulling.
 
 Wanting to record on your phone *and* your laptop is a different requirement —
-it needs a database, not a file. That is what `legacy-supabase/` was built for,
-and it is still there.
+it needs a database, not a file, and MoneyFlow does not have one.
 
 ---
 

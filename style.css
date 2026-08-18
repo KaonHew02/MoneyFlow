@@ -26,6 +26,8 @@
 [hidden] { display: none !important; }
 
 :root {
+    color-scheme: light;
+
     --canvas:      #eff3f0;
     --paper:       #ffffff;
     --paper-2:     #f7faf8;   /* nested rows, sitting inside a card */
@@ -33,13 +35,22 @@
     --ink:         #16211d;   /* warm near-black with a green cast */
     --ink-2:       #566761;
     --ink-3:       #8fa099;
+    --ink-4:       #b8c5bf;   /* placeholders, and the quietest table cell */
 
     --line:        #e0e8e3;
     --line-2:      #edf2ef;
+    --line-strong: #d8e2dd;   /* the rule above a total */
+    --row-line:    #f4f7f5;   /* between rows of a list or table */
+    --field-line:  #d9e2dd;
+
+    --track:       #e6ece9;   /* the empty part of a bar */
+    --track-2:     #d3ded8;   /* and the leftover slice of a stacked one */
 
     --jade:        #0e7c66;   /* brand, and the "needs" bucket */
     --jade-2:      #0a6553;
     --jade-soft:   #e3f2ee;
+    --jade-line:   #bfe0d7;
+    --jade-ink:    #0a5545;
 
     --amber:       #b8800f;   /* "wants" — the part you could cut */
     --amber-soft:  #fbf2dc;
@@ -49,11 +60,101 @@
 
     --red:         #cc3a34;
     --red-soft:    #fdecea;
+    --red-line:    #f3ccc8;
+    --red-ink:     #8c2723;
+    --red-2:       #b8322d;   /* the hover of a destructive button */
+
+    --on-jade:     #ffffff;   /* text sitting ON a jade or red fill, not beside it */
+    --on-red:      #ffffff;
+
+    --topbar:        rgba(255, 255, 255, .88);
+    --backdrop:      rgba(9, 30, 26, .55);
+    --scroll-shadow: rgba(22, 33, 29, .13);
+
+    --hero-a:   #13907a;      /* the three stops of the hero band */
+    --hero-mid: #0e7c66;
+    --hero-b:   #0a5545;
 
     --radius:      20px;
     --radius-sm:   12px;
     --shadow:      0 1px 2px rgba(22, 33, 29, .04), 0 10px 28px rgba(22, 33, 29, .05);
     --shadow-hero: 0 2px 6px rgba(7, 60, 49, .18), 0 18px 40px rgba(7, 60, 49, .20);
+}
+
+/* --------------------------------------------------------------------------
+   Dark theme.
+
+   Only the tokens move — every rule below this block is written against them,
+   which is the whole reason the literals were worth hunting down first. The
+   ground is a green-cast near-black rather than a neutral grey, so the jade
+   still looks like it belongs to the same app.
+
+   Jade, amber and indigo are all lifted: the daylight versions were chosen to
+   carry weight against white, and against a dark ground they read as mud. The
+   meanings do not move — jade is still needs, amber still wants, indigo still
+   savings and debt, and red is still reserved for being over budget.
+
+   There is one selector here rather than the usual pair, because the theme is
+   always an explicit `data-theme` on <html>: the inline script in the page
+   head resolves "follow my system" into `light` or `dark` before the first
+   paint, so a dark-mode reader never gets a white flash, and app.js keeps it
+   in step if the system setting changes mid-session.
+   -------------------------------------------------------------------------- */
+:root[data-theme="dark"] {
+    color-scheme: dark;
+
+    --canvas:      #0f1613;
+    --paper:       #16201c;
+    --paper-2:     #1b2622;
+
+    --ink:         #e8efeb;
+    --ink-2:       #a9bab3;
+    --ink-3:       #7d8f88;
+    --ink-4:       #5f716a;
+
+    --line:        #27352f;
+    --line-2:      #202c27;
+    --line-strong: #35463e;
+    --row-line:    #1f2a25;
+    --field-line:  #35463e;
+
+    --track:       #24312b;
+    --track-2:     #35463f;
+
+    --jade:        #2fa88c;
+    --jade-2:      #38bd9e;
+    --jade-soft:   #12332b;
+    --jade-line:   #1d4a3f;
+    --jade-ink:    #86dcc3;
+
+    --amber:       #d9a02a;
+    --amber-soft:  #33280f;
+
+    --indigo:      #8b83ec;
+    --indigo-soft: #221f45;
+
+    --red:         #e4635c;
+    --red-soft:    #351a19;
+    --red-line:    #5a2b28;
+    --red-ink:     #f2aca7;
+    --red-2:       #c9453f;
+
+    /* White on the lifted jade is about 2.8:1 — legible enough to look fine
+       and not enough to read comfortably. A filled pill in the dark theme
+       carries near-black text instead, which puts it back over 5:1. */
+    --on-jade:     #05231c;
+    --on-red:      #2b0b0a;
+
+    --topbar:        rgba(15, 22, 19, .86);
+    --backdrop:      rgba(0, 0, 0, .66);
+    --scroll-shadow: rgba(0, 0, 0, .42);
+
+    --hero-a:   #12735f;
+    --hero-mid: #0d6553;
+    --hero-b:   #06342c;
+
+    --shadow:      0 1px 2px rgba(0, 0, 0, .3), 0 10px 28px rgba(0, 0, 0, .34);
+    --shadow-hero: 0 2px 6px rgba(0, 0, 0, .38), 0 18px 40px rgba(0, 0, 0, .44);
 }
 
 * { box-sizing: border-box; }
@@ -86,7 +187,7 @@ body {
     align-items: center;
     gap: 20px;
     padding: 14px 32px;
-    background: rgba(255, 255, 255, .88);
+    background: var(--topbar);
     backdrop-filter: blur(12px);
     border-bottom: 1px solid var(--line);
 }
@@ -138,7 +239,7 @@ body {
    control on the bar. */
 .tabs button.is-on {
     background: var(--jade);
-    color: #fff;
+    color: var(--on-jade);
     box-shadow: 0 2px 8px rgba(14, 124, 102, .28);
 }
 
@@ -169,7 +270,7 @@ body {
     margin-bottom: 20px;
     padding: 30px 34px;
     border-radius: 24px;
-    background: linear-gradient(128deg, #13907a 0%, var(--jade) 48%, #0a5545 100%);
+    background: linear-gradient(128deg, var(--hero-a) 0%, var(--hero-mid) 48%, var(--hero-b) 100%);
     box-shadow: var(--shadow-hero);
     color: #fff;
 }
@@ -303,7 +404,7 @@ input[type="number"], input[type="text"], input[type="date"],
 input[type="email"], input[type="password"], input[type="search"], select {
     width: 100%;
     padding: 11px 14px;
-    border: 1px solid #d9e2dd;
+    border: 1px solid var(--field-line);
     border-radius: var(--radius-sm);
     background: var(--paper);
     font: inherit;
@@ -312,7 +413,7 @@ input[type="email"], input[type="password"], input[type="search"], select {
     transition: border-color .16s ease, box-shadow .16s ease;
 }
 
-input::placeholder { color: #b3c0ba; }
+input::placeholder { color: var(--ink-4); }
 
 input:focus, select:focus {
     outline: none;
@@ -381,7 +482,7 @@ input[type="date"]:hover::-webkit-calendar-picker-indicator { opacity: .85; }
 }
 
 .seg button:hover { color: var(--ink); }
-.seg button.is-on { background: var(--jade); color: #fff; box-shadow: 0 2px 6px rgba(14, 124, 102, .24); }
+.seg button.is-on { background: var(--jade); color: var(--on-jade); box-shadow: 0 2px 6px rgba(14, 124, 102, .24); }
 
 /* A view switch living in a card head, beside the note — not a form field. */
 .seg.is-compact { flex: 0 0 auto; padding: 3px; }
@@ -536,7 +637,7 @@ input[type="date"]:hover::-webkit-calendar-picker-indicator { opacity: .85; }
     transition: border-color .16s ease;
 }
 
-.bgt-row:focus-within { border-color: #cfdcd6; }
+.bgt-row:focus-within { border-color: var(--line-strong); }
 
 .bgt-icon {
     display: inline-flex;
@@ -576,7 +677,7 @@ input[type="date"]:hover::-webkit-calendar-picker-indicator { opacity: .85; }
     height: 5px;
     margin-top: 8px;
     border-radius: 999px;
-    background: #e6ece9;
+    background: var(--track);
     overflow: hidden;
 }
 
@@ -620,7 +721,7 @@ input[type="date"]:hover::-webkit-calendar-picker-indicator { opacity: .85; }
     gap: 3px;
     height: 18px;
     border-radius: 999px;
-    background: #e6ece9;
+    background: var(--track);
     overflow: hidden;
 }
 
@@ -630,7 +731,7 @@ input[type="date"]:hover::-webkit-calendar-picker-indicator { opacity: .85; }
 .dist-amber  { background: var(--amber); }
 .dist-indigo { background: var(--indigo); }
 .dist-red    { background: var(--red); }
-.dist-left   { background: #d3ded8; }
+.dist-left   { background: var(--track-2); }
 
 /* Said once, loudly, when a plan simply does not work. */
 .notice {
@@ -639,12 +740,12 @@ input[type="date"]:hover::-webkit-calendar-picker-indicator { opacity: .85; }
     gap: 11px;
     margin-bottom: 18px;
     padding: 14px 16px;
-    border: 1px solid #f3ccc8;
+    border: 1px solid var(--red-line);
     border-radius: 14px;
     background: var(--red-soft);
     font-size: 13px;
     line-height: 1.55;
-    color: #8c2723;
+    color: var(--red-ink);
 }
 
 .notice[hidden] { display: none; }
@@ -670,7 +771,7 @@ input[type="date"]:hover::-webkit-calendar-picker-indicator { opacity: .85; }
 .dot-amber  { background: var(--amber); }
 .dot-indigo { background: var(--indigo); }
 .dot-red    { background: var(--red); }
-.dot-left   { background: #c6d3cd; }
+.dot-left   { background: var(--track-2); }
 
 /* ==========================================================================
    Tables
@@ -683,10 +784,10 @@ input[type="date"]:hover::-webkit-calendar-picker-indicator { opacity: .85; }
     margin: 0 -4px;
     padding: 0 4px;
     background:
-        linear-gradient(to right, var(--paper) 40%, rgba(255, 255, 255, 0)) left center / 28px 100% no-repeat local,
-        linear-gradient(to left,  var(--paper) 40%, rgba(255, 255, 255, 0)) right center / 28px 100% no-repeat local,
-        radial-gradient(farthest-side at 0 50%,    rgba(22, 33, 29, .13), rgba(22, 33, 29, 0)) left center / 11px 100% no-repeat scroll,
-        radial-gradient(farthest-side at 100% 50%, rgba(22, 33, 29, .13), rgba(22, 33, 29, 0)) right center / 11px 100% no-repeat scroll;
+        linear-gradient(to right, var(--paper) 40%, transparent) left center / 28px 100% no-repeat local,
+        linear-gradient(to left,  var(--paper) 40%, transparent) right center / 28px 100% no-repeat local,
+        radial-gradient(farthest-side at 0 50%,    var(--scroll-shadow), transparent) left center / 11px 100% no-repeat scroll,
+        radial-gradient(farthest-side at 100% 50%, var(--scroll-shadow), transparent) right center / 11px 100% no-repeat scroll;
 }
 
 .data-table { width: 100%; border-collapse: collapse; min-width: 500px; }
@@ -708,7 +809,7 @@ input[type="date"]:hover::-webkit-calendar-picker-indicator { opacity: .85; }
     font-size: 14px;
     color: var(--ink-2);
     text-align: right;
-    border-bottom: 1px solid #f2f6f4;
+    border-bottom: 1px solid var(--row-line);
     font-variant-numeric: tabular-nums;
     white-space: nowrap;
 }
@@ -722,7 +823,7 @@ input[type="date"]:hover::-webkit-calendar-picker-indicator { opacity: .85; }
 .data-table .is-strong { font-weight: 700; color: var(--ink); }
 .data-table .is-minus  { color: var(--red); }
 .data-table .is-plus   { color: var(--jade); }
-.data-table .is-muted  { color: #b8c5bf; }
+.data-table .is-muted  { color: var(--ink-4); }
 
 .data-table .dot { display: inline-block; margin-right: 8px; vertical-align: middle; }
 
@@ -743,13 +844,13 @@ input[type="date"]:hover::-webkit-calendar-picker-indicator { opacity: .85; }
     font-weight: 700;
     letter-spacing: .04em;
     text-transform: uppercase;
-    color: #fff;
+    color: var(--on-jade);
     vertical-align: 1px;
 }
 
 .data-table .total-row td {
     padding-top: 16px;
-    border-top: 1.5px solid #d8e2dd;
+    border-top: 1.5px solid var(--line-strong);
     border-bottom: none;
     font-size: 14.5px;
     font-weight: 700;
@@ -824,7 +925,7 @@ input[type="date"]:hover::-webkit-calendar-picker-indicator { opacity: .85; }
     font: inherit;
     font-size: 14px;
     font-weight: 700;
-    color: #fff;
+    color: var(--on-jade);
     cursor: pointer;
     box-shadow: 0 2px 8px rgba(14, 124, 102, .28);
     transition: background .16s ease, box-shadow .16s ease, transform .1s ease;
@@ -879,7 +980,7 @@ input[type="date"]:hover::-webkit-calendar-picker-indicator { opacity: .85; }
     gap: 12px;
     align-items: center;
     padding: 9px 4px;
-    border-bottom: 1px solid #f4f7f5;
+    border-bottom: 1px solid var(--row-line);
 }
 
 .led-entry:last-child { border-bottom: 0; }
@@ -976,7 +1077,7 @@ input[type="date"]:hover::-webkit-calendar-picker-indicator { opacity: .85; }
     justify-content: space-between;
     gap: 12px;
     padding: 9px 4px;
-    border-bottom: 1px solid #f4f7f5;
+    border-bottom: 1px solid var(--row-line);
     font-size: 13.5px;
     color: var(--ink-2);
 }
@@ -986,7 +1087,7 @@ input[type="date"]:hover::-webkit-calendar-picker-indicator { opacity: .85; }
 
 /* An account that cannot be removed says so by flinching. */
 .bgt-row.is-locked {
-    border-color: #f0c8c4;
+    border-color: var(--red-line);
     background: var(--red-soft);
     animation: nudge .3s ease;
 }
@@ -1070,6 +1171,22 @@ input[type="date"]:hover::-webkit-calendar-picker-indicator { opacity: .85; }
     .primary-btn { width: 100%; justify-content: center; }
 }
 
+/* Under 700px the brand, the tabs and the file buttons cannot share a line at
+   any sane size — the bar already ran off the edge at four tabs, and the
+   Dashboard only made it obvious sooner. So the tabs take a row of their own
+   and scroll sideways if a sixth module ever arrives. */
+@media (max-width: 700px) {
+    .topbar { flex-wrap: wrap; gap: 10px 12px; padding: 10px 14px; }
+    .tabs {
+        order: 3;
+        width: 100%;
+        margin-left: 0;
+        overflow-x: auto;
+        justify-content: space-between;
+    }
+    .backup { margin-left: auto; }
+}
+
 @media (max-width: 460px) {
     .hero-stats { grid-template-columns: 1fr; }
     .brand img { width: 107px; }
@@ -1118,7 +1235,7 @@ input[type="date"]:hover::-webkit-calendar-picker-indicator { opacity: .85; }
     align-items: center;
     justify-content: center;
     padding: 24px;
-    background: rgba(9, 30, 26, .55);
+    background: var(--backdrop);
 }
 
 .dialog-card {
@@ -1169,9 +1286,9 @@ input[type="date"]:hover::-webkit-calendar-picker-indicator { opacity: .85; }
 #backupConfirm {
     border-color: var(--red);
     background: var(--red);
-    color: #fff;
+    color: var(--on-red);
 }
-#backupConfirm:hover { border-color: var(--red); background: #b8322d; color: #fff; }
+#backupConfirm:hover { border-color: var(--red); background: var(--red-2); color: var(--on-red); }
 
 /* The Drive copy sits ahead of the file buttons, with the one piece of status
    worth carrying in a topbar: when it last went up. */
@@ -1192,4 +1309,285 @@ input[type="date"]:hover::-webkit-calendar-picker-indicator { opacity: .85; }
 
 @media (max-width: 1200px) {
     .drive-stamp { display: none; }
+}
+
+/* The Dashboard tab made five tabs, and the theme button made six controls on
+   the right. All of that plus worded buttons runs off the edge of a 1280 or
+   1366 laptop. Navigation is the primary control here and the rest are not, so
+   below a genuinely wide screen the right-hand buttons keep their icons and
+   drop their words — every one of them carries a `title` saying what it does —
+   and the bar closes up around them. */
+@media (max-width: 1460px) {
+    .topbar { gap: 14px; }
+    .backup { gap: 6px; margin-left: 10px; }
+    .backup button span { display: none; }
+    .backup button { padding: 8px 10px; }
+    .tabs button { padding: 9px 13px; }
+}
+
+/* ==========================================================================
+   Dashboard — M1, Understand
+
+   The overview reads every other module, so it borrows their language rather
+   than inventing one: the same jade/amber/indigo buckets, the same stacked
+   bar, the same tally strip. What is new here is the KPI grid and the three
+   charts, and both are built from the tokens above so a colour still means
+   the same thing on this page as on the others.
+   ========================================================================== */
+
+/* The period the whole page is answering for, said once, at the top. */
+.hero-period {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin-bottom: 14px;
+    padding: 6px 12px 6px 10px;
+    border-radius: 999px;
+    background: rgba(255, 255, 255, .16);
+    font-size: 12.5px;
+    font-weight: 700;
+    color: #fff;
+    align-self: flex-start;
+}
+
+.hero-period i  { font-size: 13px; opacity: .85; }
+.hero-period em { font-style: normal; font-weight: 600; opacity: .72; }
+
+/* A seven-option period picker will not fit one line on a phone. */
+.seg.is-wrap { flex-wrap: wrap; }
+
+/* Seven options do not fit one row on a phone, and wrapping them as flex
+   leaves the last row's lone button stretched across the full width. A grid
+   keeps every button the same size: `auto-fit` collapses the empty tracks, so
+   the seven fill one row on a laptop and sit in tidy columns on a phone.
+   `.seg button` also carries no horizontal padding of its own — it relies on
+   `flex: 1` to space its labels — so a wrapping seg pays for that itself. */
+.seg.is-wrap:not(.is-compact) {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(94px, 1fr));
+}
+
+.seg.is-wrap:not(.is-compact) button { padding: 9px 12px; }
+.seg.is-compact.is-wrap button { flex: 0 0 auto; }
+
+/* --------------------------------------------------------------------------
+   KPI grid — ten figures, and three of them honestly empty.
+   -------------------------------------------------------------------------- */
+.kpi-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(178px, 1fr));
+    gap: 10px;
+}
+
+.kpi {
+    display: flex;
+    flex-direction: column;
+    gap: 5px;
+    padding: 14px 15px;
+    border: 1px solid var(--line);
+    border-radius: var(--radius-sm);
+    background: var(--paper-2);
+}
+
+.kpi-label {
+    display: flex;
+    align-items: center;
+    gap: 7px;
+    font-size: 11px;
+    font-weight: 700;
+    letter-spacing: .06em;
+    text-transform: uppercase;
+    color: var(--ink-3);
+}
+
+.kpi-label i { font-size: 12.5px; color: var(--jade); }
+
+.kpi-value {
+    font-size: 19px;
+    font-weight: 700;
+    color: var(--ink);
+    font-variant-numeric: tabular-nums;
+    line-height: 1.15;
+}
+
+.kpi-value.is-minus { color: var(--red); }
+.kpi-value.is-plus  { color: var(--jade); }
+
+.kpi-foot { font-size: 11.5px; line-height: 1.45; color: var(--ink-3); }
+
+/* A figure with no module behind it yet reads as waiting, not as zero. */
+.kpi.is-pending {
+    border-style: dashed;
+    background: transparent;
+}
+
+.kpi.is-pending .kpi-label i,
+.kpi.is-pending .kpi-value { color: var(--ink-3); }
+
+/* --------------------------------------------------------------------------
+   Accounts — the ledger's own rows, made into buttons that open a history.
+   -------------------------------------------------------------------------- */
+.acct-group.is-total {
+    margin-top: 18px;
+    padding-top: 12px;
+    border-top: 1.5px solid var(--line-strong);
+    color: var(--jade);
+}
+
+.acct-group.is-total b { font-size: 15px; font-weight: 700; color: var(--jade); }
+
+.acct-pick {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    gap: 12px;
+    width: 100%;
+    padding: 9px 8px 9px 4px;
+    border: 0;
+    border-bottom: 1px solid var(--row-line);
+    border-radius: 8px;
+    background: none;
+    font: inherit;
+    font-size: 13.5px;
+    color: var(--ink-2);
+    text-align: left;
+    cursor: pointer;
+    transition: background .16s ease, color .16s ease;
+}
+
+.acct-pick b { font-weight: 700; color: var(--ink); font-variant-numeric: tabular-nums; }
+.acct-pick b.is-minus { color: var(--red); }
+.acct-pick i { font-size: 11px; color: var(--ink-3); opacity: 0; transition: opacity .16s ease; }
+
+.acct-pick:hover { background: var(--paper-2); color: var(--ink); }
+.acct-pick:hover i { opacity: 1; }
+
+.acct-pick.is-on { background: var(--jade-soft); color: var(--jade); }
+.acct-pick.is-on i { opacity: 1; color: var(--jade); transform: rotate(90deg); }
+
+/* The opened account's history, nested inside the same card. */
+.hist {
+    margin-top: 20px;
+    padding-top: 4px;
+    border-top: 1px solid var(--line);
+}
+
+.hist h3 { margin: 0; font-size: 15px; font-weight: 700; color: var(--ink); }
+
+.hist-row {
+    display: grid;
+    grid-template-columns: 58px 1fr auto;
+    align-items: center;
+    gap: 12px;
+    padding: 9px 4px;
+    border-bottom: 1px solid var(--row-line);
+}
+
+.hist-date { font-size: 11.5px; font-weight: 700; color: var(--ink-3); }
+.hist-what b { display: block; font-size: 13.5px; font-weight: 650; color: var(--ink); }
+.hist-what small { display: block; font-size: 11.5px; color: var(--ink-3); }
+
+.hist-amount { font-size: 14px; font-weight: 700; font-variant-numeric: tabular-nums; }
+.hist-amount.is-in  { color: var(--jade); }
+.hist-amount.is-out { color: var(--ink); }
+
+/* --------------------------------------------------------------------------
+   Charts. Hand-drawn SVG, no library — the app is still a folder you copy.
+   -------------------------------------------------------------------------- */
+.chart-row {
+    display: flex;
+    align-items: center;
+    gap: 28px;
+    flex-wrap: wrap;
+    margin-top: 18px;
+}
+
+.chart-figure { flex: 0 0 auto; }
+.chart-row .legend { flex: 1 1 240px; margin-top: 0; }
+.legend.is-stacked { flex-direction: column; align-items: flex-start; gap: 9px; }
+
+.donut { width: 176px; height: 176px; display: block; }
+.donut circle { transition: stroke-dasharray .3s ease; }
+
+.donut-value {
+    text-anchor: middle;
+    font-size: 13px;
+    font-weight: 700;
+    fill: var(--ink);
+}
+
+.donut-note {
+    text-anchor: middle;
+    font-size: 8.5px;
+    font-weight: 700;
+    letter-spacing: .09em;
+    text-transform: uppercase;
+    fill: var(--ink-3);
+}
+
+/* The same breakdown as bars, for anyone who reads lengths faster than arcs. */
+.dash-bars { display: flex; flex-direction: column; gap: 9px; width: 100%; }
+
+.dash-bar {
+    display: grid;
+    grid-template-columns: minmax(90px, 148px) 1fr auto auto;
+    align-items: center;
+    gap: 12px;
+    font-size: 13px;
+    color: var(--ink-2);
+}
+
+.dash-bar-label { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+.dash-bar-track {
+    height: 10px;
+    border-radius: 999px;
+    background: var(--line-2);
+    overflow: hidden;
+}
+
+.dash-bar-fill { display: block; height: 100%; border-radius: 999px; transition: width .3s ease; }
+
+.dash-bar b { font-weight: 700; color: var(--ink); font-variant-numeric: tabular-nums; }
+.dash-bar small { min-width: 46px; text-align: right; font-size: 11.5px; color: var(--ink-3); font-variant-numeric: tabular-nums; }
+
+.chart-full { margin-top: 18px; }
+
+.trend { width: 100%; height: 250px; display: block; overflow: visible; }
+
+.trend-grid { stroke: var(--line-2); stroke-width: 1; }
+.trend-axis { text-anchor: end;    font-size: 10px; fill: var(--ink-3); font-variant-numeric: tabular-nums; }
+.trend-tick { text-anchor: middle; font-size: 10px; fill: var(--ink-3); }
+
+.trend-line { fill: none; stroke: var(--jade); stroke-width: 2.5; stroke-linejoin: round; stroke-linecap: round; }
+.trend-area { fill: var(--jade); opacity: .09; stroke: none; }
+.trend-dot  { fill: var(--paper); stroke: var(--jade); stroke-width: 2.5; }
+.trend-bar  { fill: var(--jade); opacity: .82; }
+.trend-bar:hover { opacity: 1; }
+
+/* --------------------------------------------------------------------------
+   The comparison verdict. `.notice` is alarm-red by default, which is right
+   for spending more and wrong for the other two answers.
+   -------------------------------------------------------------------------- */
+.notice.is-down {
+    border-color: var(--jade-line);
+    background: var(--jade-soft);
+    color: var(--jade-ink);
+}
+.notice.is-down i { color: var(--jade); }
+
+.notice.is-same {
+    border-color: var(--line);
+    background: var(--paper-2);
+    color: var(--ink-2);
+}
+.notice.is-same i { color: var(--ink-3); }
+
+@media (max-width: 720px) {
+    .kpi-grid { grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); }
+    .kpi-value { font-size: 17px; }
+    .chart-row { gap: 18px; justify-content: center; }
+    .dash-bar { grid-template-columns: minmax(72px, 1fr) 2fr auto; }
+    .dash-bar small { display: none; }
+    .trend { height: 210px; }
 }

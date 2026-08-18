@@ -95,11 +95,11 @@ elsewhere. Import replaces rather than merges — merging two ledgers means
 guessing which entries are the same, and guessing wrong doubles a balance
 quietly — so it states what is in the file and what is about to go, and waits.
 
-The Supabase build is archived intact in `legacy-supabase/` — schema, client,
-gate and setup guide — and the old Node/SQLite build in `legacy-sqlite/`. Both
-are out of the running app; neither is deleted. If MoneyFlow ever needs to
-follow you between devices, Option C is written and waiting rather than
-imagined.
+**The Supabase build has since been deleted** (2026-08-18) — schema, client,
+gate and setup guide are gone from the working tree, along with the project URL
+and anon key they carried into a public repo. They remain in git history if
+they are ever wanted back. The old Node/SQLite build in `legacy-sqlite/` is
+untouched and is still the offline fallback.
 
 ## What this route costs you
 
@@ -111,6 +111,7 @@ browser is a cleared ledger.
 there are no keys left to leak — but `legacy-sqlite/data/` holds your real
 figures and is in `.gitignore`. Leave it there.
 
-**If you ever want it on your phone**, that is Option C again, and the pieces
-are in `legacy-supabase/`. The one piece that was never written is the part
-that connects the modules to `api.js`.
+**If you ever want it on your phone**, that is Option C again — and now it is a
+rebuild, not a rewiring. The piece that was never written is still the same
+one: whatever connects the modules to a data layer instead of to
+`localStorage`.

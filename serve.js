@@ -33,8 +33,8 @@ const MIME = {
     '.woff2': 'font/woff2',
 };
 
-/** Never serve the archived builds or their data, whatever the URL asks for. */
-const FORBIDDEN = ['legacy-sqlite', 'legacy-supabase', 'data', '.git'];
+/** Never serve the archived build or its data, whatever the URL asks for. */
+const FORBIDDEN = ['legacy-sqlite', 'data', '.git'];
 
 const server = http.createServer((req, res) => {
     const url = new URL(req.url, `http://localhost:${PORT}`);
