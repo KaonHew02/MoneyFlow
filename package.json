@@ -1,0 +1,14 @@
+{
+  "name": "moneyflow",
+  "version": "1.0.0",
+  "private": true,
+  "description": "MoneyFlow - Understand Your Money. Manage Your Future.",
+  "scripts": {
+    "start": "node server/server.js",
+    "open": "node server/server.js --open",
+    "backup": "node server/backup.js"
+  },
+  "engines": {
+    "node": ">=22.5"
+  }
+}

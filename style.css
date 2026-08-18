@@ -1,0 +1,1056 @@
+/* ==========================================================================
+   MoneyFlow — design tokens
+
+   Its own identity, deliberately not the sibling calculator app's: jade
+   instead of corporate blue, a sage-white page instead of ivory, a top bar
+   and a full-bleed hero band instead of a sidebar and stat tiles.
+
+   Jade / amber / indigo are the three budget buckets, and they mean the same
+   thing everywhere they appear — the logo wedges, the stacked bar, the row
+   icons, the legend dots and the tables.
+   ========================================================================== */
+:root {
+    --canvas:      #eff3f0;
+    --paper:       #ffffff;
+    --paper-2:     #f7faf8;   /* nested rows, sitting inside a card */
+
+    --ink:         #16211d;   /* warm near-black with a green cast */
+    --ink-2:       #566761;
+    --ink-3:       #8fa099;
+
+    --line:        #e0e8e3;
+    --line-2:      #edf2ef;
+
+    --jade:        #0e7c66;   /* brand, and the "needs" bucket */
+    --jade-2:      #0a6553;
+    --jade-soft:   #e3f2ee;
+
+    --amber:       #b8800f;   /* "wants" — the part you could cut */
+    --amber-soft:  #fbf2dc;
+
+    --indigo:      #4f46c9;   /* "savings & debt" — still your money */
+    --indigo-soft: #ecebfb;
+
+    --red:         #cc3a34;
+    --red-soft:    #fdecea;
+
+    --radius:      20px;
+    --radius-sm:   12px;
+    --shadow:      0 1px 2px rgba(22, 33, 29, .04), 0 10px 28px rgba(22, 33, 29, .05);
+    --shadow-hero: 0 2px 6px rgba(7, 60, 49, .18), 0 18px 40px rgba(7, 60, 49, .20);
+}
+
+* { box-sizing: border-box; }
+
+html { -webkit-text-size-adjust: 100%; }
+
+body {
+    margin: 0;
+    background: var(--canvas);
+    color: var(--ink);
+    font-family: "Inter", system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Arial, sans-serif;
+    font-size: 15px;
+    line-height: 1.5;
+    -webkit-font-smoothing: antialiased;
+}
+
+.app { display: flex; flex-direction: column; min-height: 100vh; }
+
+.module[hidden] { display: none; }
+
+/* ==========================================================================
+   Top bar — brand on the left, the two modules on the right. No sidebar:
+   this app is two screens, not a directory of calculators.
+   ========================================================================== */
+.topbar {
+    position: sticky;
+    top: 0;
+    z-index: 10;
+    display: flex;
+    align-items: center;
+    gap: 20px;
+    padding: 14px 32px;
+    background: rgba(255, 255, 255, .88);
+    backdrop-filter: blur(12px);
+    border-bottom: 1px solid var(--line);
+}
+
+.brand { display: block; flex: 0 0 auto; }
+.brand img { display: block; width: 152px; height: auto; }
+
+/* The slogan rides beside the wordmark, and is the first thing dropped
+   when the bar gets tight — the tabs matter more than it does. */
+.tagline {
+    margin: 0;
+    font-size: 12.5px;
+    font-weight: 600;
+    letter-spacing: .04em;
+    color: var(--muted);
+}
+
+.tabs {
+    display: flex;
+    flex: 0 0 auto;
+    gap: 4px;
+    margin-left: auto;
+    padding: 4px;
+    border-radius: 14px;
+    background: var(--canvas);
+}
+
+.tabs button {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    padding: 9px 16px;
+    border: 0;
+    border-radius: 11px;
+    background: transparent;
+    font: inherit;
+    font-size: 13.5px;
+    font-weight: 650;
+    color: var(--ink-2);
+    cursor: pointer;
+    white-space: nowrap;
+    transition: all .16s ease;
+}
+
+.tabs button i { font-size: 13px; opacity: .75; }
+.tabs button:hover { color: var(--ink); }
+
+/* Filled, not a white chip on grey — the switch should be the loudest
+   control on the bar. */
+.tabs button.is-on {
+    background: var(--jade);
+    color: #fff;
+    box-shadow: 0 2px 8px rgba(14, 124, 102, .28);
+}
+
+.tabs button.is-on i { opacity: 1; }
+
+/* ==========================================================================
+   Main column — everything in one centred stack, inputs and answers alike.
+   ========================================================================== */
+.main {
+    flex: 1;
+    width: 100%;
+    max-width: 1020px;
+    margin: 0 auto;
+    padding: 26px 32px 64px;
+}
+
+.stack { display: flex; flex-direction: column; gap: 18px; }
+
+/* ==========================================================================
+   Hero band — the one number the screen exists to answer, plus the two
+   figures that explain it.
+   ========================================================================== */
+.hero {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    gap: 30px;
+    align-items: center;
+    margin-bottom: 20px;
+    padding: 30px 34px;
+    border-radius: 24px;
+    background: linear-gradient(128deg, #13907a 0%, var(--jade) 48%, #0a5545 100%);
+    box-shadow: var(--shadow-hero);
+    color: #fff;
+}
+
+.hero-main { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
+
+.hero-label {
+    font-size: 11.5px;
+    font-weight: 700;
+    letter-spacing: .1em;
+    text-transform: uppercase;
+    color: rgba(255, 255, 255, .66);
+}
+
+.hero-value {
+    font-size: 44px;
+    font-weight: 750;
+    line-height: 1.08;
+    letter-spacing: -.035em;
+    font-variant-numeric: tabular-nums;
+}
+
+.hero-foot { font-size: 13px; color: rgba(255, 255, 255, .78); font-variant-numeric: tabular-nums; }
+
+.hero-stats { display: flex; gap: 12px; }
+
+.hero-stat {
+    display: flex;
+    flex-direction: column;
+    gap: 3px;
+    min-width: 168px;
+    padding: 14px 16px;
+    border-radius: 14px;
+    background: rgba(255, 255, 255, .12);
+}
+
+.hero-stat-label {
+    font-size: 10.5px;
+    font-weight: 700;
+    letter-spacing: .08em;
+    text-transform: uppercase;
+    color: rgba(255, 255, 255, .64);
+}
+
+.hero-stat-value {
+    font-size: 20px;
+    font-weight: 700;
+    letter-spacing: -.02em;
+    font-variant-numeric: tabular-nums;
+}
+
+.hero-stat-foot { font-size: 11.5px; line-height: 1.35; color: rgba(255, 255, 255, .66); }
+
+/* ==========================================================================
+   Cards
+   ========================================================================== */
+.card {
+    padding: 24px 26px;
+    background: var(--paper);
+    border: 1px solid var(--line);
+    border-radius: var(--radius);
+    box-shadow: var(--shadow);
+}
+
+/* The rule under every heading gives the stack its rhythm. */
+.card-head {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    gap: 16px;
+    margin-bottom: 18px;
+    padding-bottom: 13px;
+    border-bottom: 1px solid var(--line-2);
+}
+
+.card-head h2 { margin: 0; font-size: 16.5px; font-weight: 700; letter-spacing: -.015em; }
+.card-actions { display: flex; align-items: center; gap: 14px; }
+.card-note { font-size: 12px; color: var(--ink-3); font-variant-numeric: tabular-nums; text-align: right; }
+.card-note b { font-weight: 700; color: var(--ink-2); }
+
+.ghost-btn {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 7px 12px;
+    border: 1px solid var(--line);
+    border-radius: 10px;
+    background: transparent;
+    font: inherit;
+    font-size: 12.5px;
+    font-weight: 650;
+    color: var(--ink-2);
+    cursor: pointer;
+    white-space: nowrap;
+    transition: all .16s ease;
+}
+
+.ghost-btn:hover { border-color: var(--jade); background: var(--jade-soft); color: var(--jade); }
+
+/* ==========================================================================
+   Fields — laid out across the card, not stacked down a narrow panel.
+   ========================================================================== */
+.field-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(226px, 1fr));
+    gap: 18px;
+}
+
+.field.is-wide { grid-column: 1 / -1; }
+
+.field { display: flex; flex-direction: column; gap: 8px; min-width: 0; }
+
+.field label {
+    display: flex;
+    align-items: baseline;
+    gap: 6px;
+    font-size: 12.5px;
+    font-weight: 650;
+    color: var(--ink);
+}
+
+.field .per { font-weight: 500; font-size: 11.5px; color: var(--ink-3); }
+
+.hint { margin: -1px 0 0; font-size: 11.5px; line-height: 1.5; color: var(--ink-3); }
+.hint i { margin-right: 3px; }
+
+input[type="number"], input[type="text"], input[type="date"], select {
+    width: 100%;
+    padding: 11px 14px;
+    border: 1px solid #d9e2dd;
+    border-radius: var(--radius-sm);
+    background: var(--paper);
+    font: inherit;
+    font-size: 14.5px;
+    color: var(--ink);
+    transition: border-color .16s ease, box-shadow .16s ease;
+}
+
+input::placeholder { color: #b3c0ba; }
+
+input:focus, select:focus {
+    outline: none;
+    border-color: var(--jade);
+    box-shadow: 0 0 0 3px rgba(14, 124, 102, .13);
+}
+
+/* strip the spinner so the field reads as a figure, not a stepper */
+input[type="number"]::-webkit-outer-spin-button,
+input[type="number"]::-webkit-inner-spin-button { -webkit-appearance: none; margin: 0; }
+input[type="number"] { -moz-appearance: textfield; appearance: textfield; }
+
+/* the native date field ships its own chrome — flatten it so it sits with the rest */
+input[type="date"] {
+    -webkit-appearance: none;
+    appearance: none;
+}
+input[type="date"]::-webkit-calendar-picker-indicator {
+    cursor: pointer;
+    opacity: .5;
+    filter: grayscale(1);
+    transition: opacity .16s ease;
+}
+input[type="date"]:hover::-webkit-calendar-picker-indicator { opacity: .85; }
+
+.money-input { position: relative; display: flex; align-items: center; }
+
+.money-input .affix {
+    position: absolute;
+    left: 14px;
+    font-size: 12.5px;
+    font-weight: 700;
+    color: var(--ink-3);
+    pointer-events: none;
+}
+
+.money-input input {
+    padding-left: 42px;
+    font-size: 15.5px;
+    font-weight: 650;
+    font-variant-numeric: tabular-nums;
+}
+
+/* A percentage reads better with the sign trailing the number. */
+.money-input.is-suffix .affix { left: auto; right: 13px; }
+.money-input.is-suffix input { padding-left: 14px; padding-right: 32px; }
+
+.money-input-sm input { padding: 9px 11px 9px 36px; font-size: 14px; }
+.money-input-sm .affix { left: 11px; font-size: 11.5px; }
+
+/* Segmented control — the live option is filled, not a white chip. */
+.seg { display: flex; gap: 4px; padding: 4px; background: var(--canvas); border-radius: var(--radius-sm); }
+
+.seg button {
+    flex: 1;
+    padding: 9px 0;
+    border: 0;
+    border-radius: 9px;
+    background: transparent;
+    font: inherit;
+    font-size: 13px;
+    font-weight: 650;
+    color: var(--ink-2);
+    cursor: pointer;
+    transition: all .16s ease;
+}
+
+.seg button:hover { color: var(--ink); }
+.seg button.is-on { background: var(--jade); color: #fff; box-shadow: 0 2px 6px rgba(14, 124, 102, .24); }
+
+/* A view switch living in a card head, beside the note — not a form field. */
+.seg.is-compact { flex: 0 0 auto; padding: 3px; }
+.seg.is-compact button { flex: 0 0 auto; padding: 6px 12px; font-size: 12px; }
+
+/* ==========================================================================
+   Tally — a row of figures across the card, not a column of ledger lines.
+   ========================================================================== */
+.tally {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 10px 0;
+    margin-top: 20px;
+    padding: 16px 4px;
+    border-top: 1px solid var(--line-2);
+    border-bottom: 1px solid var(--line-2);
+}
+
+.tally-cell {
+    display: flex;
+    flex-direction: column;
+    gap: 3px;
+    flex: 1 1 130px;
+    padding: 0 16px;
+    border-left: 1px solid var(--line-2);
+}
+
+.tally-cell[hidden] { display: none; }
+.tally-cell:first-child { border-left: 0; }
+
+.tally-cell span { font-size: 11px; font-weight: 700; letter-spacing: .07em; text-transform: uppercase; color: var(--ink-3); }
+.tally-cell b { font-size: 16px; font-weight: 700; color: var(--ink); font-variant-numeric: tabular-nums; }
+.tally-cell .is-minus { color: var(--red); }
+
+.tally-cell.is-total span { color: var(--jade); }
+.tally-cell.is-total b { font-size: 19px; color: var(--jade); }
+
+.check-line {
+    display: inline-flex;
+    align-items: center;
+    gap: 9px;
+    margin-top: 16px;
+    font-size: 13px;
+    font-weight: 600;
+    color: var(--ink-2);
+    cursor: pointer;
+    user-select: none;
+}
+
+.check-line input {
+    width: 18px;
+    height: 18px;
+    margin: 0;
+    accent-color: var(--jade);
+    cursor: pointer;
+}
+
+.check-line:hover { color: var(--ink); }
+
+/* ==========================================================================
+   Bill split — one card per person, their items nested inside
+   ========================================================================== */
+.split-person {
+    padding: 14px 15px;
+    border: 1px solid var(--line-2);
+    border-radius: 14px;
+    background: var(--paper-2);
+}
+
+.split-person + .split-person { margin-top: 10px; }
+
+.split-person-head { display: flex; align-items: center; gap: 10px; margin-bottom: 12px; }
+
+.split-name { padding: 9px 12px; font-size: 14px; font-weight: 650; }
+
+.split-person-sum {
+    flex: 0 0 auto;
+    font-size: 15px;
+    font-weight: 750;
+    color: var(--jade);
+    font-variant-numeric: tabular-nums;
+    white-space: nowrap;
+}
+
+.split-x {
+    flex: 0 0 auto;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 30px;
+    height: 30px;
+    padding: 0;
+    border: 0;
+    border-radius: 9px;
+    background: transparent;
+    font: inherit;
+    font-size: 11px;
+    color: var(--ink-3);
+    cursor: pointer;
+    transition: background .16s ease, color .16s ease;
+}
+
+.split-x:hover { background: var(--red-soft); color: var(--red); }
+
+.split-items { display: grid; gap: 8px; }
+
+.split-item {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) 130px 30px;
+    gap: 8px;
+    align-items: center;
+}
+
+.split-item-label { padding: 9px 12px; font-size: 13.5px; }
+
+.split-add {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    margin-top: 10px;
+    padding: 0;
+    border: 0;
+    background: none;
+    font: inherit;
+    font-size: 12px;
+    font-weight: 700;
+    color: var(--jade);
+    cursor: pointer;
+}
+
+.split-add i { font-size: 10px; }
+.split-add:hover { text-decoration: underline; }
+
+.split-empty { margin: 0; font-size: 13px; line-height: 1.55; color: var(--ink-3); }
+
+/* ==========================================================================
+   Budget planner
+   ========================================================================== */
+.bgt-list { display: grid; gap: 9px; }
+.bgt-list:empty { display: none; }
+.bgt-list + .bgt-list:not(:empty) { margin-top: 9px; }
+
+.bgt-row {
+    display: grid;
+    grid-template-columns: 38px minmax(0, 1fr) 140px 48px;
+    gap: 14px;
+    align-items: center;
+    padding: 11px 14px;
+    border: 1px solid var(--line-2);
+    border-radius: 14px;
+    background: var(--paper-2);
+    transition: border-color .16s ease;
+}
+
+.bgt-row:focus-within { border-color: #cfdcd6; }
+
+.bgt-icon {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 38px;
+    height: 38px;
+    border-radius: 12px;
+    background: var(--jade-soft);
+    color: var(--jade);
+    font-size: 16px;
+}
+
+.bgt-row[data-bucket="wants"] .bgt-icon { background: var(--amber-soft);  color: var(--amber); }
+.bgt-row[data-bucket="save"]  .bgt-icon { background: var(--indigo-soft); color: var(--indigo); }
+
+.bgt-meta { min-width: 0; }
+
+.bgt-meta label {
+    display: block;
+    font-size: 13.5px;
+    font-weight: 650;
+    color: var(--ink);
+    cursor: pointer;
+}
+
+.bgt-meta small {
+    display: block;
+    font-size: 11.5px;
+    color: var(--ink-3);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.bgt-bar {
+    height: 5px;
+    margin-top: 8px;
+    border-radius: 999px;
+    background: #e6ece9;
+    overflow: hidden;
+}
+
+.bgt-bar i {
+    display: block;
+    height: 100%;
+    border-radius: 999px;
+    background: var(--jade);
+    transition: width .22s ease;
+}
+
+.bgt-row[data-bucket="wants"] .bgt-bar i { background: var(--amber); }
+.bgt-row[data-bucket="save"]  .bgt-bar i { background: var(--indigo); }
+
+.bgt-pct {
+    font-size: 13px;
+    font-weight: 700;
+    color: var(--ink-3);
+    text-align: right;
+    font-variant-numeric: tabular-nums;
+}
+
+/* A category the user invented: name and bucket become editable, so the share
+   column gives up its place to the picker and the remove button. */
+.bgt-row.is-custom { grid-template-columns: 38px minmax(0, 1fr) 124px 140px 30px; }
+.bgt-row.is-custom .bgt-label { padding: 9px 12px; font-size: 13.5px; font-weight: 650; }
+
+.bgt-bucket {
+    padding: 9px 11px;
+    font-size: 12.5px;
+    font-weight: 600;
+    color: var(--ink-2);
+    cursor: pointer;
+}
+
+/* ==========================================================================
+   Stacked share bar + legend
+   ========================================================================== */
+.dist {
+    display: flex;
+    gap: 3px;
+    height: 18px;
+    border-radius: 999px;
+    background: #e6ece9;
+    overflow: hidden;
+}
+
+.dist span { display: block; height: 100%; transition: width .22s ease; }
+
+.dist-jade   { background: var(--jade); }
+.dist-amber  { background: var(--amber); }
+.dist-indigo { background: var(--indigo); }
+.dist-red    { background: var(--red); }
+.dist-left   { background: #d3ded8; }
+
+/* Said once, loudly, when a plan simply does not work. */
+.notice {
+    display: flex;
+    align-items: flex-start;
+    gap: 11px;
+    margin-bottom: 18px;
+    padding: 14px 16px;
+    border: 1px solid #f3ccc8;
+    border-radius: 14px;
+    background: var(--red-soft);
+    font-size: 13px;
+    line-height: 1.55;
+    color: #8c2723;
+}
+
+.notice[hidden] { display: none; }
+.notice i { flex: 0 0 auto; margin-top: 2px; font-size: 14px; color: var(--red); }
+
+.legend { display: flex; flex-wrap: wrap; gap: 10px 24px; margin-top: 16px; }
+
+.legend-item { display: flex; align-items: center; gap: 9px; font-size: 13px; color: var(--ink-2); }
+.legend-item b { font-weight: 700; color: var(--ink); font-variant-numeric: tabular-nums; }
+.legend-item small { font-size: 11.5px; color: var(--ink-3); font-variant-numeric: tabular-nums; }
+.legend-item .is-minus { color: var(--red); }
+.legend-empty { font-size: 13px; color: var(--ink-3); }
+
+.dot {
+    flex: 0 0 auto;
+    width: 10px;
+    height: 10px;
+    border-radius: 4px;
+    background: var(--ink-3);
+}
+
+.dot-jade   { background: var(--jade); }
+.dot-amber  { background: var(--amber); }
+.dot-indigo { background: var(--indigo); }
+.dot-red    { background: var(--red); }
+.dot-left   { background: #c6d3cd; }
+
+/* ==========================================================================
+   Tables
+   Horizontal scroll for narrow screens. The paired local/scroll gradients are
+   the classic pure-CSS scroll shadow: the edge shadow only shows while there
+   is more table to scroll to on that side.
+   ========================================================================== */
+.table-wrap {
+    overflow-x: auto;
+    margin: 0 -4px;
+    padding: 0 4px;
+    background:
+        linear-gradient(to right, var(--paper) 40%, rgba(255, 255, 255, 0)) left center / 28px 100% no-repeat local,
+        linear-gradient(to left,  var(--paper) 40%, rgba(255, 255, 255, 0)) right center / 28px 100% no-repeat local,
+        radial-gradient(farthest-side at 0 50%,    rgba(22, 33, 29, .13), rgba(22, 33, 29, 0)) left center / 11px 100% no-repeat scroll,
+        radial-gradient(farthest-side at 100% 50%, rgba(22, 33, 29, .13), rgba(22, 33, 29, 0)) right center / 11px 100% no-repeat scroll;
+}
+
+.data-table { width: 100%; border-collapse: collapse; min-width: 500px; }
+
+.data-table th {
+    padding: 0 14px 11px;
+    font-size: 10.5px;
+    font-weight: 700;
+    letter-spacing: .08em;
+    text-transform: uppercase;
+    color: var(--ink-3);
+    text-align: right;
+    border-bottom: 1px solid var(--line-2);
+    white-space: nowrap;
+}
+
+.data-table td {
+    padding: 13px 14px;
+    font-size: 14px;
+    color: var(--ink-2);
+    text-align: right;
+    border-bottom: 1px solid #f2f6f4;
+    font-variant-numeric: tabular-nums;
+    white-space: nowrap;
+}
+
+.data-table th:first-child,
+.data-table td:first-child { text-align: left; padding-left: 2px; white-space: normal; }
+
+.data-table td strong { display: block; font-size: 14px; font-weight: 650; color: var(--ink); }
+.data-table td small { display: block; font-size: 11.5px; color: var(--ink-3); margin-top: 1px; }
+
+.data-table .is-strong { font-weight: 700; color: var(--ink); }
+.data-table .is-minus  { color: var(--red); }
+.data-table .is-plus   { color: var(--jade); }
+.data-table .is-muted  { color: #b8c5bf; }
+
+.data-table .dot { display: inline-block; margin-right: 8px; vertical-align: middle; }
+
+/* The row that is the reader's own situation, so the rest read as options. */
+.data-table tr.is-you td { background: var(--jade-soft); }
+/* The first cell normally hugs the left edge; a tinted row needs the padding back. */
+.data-table tr.is-you td:first-child { padding-left: 12px; border-top-left-radius: 10px; border-bottom-left-radius: 10px; }
+.data-table tr.is-you td:last-child  { border-top-right-radius: 10px; border-bottom-right-radius: 10px; }
+
+.data-table .tag {
+    display: inline-block;
+    margin-left: 7px;
+    padding: 2px 7px;
+    border-radius: 6px;
+    background: var(--jade);
+    font-size: 10px;
+    font-style: normal;
+    font-weight: 700;
+    letter-spacing: .04em;
+    text-transform: uppercase;
+    color: #fff;
+    vertical-align: 1px;
+}
+
+.data-table .total-row td {
+    padding-top: 16px;
+    border-top: 1.5px solid #d8e2dd;
+    border-bottom: none;
+    font-size: 14.5px;
+    font-weight: 700;
+    color: var(--ink);
+}
+
+/* The "left over" line trails the total, so it stays subordinate to it. */
+.data-table .total-row.is-quiet td {
+    padding-top: 9px;
+    border-top: 0;
+    font-size: 14px;
+    font-weight: 650;
+    color: var(--ink-2);
+}
+
+/* ==========================================================================
+   Daily ledger
+   ========================================================================== */
+
+/* Month stepper, sitting above the headline inside the hero */
+.month-nav { display: flex; align-items: center; gap: 6px; margin-bottom: 6px; }
+
+.month-nav span {
+    min-width: 96px;
+    font-size: 13.5px;
+    font-weight: 700;
+    letter-spacing: .01em;
+    text-align: center;
+    color: #fff;
+}
+
+.month-nav button {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 26px;
+    height: 26px;
+    padding: 0;
+    border: 0;
+    border-radius: 8px;
+    background: rgba(255, 255, 255, .14);
+    font: inherit;
+    font-size: 11px;
+    color: #fff;
+    cursor: pointer;
+    transition: background .16s ease;
+}
+
+.month-nav button:hover { background: rgba(255, 255, 255, .26); }
+
+/* The primary action of the whole app: file this entry. */
+.form-foot {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 14px 18px;
+    margin-top: 20px;
+    padding-top: 18px;
+    border-top: 1px solid var(--line-2);
+}
+
+.form-foot .hint { margin: 0; flex: 1 1 220px; }
+
+.primary-btn {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    padding: 12px 22px;
+    border: 0;
+    border-radius: var(--radius-sm);
+    background: var(--jade);
+    font: inherit;
+    font-size: 14px;
+    font-weight: 700;
+    color: #fff;
+    cursor: pointer;
+    box-shadow: 0 2px 8px rgba(14, 124, 102, .28);
+    transition: background .16s ease, box-shadow .16s ease, transform .1s ease;
+}
+
+.primary-btn:hover { background: var(--jade-2); box-shadow: 0 4px 14px rgba(14, 124, 102, .34); }
+.primary-btn:active { transform: translateY(1px); }
+.primary-btn i { font-size: 12px; }
+
+/* A day's heading: the date on the left, what it cost on the right. */
+.led-day {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 14px;
+    margin: 20px 0 6px;
+    padding-bottom: 8px;
+    border-bottom: 1px solid var(--line-2);
+}
+
+.led-day:first-child { margin-top: 0; }
+
+.led-date { display: flex; align-items: baseline; gap: 8px; }
+.led-date b { font-size: 19px; font-weight: 750; letter-spacing: -.02em; color: var(--ink); }
+
+.led-date em {
+    padding: 2px 7px;
+    border-radius: 6px;
+    background: var(--canvas);
+    font-size: 10.5px;
+    font-style: normal;
+    font-weight: 700;
+    letter-spacing: .04em;
+    text-transform: uppercase;
+    color: var(--ink-3);
+}
+
+.led-day-sums { display: flex; gap: 14px; }
+
+.led-day-sums i {
+    font-size: 12.5px;
+    font-style: normal;
+    font-weight: 650;
+    font-variant-numeric: tabular-nums;
+}
+
+/* One line per entry. The note is a button so the row can be picked up and
+   edited, without nesting anything clickable inside anything else clickable. */
+.led-entry {
+    display: grid;
+    grid-template-columns: 34px minmax(0, 1fr) auto 30px;
+    gap: 12px;
+    align-items: center;
+    padding: 9px 4px;
+    border-bottom: 1px solid #f4f7f5;
+}
+
+.led-entry:last-child { border-bottom: 0; }
+.led-entry:hover { background: var(--paper-2); }
+
+.led-icon {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 34px;
+    height: 34px;
+    border-radius: 11px;
+    background: var(--red-soft);
+    color: var(--red);
+    font-size: 14px;
+}
+
+.led-icon.led-income   { background: var(--jade-soft);   color: var(--jade); }
+.led-icon.led-transfer { background: var(--indigo-soft); color: var(--indigo); }
+
+.led-meta {
+    min-width: 0;
+    padding: 0;
+    border: 0;
+    background: none;
+    font: inherit;
+    text-align: left;
+    cursor: pointer;
+}
+
+.led-meta b {
+    display: block;
+    font-size: 14px;
+    font-weight: 650;
+    color: var(--ink);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.led-meta small {
+    display: block;
+    font-size: 11.5px;
+    color: var(--ink-3);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.led-meta:hover b { color: var(--jade); text-decoration: underline; }
+
+.led-amount {
+    font-size: 14.5px;
+    font-weight: 700;
+    font-variant-numeric: tabular-nums;
+    white-space: nowrap;
+}
+
+/* Money in, money out, money that only changed pocket. */
+.is-in   { color: var(--jade); }
+.is-out  { color: var(--red); }
+.is-move { color: var(--indigo); }
+
+/* Assets / owing / altogether, above the account list */
+.acct-summary {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 10px 0;
+    margin-bottom: 18px;
+    padding: 14px 4px;
+    border-top: 1px solid var(--line-2);
+    border-bottom: 1px solid var(--line-2);
+}
+
+.acct-group {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    gap: 12px;
+    margin: 16px 0 2px;
+    font-size: 11px;
+    font-weight: 700;
+    letter-spacing: .07em;
+    text-transform: uppercase;
+    color: var(--ink-3);
+}
+
+.acct-group:first-child { margin-top: 0; }
+.acct-group b { font-size: 12.5px; letter-spacing: 0; text-transform: none; color: var(--ink-2); font-variant-numeric: tabular-nums; }
+
+.acct-row {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    gap: 12px;
+    padding: 9px 4px;
+    border-bottom: 1px solid #f4f7f5;
+    font-size: 13.5px;
+    color: var(--ink-2);
+}
+
+.acct-row b { font-weight: 700; color: var(--ink); font-variant-numeric: tabular-nums; }
+.acct-row b.is-minus { color: var(--red); }
+
+/* An account that cannot be removed says so by flinching. */
+.bgt-row.is-locked {
+    border-color: #f0c8c4;
+    background: var(--red-soft);
+    animation: nudge .3s ease;
+}
+
+@keyframes nudge {
+    0%, 100% { transform: translateX(0); }
+    25%      { transform: translateX(-4px); }
+    75%      { transform: translateX(4px); }
+}
+
+/* ==========================================================================
+   Responsive
+   ========================================================================== */
+@media (max-width: 1080px) {
+    .tagline { display: none; }
+}
+
+@media (max-width: 900px) {
+    .topbar { gap: 12px; padding: 12px 18px; }
+    .brand img { width: 122px; }
+    .tabs button span { display: none; }
+    .tabs button { padding: 9px 14px; }
+    .tabs button i { font-size: 15px; }
+
+    .main { padding: 18px 16px 48px; }
+
+    /* The hero turns into a headline with two figures underneath it. */
+    .hero { grid-template-columns: minmax(0, 1fr); gap: 20px; padding: 24px 22px; border-radius: 20px; }
+    .hero-value { font-size: 36px; }
+    .hero-stats { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+    .hero-stat { min-width: 0; }
+
+    .card { padding: 20px 18px; }
+
+    /* Title, running total and the action button need their own lines here. */
+    .card-head { flex-direction: column; align-items: flex-start; gap: 10px; }
+    .card-note { text-align: left; }
+    .card-actions { width: 100%; justify-content: space-between; }
+
+    .tally { gap: 14px 0; }
+    .tally-cell { flex: 1 1 44%; padding: 0 14px; }
+    .tally-cell:nth-child(odd) { border-left: 0; }
+
+    /* The last column has to stay as wide as the button itself, or it clips. */
+    .split-item { grid-template-columns: minmax(0, 1fr) 104px 30px; gap: 6px; }
+    .split-person-sum { font-size: 14px; }
+
+    /* The share column is the first thing to go — the same figure is in the
+       "Every ringgit" table two cards down. */
+    .bgt-row { grid-template-columns: 38px minmax(0, 1fr) 118px; gap: 11px; }
+    .bgt-pct { display: none; }
+
+    /* A custom row carries too many controls for one line: name on top,
+       bucket and amount underneath it. */
+    .bgt-row.is-custom {
+        grid-template-columns: 38px minmax(0, 1fr) minmax(0, 1fr) 30px;
+        grid-template-areas:
+            "icon name   name   x"
+            ".    bucket amount .";
+    }
+
+    .bgt-row.is-custom .bgt-icon    { grid-area: icon; }
+    .bgt-row.is-custom .bgt-meta    { grid-area: name; }
+    .bgt-row.is-custom .bgt-bucket  { grid-area: bucket; }
+    .bgt-row.is-custom .money-input { grid-area: amount; }
+    .bgt-row.is-custom .split-x     { grid-area: x; }
+
+    .legend { gap: 9px 18px; }
+
+    /* An entry line gives up the icon before it gives up the note. */
+    .led-entry { grid-template-columns: 30px minmax(0, 1fr) auto 28px; gap: 9px; }
+    .led-icon { width: 30px; height: 30px; border-radius: 9px; font-size: 13px; }
+    .led-amount { font-size: 13.5px; }
+    .led-date b { font-size: 17px; }
+
+    .acct-summary { gap: 14px 0; }
+    .acct-summary .tally-cell { flex: 1 1 44%; padding: 0 14px; }
+    .acct-summary .tally-cell:nth-child(odd) { border-left: 0; }
+
+    .form-foot { gap: 12px; }
+    .primary-btn { width: 100%; justify-content: center; }
+}
+
+@media (max-width: 460px) {
+    .hero-stats { grid-template-columns: 1fr; }
+    .brand img { width: 107px; }
+}

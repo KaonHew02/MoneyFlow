@@ -1,0 +1,711 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="description" content="MoneyFlow — track the money you spend, plan the month ahead and watch it grow. Track. Plan. Grow.">
+    <title>MoneyFlow — Understand Your Money. Manage Your Future.</title>
+    <link rel="icon" href="logo-icon.svg">
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.min.css">
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+<div class="app">
+
+    <header class="topbar">
+        <a class="brand" href="#" aria-label="MoneyFlow — Understand Your Money. Manage Your Future.">
+            <img src="logo.svg" alt="MoneyFlow">
+        </a>
+        <p class="tagline">Track. Plan. Grow.</p>
+        <nav class="tabs" id="tabs">
+            <button type="button" data-module="ledger" class="is-on">
+                <i class="bi bi-journal-text"></i><span>Expenses</span>
+            </button>
+            <button type="button" data-module="split">
+                <i class="bi bi-people-fill"></i><span>Bill Split</span>
+            </button>
+            <button type="button" data-module="budget">
+                <i class="bi bi-pie-chart-fill"></i><span>Budget Planner</span>
+            </button>
+            <button type="button" data-module="card">
+                <i class="bi bi-credit-card-2-front-fill"></i><span>Card Payoff</span>
+            </button>
+        </nav>
+    </header>
+
+    <main class="main">
+
+        <!-- ==============================================================
+             DAILY EXPENSES — the ledger the whole app is really for
+             ============================================================== -->
+        <section class="module" id="module-ledger">
+
+            <div class="hero">
+                <div class="hero-main">
+                    <div class="month-nav">
+                        <button type="button" id="ledgerPrev" aria-label="Previous month">
+                            <i class="bi bi-chevron-left"></i>
+                        </button>
+                        <span id="ledgerMonthLabel">&mdash;</span>
+                        <button type="button" id="ledgerNext" aria-label="Next month">
+                            <i class="bi bi-chevron-right"></i>
+                        </button>
+                    </div>
+                    <span class="hero-label">Spent this month</span>
+                    <span class="hero-value" id="ledgerSpent">RM 0.00</span>
+                    <span class="hero-foot" id="ledgerSpentFoot">&mdash;</span>
+                </div>
+                <div class="hero-stats">
+                    <div class="hero-stat">
+                        <span class="hero-stat-label">Money in</span>
+                        <span class="hero-stat-value" id="ledgerIncome">RM 0.00</span>
+                        <span class="hero-stat-foot" id="ledgerIncomeFoot">&mdash;</span>
+                    </div>
+                    <div class="hero-stat">
+                        <span class="hero-stat-label">Kept</span>
+                        <span class="hero-stat-value" id="ledgerNet">RM 0.00</span>
+                        <span class="hero-stat-foot" id="ledgerNetFoot">&mdash;</span>
+                    </div>
+                </div>
+            </div>
+
+            <div class="stack">
+
+                <form class="card" id="ledger-form" autocomplete="off" onsubmit="return false;">
+                    <div class="card-head">
+                        <h2 id="ledgerFormTitle">Add an entry</h2>
+                        <div class="card-actions">
+                            <button type="button" class="ghost-btn" id="ledgerCancel" hidden>
+                                <i class="bi bi-x-lg"></i> Cancel
+                            </button>
+                            <button type="button" class="ghost-btn" data-reset="ledger">
+                                <i class="bi bi-arrow-counterclockwise"></i> Clear
+                            </button>
+                        </div>
+                    </div>
+
+                    <div class="field-grid">
+                        <div class="field is-wide">
+                            <label>What kind</label>
+                            <div class="seg" id="ledgerType" data-value="expense">
+                                <button type="button" data-val="expense" class="is-on">Spent</button>
+                                <button type="button" data-val="income">Received</button>
+                                <button type="button" data-val="transfer">Moved</button>
+                            </div>
+                        </div>
+
+                        <div class="field">
+                            <label for="ledgerAmount">Amount</label>
+                            <div class="money-input">
+                                <span class="affix">RM</span>
+                                <input type="number" id="ledgerAmount" min="0" step="0.10" placeholder="0.00" inputmode="decimal">
+                            </div>
+                        </div>
+
+                        <div class="field">
+                            <label for="ledgerDate">When</label>
+                            <input type="date" id="ledgerDate">
+                        </div>
+
+                        <div class="field" id="ledgerFieldCategory">
+                            <label for="ledgerCategory">Category</label>
+                            <select id="ledgerCategory"></select>
+                        </div>
+
+                        <div class="field">
+                            <label for="ledgerAccount" id="ledgerAccountLabel">Paid from</label>
+                            <select id="ledgerAccount"></select>
+                        </div>
+
+                        <div class="field" id="ledgerFieldTo" hidden>
+                            <label for="ledgerTo">Into</label>
+                            <select id="ledgerTo"></select>
+                        </div>
+
+                        <div class="field is-wide">
+                            <label for="ledgerNote">What was it</label>
+                            <input type="text" id="ledgerNote" placeholder="mooncake, petrol, lunch with the team…">
+                        </div>
+                    </div>
+
+                    <div class="form-foot">
+                        <button type="button" class="primary-btn" id="ledgerSubmit">
+                            <i class="bi bi-plus-lg"></i> Add entry
+                        </button>
+                        <span class="hint" id="ledgerFormHint">
+                            <i class="bi bi-hdd"></i> Saved on this device only &mdash; nothing leaves your browser.
+                        </span>
+                    </div>
+                </form>
+
+                <section class="card">
+                    <div class="card-head">
+                        <h2 id="ledgerListTitle">The month</h2>
+                        <div class="card-actions">
+                            <span class="card-note" id="ledgerListNote">&mdash;</span>
+                            <button type="button" class="ghost-btn" id="ledgerCopy">
+                                <i class="bi bi-clipboard"></i> Copy summary
+                            </button>
+                        </div>
+                    </div>
+                    <div id="ledgerList"></div>
+                </section>
+
+                <section class="card">
+                    <div class="card-head">
+                        <h2>Where it went</h2>
+                        <span class="card-note" id="ledgerCatNote">&mdash;</span>
+                    </div>
+                    <div class="dist" id="ledgerDist"></div>
+                    <div class="legend" id="ledgerLegend"></div>
+                    <div class="table-wrap">
+                        <table class="data-table">
+                            <thead>
+                                <tr>
+                                    <th>Category</th>
+                                    <th>Spent</th>
+                                    <th>Share</th>
+                                    <th>Budgeted</th>
+                                    <th>Left</th>
+                                </tr>
+                            </thead>
+                            <tbody id="ledgerCatBody"></tbody>
+                        </table>
+                    </div>
+                </section>
+
+                <section class="card">
+                    <div class="card-head">
+                        <h2>Accounts</h2>
+                        <div class="card-actions">
+                            <span class="card-note" id="ledgerWorthNote">&mdash;</span>
+                            <button type="button" class="ghost-btn" id="ledgerAddAccount">
+                                <i class="bi bi-plus-lg"></i> Add account
+                            </button>
+                        </div>
+                    </div>
+                    <div class="acct-summary">
+                        <div class="tally-cell">
+                            <span>Assets</span>
+                            <b id="ledgerAssets">RM 0.00</b>
+                        </div>
+                        <div class="tally-cell">
+                            <span>Owing</span>
+                            <b id="ledgerOwing" class="is-minus">RM 0.00</b>
+                        </div>
+                        <div class="tally-cell is-total">
+                            <span>Altogether</span>
+                            <b id="ledgerWorth">RM 0.00</b>
+                        </div>
+                    </div>
+                    <div id="ledgerBalances"></div>
+                    <div class="bgt-list" id="ledgerAccounts"></div>
+                    <p class="hint">Opening balance is what each account held before your first entry here. Every entry moves the balance from there.</p>
+                </section>
+
+            </div>
+        </section>
+
+        <!-- ==============================================================
+             BILL SPLIT
+             ============================================================== -->
+        <section class="module" id="module-split" hidden>
+
+            <div class="hero">
+                <div class="hero-main">
+                    <span class="hero-label">Bill total</span>
+                    <span class="hero-value" id="splitTotal">RM 0.00</span>
+                    <span class="hero-foot" id="splitPaxFoot">&mdash;</span>
+                </div>
+                <div class="hero-stats">
+                    <div class="hero-stat">
+                        <span class="hero-stat-label">Food ordered</span>
+                        <span class="hero-stat-value" id="splitFood">RM 0.00</span>
+                        <span class="hero-stat-foot" id="splitFoodFoot">&mdash;</span>
+                    </div>
+                    <div class="hero-stat">
+                        <span class="hero-stat-label">Charges added</span>
+                        <span class="hero-stat-value" id="splitChargeAdded">RM 0.00</span>
+                        <span class="hero-stat-foot" id="splitChargeFoot">&mdash;</span>
+                    </div>
+                </div>
+            </div>
+
+            <div class="stack">
+
+                <form class="card" id="split-form" autocomplete="off" onsubmit="return false;">
+                    <div class="card-head">
+                        <h2>The bill</h2>
+                        <button type="button" class="ghost-btn" data-reset="split">
+                            <i class="bi bi-arrow-counterclockwise"></i> Reset
+                        </button>
+                    </div>
+
+                    <div class="field-grid">
+                        <div class="field is-wide">
+                            <label>What the place charges</label>
+                            <div class="seg" id="splitCharges" data-value="none">
+                                <button type="button" data-val="none" class="is-on">None</button>
+                                <button type="button" data-val="tax">6%</button>
+                                <button type="button" data-val="svc">10%</button>
+                                <button type="button" data-val="both">10% + 6%</button>
+                            </div>
+                            <p class="hint">Service charge goes on first, then SST is charged on top of it &mdash; same order as the receipt.</p>
+                        </div>
+
+                        <div class="field">
+                            <label for="splitService">Service charge</label>
+                            <div class="money-input is-suffix">
+                                <span class="affix">%</span>
+                                <input type="number" id="splitService" min="0" max="100" step="1" value="0" inputmode="decimal">
+                            </div>
+                        </div>
+
+                        <div class="field">
+                            <label for="splitTax">SST</label>
+                            <div class="money-input is-suffix">
+                                <span class="affix">%</span>
+                                <input type="number" id="splitTax" min="0" max="100" step="1" value="0" inputmode="decimal">
+                            </div>
+                        </div>
+
+                        <div class="field">
+                            <label for="splitDiscount">Discount <span class="per">off the food</span></label>
+                            <div class="money-input">
+                                <span class="affix">RM</span>
+                                <input type="number" id="splitDiscount" min="0" step="1" placeholder="0" inputmode="decimal">
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="tally">
+                        <div class="tally-cell">
+                            <span>Food ordered</span>
+                            <b id="splitTallyFood">RM 0.00</b>
+                        </div>
+                        <div class="tally-cell" id="splitRowDiscount" hidden>
+                            <span>Discount</span>
+                            <b id="splitTallyDiscount" class="is-minus">RM 0.00</b>
+                        </div>
+                        <div class="tally-cell" id="splitRowService" hidden>
+                            <span id="splitTallyServiceLabel">Service charge</span>
+                            <b id="splitTallyService">RM 0.00</b>
+                        </div>
+                        <div class="tally-cell" id="splitRowTax" hidden>
+                            <span id="splitTallyTaxLabel">SST</span>
+                            <b id="splitTallyTax">RM 0.00</b>
+                        </div>
+                        <div class="tally-cell is-total">
+                            <span>Bill total</span>
+                            <b id="splitTallyTotal">RM 0.00</b>
+                        </div>
+                    </div>
+
+                    <label class="check-line">
+                        <input type="checkbox" id="splitRound">
+                        <span>Round the total to 5 sen (paying cash)</span>
+                    </label>
+                </form>
+
+                <section class="card">
+                    <div class="card-head">
+                        <h2>Who ate what</h2>
+                        <div class="card-actions">
+                            <span class="card-note">Ordered <b id="splitOwnTotal">RM 0.00</b></span>
+                            <button type="button" class="ghost-btn" id="splitAddPerson">
+                                <i class="bi bi-person-plus"></i> Add person
+                            </button>
+                        </div>
+                    </div>
+                    <div id="splitPeople"></div>
+                </section>
+
+                <section class="card">
+                    <div class="card-head">
+                        <h2>Shared by everyone</h2>
+                        <div class="card-actions">
+                            <span class="card-note">Split evenly <b id="splitSharedTotal">RM 0.00</b></span>
+                            <button type="button" class="ghost-btn" id="splitAddShared">
+                                <i class="bi bi-plus-lg"></i> Add item
+                            </button>
+                        </div>
+                    </div>
+                    <div id="splitShared"></div>
+                </section>
+
+                <section class="card">
+                    <div class="card-head">
+                        <h2>Everyone pays</h2>
+                        <div class="card-actions">
+                            <span class="card-note" id="splitEvenNote">&mdash;</span>
+                            <button type="button" class="ghost-btn" id="splitCopy">
+                                <i class="bi bi-clipboard"></i> Copy summary
+                            </button>
+                        </div>
+                    </div>
+                    <div class="table-wrap">
+                        <table class="data-table">
+                            <thead>
+                                <tr>
+                                    <th>Person</th>
+                                    <th>Ate</th>
+                                    <th>Share of charges</th>
+                                    <th>Pays</th>
+                                </tr>
+                            </thead>
+                            <tbody id="splitBody"></tbody>
+                        </table>
+                    </div>
+                </section>
+
+            </div>
+        </section>
+
+        <!-- ==============================================================
+             BUDGET PLANNER
+             ============================================================== -->
+        <section class="module" id="module-budget" hidden>
+
+            <div class="hero">
+                <div class="hero-main">
+                    <span class="hero-label">Left over</span>
+                    <span class="hero-value" id="budgetLeft">RM 0.00</span>
+                    <span class="hero-foot" id="budgetLeftFoot">&mdash;</span>
+                </div>
+                <div class="hero-stats">
+                    <div class="hero-stat">
+                        <span class="hero-stat-label">Total spending</span>
+                        <span class="hero-stat-value" id="budgetSpend">RM 0.00</span>
+                        <span class="hero-stat-foot" id="budgetSpendFoot">&mdash;</span>
+                    </div>
+                    <div class="hero-stat">
+                        <span class="hero-stat-label">Savings rate</span>
+                        <span class="hero-stat-value" id="budgetRate">0.0%</span>
+                        <span class="hero-stat-foot" id="budgetRateFoot">&mdash;</span>
+                    </div>
+                </div>
+            </div>
+
+            <div class="stack">
+
+                <form class="card" id="budget-form" autocomplete="off" onsubmit="return false;">
+                    <div class="card-head">
+                        <h2>Your month</h2>
+                        <button type="button" class="ghost-btn" data-reset="budget">
+                            <i class="bi bi-arrow-counterclockwise"></i> Reset
+                        </button>
+                    </div>
+
+                    <div class="field-grid">
+                        <div class="field">
+                            <label for="budgetIncome">Monthly income <span class="per">take-home</span></label>
+                            <div class="money-input">
+                                <span class="affix">RM</span>
+                                <input type="number" id="budgetIncome" min="0" step="100" placeholder="0" inputmode="decimal">
+                            </div>
+                            <p class="hint">What lands in the bank &mdash; after EPF, SOCSO, EIS and PCB.</p>
+                        </div>
+
+                        <div class="field">
+                            <label for="budgetExtra">Other income <span class="per">side job, rental</span></label>
+                            <div class="money-input">
+                                <span class="affix">RM</span>
+                                <input type="number" id="budgetExtra" min="0" step="50" placeholder="0" inputmode="decimal">
+                            </div>
+                        </div>
+
+                        <div class="field">
+                            <label>Plan against</label>
+                            <div class="seg" id="budgetRule" data-value="502030">
+                                <button type="button" data-val="502030" class="is-on">50/30/20</button>
+                                <button type="button" data-val="702010">70/20/10</button>
+                                <button type="button" data-val="off">Off</button>
+                            </div>
+                            <p class="hint">70/20/10 is the gentler version, for when rent already eats the month.</p>
+                        </div>
+                    </div>
+
+                    <div class="tally">
+                        <div class="tally-cell">
+                            <span>Income</span>
+                            <b id="budgetTallyIncome">RM 0.00</b>
+                        </div>
+                        <div class="tally-cell">
+                            <span>Spending</span>
+                            <b id="budgetTallySpend" class="is-minus">RM 0.00</b>
+                        </div>
+                        <div class="tally-cell">
+                            <span>Savings &amp; debt</span>
+                            <b id="budgetTallySave" class="is-minus">RM 0.00</b>
+                        </div>
+                        <div class="tally-cell is-total">
+                            <span>Left over</span>
+                            <b id="budgetTallyLeft">RM 0.00</b>
+                        </div>
+                    </div>
+
+                    <p class="hint" id="budgetStore">
+                        <i class="bi bi-hdd"></i> Saved on this device only &mdash; nothing leaves your browser.
+                    </p>
+                </form>
+
+                <section class="card">
+                    <div class="card-head">
+                        <h2>Your budget</h2>
+                        <div class="card-actions">
+                            <span class="card-note">Planned <b id="budgetPlanned">RM 0.00</b></span>
+                            <button type="button" class="ghost-btn" id="budgetAddCat">
+                                <i class="bi bi-plus-lg"></i> Add category
+                            </button>
+                        </div>
+                    </div>
+                    <div class="bgt-list" id="budgetRows"></div>
+                    <div class="bgt-list" id="budgetCustom"></div>
+                </section>
+
+                <section class="card">
+                    <div class="card-head">
+                        <h2>Where the month goes</h2>
+                        <div class="card-actions">
+                            <span class="card-note" id="budgetDistNote">&mdash;</span>
+                            <button type="button" class="ghost-btn" id="budgetCopy">
+                                <i class="bi bi-clipboard"></i> Copy summary
+                            </button>
+                        </div>
+                    </div>
+                    <div class="dist" id="budgetDist"></div>
+                    <div class="legend" id="budgetLegend"></div>
+                </section>
+
+                <section class="card" id="budgetGuideBlock">
+                    <div class="card-head">
+                        <h2>Against the guide</h2>
+                        <span class="card-note" id="budgetGuideNote">&mdash;</span>
+                    </div>
+                    <div class="table-wrap">
+                        <table class="data-table">
+                            <thead>
+                                <tr>
+                                    <th>Bucket</th>
+                                    <th>Target</th>
+                                    <th>Planned</th>
+                                    <th>Difference</th>
+                                </tr>
+                            </thead>
+                            <tbody id="budgetGuideBody"></tbody>
+                        </table>
+                    </div>
+                </section>
+
+                <section class="card">
+                    <div class="card-head">
+                        <h2>Every ringgit</h2>
+                        <span class="card-note" id="budgetTableNote">&mdash;</span>
+                    </div>
+                    <div class="table-wrap">
+                        <table class="data-table">
+                            <thead>
+                                <tr>
+                                    <th>Category</th>
+                                    <th>Bucket</th>
+                                    <th>Per month</th>
+                                    <th>Of income</th>
+                                </tr>
+                            </thead>
+                            <tbody id="budgetBody"></tbody>
+                        </table>
+                    </div>
+                </section>
+
+            </div>
+        </section>
+
+        <!-- ==============================================================
+             CREDIT CARD PAYOFF
+             ============================================================== -->
+        <section class="module" id="module-card" hidden>
+
+            <div class="hero">
+                <div class="hero-main">
+                    <span class="hero-label">Debt free in</span>
+                    <span class="hero-value" id="cardMonths">&mdash;</span>
+                    <span class="hero-foot" id="cardMonthsFoot">&mdash;</span>
+                </div>
+                <div class="hero-stats">
+                    <div class="hero-stat">
+                        <span class="hero-stat-label">Total interest</span>
+                        <span class="hero-stat-value" id="cardInterest">RM 0.00</span>
+                        <span class="hero-stat-foot" id="cardInterestFoot">&mdash;</span>
+                    </div>
+                    <div class="hero-stat">
+                        <span class="hero-stat-label">Total paid</span>
+                        <span class="hero-stat-value" id="cardPaid">RM 0.00</span>
+                        <span class="hero-stat-foot" id="cardPaidFoot">&mdash;</span>
+                    </div>
+                </div>
+            </div>
+
+            <div class="stack">
+
+                <form class="card" id="card-form" autocomplete="off" onsubmit="return false;">
+                    <div class="card-head">
+                        <h2>The card</h2>
+                        <button type="button" class="ghost-btn" data-reset="card">
+                            <i class="bi bi-arrow-counterclockwise"></i> Reset
+                        </button>
+                    </div>
+
+                    <div class="field-grid">
+                        <div class="field is-wide">
+                            <label>What the card charges</label>
+                            <div class="seg" id="cardTier" data-value="18">
+                                <button type="button" data-val="15">15%</button>
+                                <button type="button" data-val="17">17%</button>
+                                <button type="button" data-val="18" class="is-on">18%</button>
+                            </div>
+                            <p class="hint">Malaysian cards charge 15&ndash;18% a year under Bank Negara's tiered framework &mdash; the better your payment record, the lower the tier. 18% is the cap, and the usual starting point.</p>
+                        </div>
+
+                        <div class="field">
+                            <label for="cardBalance">Outstanding balance</label>
+                            <div class="money-input">
+                                <span class="affix">RM</span>
+                                <input type="number" id="cardBalance" min="0" step="100" placeholder="0" inputmode="decimal">
+                            </div>
+                        </div>
+
+                        <div class="field">
+                            <label for="cardRate">Interest rate <span class="per">a year</span></label>
+                            <div class="money-input is-suffix">
+                                <span class="affix">%</span>
+                                <input type="number" id="cardRate" min="0" max="60" step="0.5" value="18" inputmode="decimal">
+                            </div>
+                        </div>
+
+                        <div class="field">
+                            <label for="cardPayment">Monthly payment</label>
+                            <div class="money-input">
+                                <span class="affix">RM</span>
+                                <input type="number" id="cardPayment" min="0" step="50" placeholder="0" inputmode="decimal">
+                            </div>
+                            <p class="hint" id="cardPaymentHint">Leave it empty to see what paying only the minimum does.</p>
+                        </div>
+
+                        <div class="field">
+                            <label for="cardMinPct">Minimum payment <span class="per">of the balance</span></label>
+                            <div class="money-input is-suffix">
+                                <span class="affix">%</span>
+                                <input type="number" id="cardMinPct" min="0" max="100" step="1" value="5" inputmode="decimal">
+                            </div>
+                        </div>
+
+                        <div class="field">
+                            <label for="cardMinFloor">&hellip; or at least</label>
+                            <div class="money-input">
+                                <span class="affix">RM</span>
+                                <input type="number" id="cardMinFloor" min="0" step="5" value="25" inputmode="decimal">
+                            </div>
+                            <p class="hint">Banks here ask for 5% of the balance, subject to a small floor.</p>
+                        </div>
+                    </div>
+
+                    <div class="tally">
+                        <div class="tally-cell">
+                            <span>Balance</span>
+                            <b id="cardTallyBalance">RM 0.00</b>
+                        </div>
+                        <div class="tally-cell">
+                            <span>Interest this month</span>
+                            <b id="cardTallyInterest" class="is-minus">RM 0.00</b>
+                        </div>
+                        <div class="tally-cell">
+                            <span>Minimum due</span>
+                            <b id="cardTallyMin">RM 0.00</b>
+                        </div>
+                        <div class="tally-cell is-total">
+                            <span>You pay</span>
+                            <b id="cardTallyPay">RM 0.00</b>
+                        </div>
+                    </div>
+
+                    <p class="hint" id="cardStore">
+                        <i class="bi bi-hdd"></i> Saved on this device only &mdash; nothing leaves your browser.
+                    </p>
+                </form>
+
+                <section class="card">
+                    <div class="card-head">
+                        <h2>What the debt costs</h2>
+                        <div class="card-actions">
+                            <span class="card-note" id="cardDistNote">&mdash;</span>
+                            <button type="button" class="ghost-btn" id="cardCopy">
+                                <i class="bi bi-clipboard"></i> Copy summary
+                            </button>
+                        </div>
+                    </div>
+                    <div class="notice" id="cardNotice" hidden>
+                        <i class="bi bi-exclamation-triangle-fill"></i>
+                        <span id="cardNoticeText"></span>
+                    </div>
+                    <div class="dist" id="cardDist"></div>
+                    <div class="legend" id="cardLegend"></div>
+                </section>
+
+                <section class="card">
+                    <div class="card-head">
+                        <h2>Pay more, finish sooner</h2>
+                        <span class="card-note" id="cardCompareNote">&mdash;</span>
+                    </div>
+                    <div class="table-wrap">
+                        <table class="data-table">
+                            <thead>
+                                <tr>
+                                    <th>Plan</th>
+                                    <th>Per month</th>
+                                    <th>Cleared in</th>
+                                    <th>Interest</th>
+                                    <th>You save</th>
+                                </tr>
+                            </thead>
+                            <tbody id="cardCompareBody"></tbody>
+                        </table>
+                    </div>
+                </section>
+
+                <section class="card">
+                    <div class="card-head">
+                        <h2>The way down</h2>
+                        <div class="card-actions">
+                            <span class="card-note" id="cardPlanNote">&mdash;</span>
+                            <div class="seg is-compact" id="cardView" data-value="year">
+                                <button type="button" data-val="year" class="is-on">By year</button>
+                                <button type="button" data-val="month">By month</button>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="table-wrap">
+                        <table class="data-table">
+                            <thead>
+                                <tr>
+                                    <th id="cardPlanHead">Year</th>
+                                    <th>Paid</th>
+                                    <th>Interest</th>
+                                    <th>Off the balance</th>
+                                    <th>Still owing</th>
+                                </tr>
+                            </thead>
+                            <tbody id="cardPlanBody"></tbody>
+                        </table>
+                    </div>
+                </section>
+
+            </div>
+        </section>
+
+    </main>
+</div>
+
+<script src="app.js"></script>
+</body>
+</html>

@@ -1,0 +1,8 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" width="64" height="64" role="img" aria-label="MoneyFlow">
+    <!-- The mark on its own, sized up to fill a favicon. -->
+    <g transform="translate(32 32) scale(1.36) translate(-32 -32)">
+        <path d="M 34.30 32.00 L 34.30 12.00 A 20 20 0 0 1 34.30 52.00 Z" fill="#0e7c66"/>
+        <path d="M 30.14 33.35 L 30.14 53.35 A 20 20 0 0 1 11.12 27.17 Z" fill="#c98a12"/>
+        <path d="M 30.65 30.14 L 11.63 23.96 A 20 20 0 0 1 30.65 10.14 Z" fill="#4f46c9"/>
+    </g>
+</svg>
