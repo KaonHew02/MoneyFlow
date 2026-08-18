@@ -280,7 +280,11 @@ body {
 .hint { margin: -1px 0 0; font-size: 11.5px; line-height: 1.5; color: var(--ink-3); }
 .hint i { margin-right: 3px; }
 
-input[type="number"], input[type="text"], input[type="date"], select {
+/* Every input type the app uses is listed here on purpose. A type left out of
+   this rule does not inherit anything — it falls back to raw browser chrome
+   and looks broken beside the others. Add new types here first. */
+input[type="number"], input[type="text"], input[type="date"],
+input[type="email"], input[type="password"], input[type="search"], select {
     width: 100%;
     padding: 11px 14px;
     border: 1px solid #d9e2dd;
@@ -1053,4 +1057,21 @@ input[type="date"]:hover::-webkit-calendar-picker-indicator { opacity: .85; }
 @media (max-width: 460px) {
     .hero-stats { grid-template-columns: 1fr; }
     .brand img { width: 107px; }
+}
+
+/* ====================================================================
+   WHEN THE DATABASE IS OUT OF REACH
+   There is no sign-in screen to fail on any more, so trouble has to
+   announce itself somewhere. A strip above everything: readable, and
+   in the way of nothing.
+   ==================================================================== */
+
+.conn-error {
+    margin: 0;
+    padding: 11px 20px;
+    background: var(--red-soft);
+    color: var(--red);
+    font-size: 13px;
+    line-height: 1.45;
+    text-align: center;
 }

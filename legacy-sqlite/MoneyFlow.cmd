@@ -1,7 +1,7 @@
 @echo off
 title MoneyFlow
 cd /d "%~dp0"
-node serve.js --open
+node server\server.js --open
 echo.
 echo MoneyFlow has stopped.
 pause

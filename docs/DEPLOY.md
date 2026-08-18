@@ -56,23 +56,58 @@ works from any device, and someone else handles the backups.
 
 Costs: real rework. The schema ports to Postgres nearly verbatim — the table
 design carries over — but every `db.all(...)` call becomes a Supabase call, so
-the API layer is rewritten rather than moved. You also need a login, because a
-public site with no login is a public database.
+the API layer is rewritten rather than moved. You also need a session on every
+request, because a public site whose rows belong to nobody is a public
+database.
 
-## Recommendation
+## What was chosen — Option C, on 2026-08-18
 
-**Do not decide now.** Keep building on SQLite locally. Nothing is wasted
-either way — the asset is the schema and the eight modules, and both survive
-any of these choices.
+Pages + Supabase as the only database. Step-by-step setup is in
+[LAUNCH.md](LAUNCH.md).
 
-What *does* matter is that the browser code never talks to the database
-directly. Every module goes through one small client file that speaks to the
-API. When you pick a destination, that one file changes and the modules do not
-notice. That is how the choice stays cheap right up until you make it.
+Sign-in started as email and password and was taken back out on the same day:
+for an app one person uses, a login screen was a lock on a door only its owner
+knocks at. What replaced it is an **anonymous session** — Supabase issues the
+browser a real user row with no email and no password, and every policy below
+keeps working untouched, because they compare rows against a session, and never
+cared how that session was obtained.
 
-## If you want a public demo on github.io
+The swap cost exactly what it was supposed to: `api.js` was rewritten and the
+modules were not touched. That is the whole return on having built a client
+layer in the first place.
 
-There is a middle path worth knowing about: publish a **demo build** to Pages
-that runs entirely in the browser on sample data, with no real records in it —
-a shop window for the project. Your actual money stays in the local copy. This
-costs one build script, not an architecture.
+What changed:
+
+| | Before | After |
+|---|---|---|
+| Database | SQLite file on your PC | Postgres at Supabase |
+| Schema | `server/schema.sql` | `supabase/schema.sql` — same design, plus `user_id` and row-level security |
+| API | `server/api/*.js` over `node:http` | gone; the browser queries Supabase directly |
+| Security | nothing could reach it but you | an anonymous session, and a policy on every table |
+| Running it | `MoneyFlow.cmd` | any static web server, or the live Pages URL |
+
+The old build is kept in `legacy-sqlite/`, database and all, as a working
+fallback that needs no internet. It is not part of the live app.
+
+## What this route costs you
+
+**The session is not optional, even without a login.** A static site has no
+secrets — the Supabase key is in the JavaScript and anyone can read it. It
+grants nothing on its own, because every table carries `user_id` and a policy
+restricting rows to the session asking for them. That policy *is* the security,
+which is why the gate could go and the policies could not. Which is also why
+`supabase/schema.sql`
+enables row-level security on all fourteen tables and why the balance view is
+declared `security_invoker` — a view without it would run with its owner's
+rights and hand every user everyone's balances.
+
+**The session is the only key, and it lives in one browser.** No password means
+no password reset. Cleared site data, a different device, or a different
+address is a different book. Export `txn` to CSV now and then.
+
+**The free tier pauses after 7 days of no activity.** The app will fail to load
+until you restore it from the dashboard. If you use MoneyFlow most weeks you
+will not notice; if you go quiet for a month, expect one extra click.
+
+**Never commit `legacy-sqlite/data/`.** A Pages repo is public. That folder has
+your real figures in it and is in `.gitignore` — leave it there.

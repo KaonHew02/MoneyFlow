@@ -13,6 +13,10 @@
 
 <div class="app">
 
+    <!-- Only ever seen when the database cannot be reached. The app keeps
+         working; this says what is not being saved and why. -->
+    <p class="conn-error" id="connError" hidden></p>
+
     <header class="topbar">
         <a class="brand" href="#" aria-label="MoneyFlow — Understand Your Money. Manage Your Future.">
             <img src="logo.svg" alt="MoneyFlow">
@@ -706,6 +710,13 @@
     </main>
 </div>
 
+<!-- Supabase's browser library, then our own four files in dependency order:
+     config (your project's address) → api (the only door to the data) →
+     session (gets one, silently) → app (the modules). -->
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script src="config.js"></script>
+<script src="api.js"></script>
+<script src="session.js"></script>
 <script src="app.js"></script>
 </body>
 </html>

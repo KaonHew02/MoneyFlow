@@ -1,5 +1,9 @@
-data/
-node_modules/
+# Your actual financial records. A GitHub Pages repo is public — these must
+# never be committed. Everything about the old local SQLite build lives here.
+legacy-sqlite/data/
 *.db
 *.db-wal
 *.db-shm
+
+node_modules/
+.DS_Store
