@@ -385,14 +385,221 @@ function onSplitEdit(event) {
 
 /**
  * ====================================================================
+ * CATEGORIES
+ * ====================================================================
+ * One list, owned by the reader, shared by every module that names a
+ * category. It used to be two constants — eight fixed budget lines and six
+ * income labels — which meant a category could not be renamed, and a name
+ * changed in one place would not have followed into the other.
+ *
+ * A category carries:
+ *
+ *   bucket   needs | wants | save | income. The first three are what makes
+ *            the 50/30/20 reading possible; `income` puts the category on
+ *            the Received list instead, where buckets mean nothing.
+ *   enabled  a category with history behind it must not be deleted — the
+ *            entries would lose their name. Disabling takes it out of the
+ *            pickers and leaves every record intact.
+ *   subs     sub-categories: the same idea one level down.
+ *
+ * Ids are stable and never derived from the label, so renaming "Food &
+ * Drinks" to "Makan" does not orphan a year of entries. The default ids that
+ * overlap the Budget Planner's old lines are deliberately unchanged, so a
+ * book recorded before this existed still reads against its plan.
+ */
+const CATEGORY_KEY = 'moneyflow.categories.v1';
+
+const CATEGORY_BUCKETS = {
+    needs:  'Needs',
+    wants:  'Wants',
+    save:   'Savings & debt',
+    income: 'Money coming in',
+};
+
+/** Only the first three are spending, so only those three are what the
+ *  50/30/20 reading divides. `BUDGET_BUCKETS` below keeps their tones. */
+const SPENDING_BUCKETS = ['needs', 'wants', 'save'];
+
+/** Tints a category may carry — names, not hex, so the palette moves with
+ *  the stylesheet rather than being frozen into saved data. */
+const CATEGORY_TONES = ['jade', 'amber', 'indigo', 'red', 'violet', 'sky', 'rose', 'slate'];
+
+/** Icons offered by the picker. Bootstrap Icons is already loaded for the
+ *  chrome, so this costs nothing but the list itself. */
+const CATEGORY_ICONS = [
+    'bi-tag', 'bi-cup-hot', 'bi-basket', 'bi-car-front', 'bi-bag', 'bi-house-door',
+    'bi-controller', 'bi-heart-pulse', 'bi-airplane', 'bi-receipt', 'bi-mortarboard',
+    'bi-people', 'bi-bank', 'bi-shield-check', 'bi-piggy-bank', 'bi-credit-card',
+    'bi-cash-stack', 'bi-gift', 'bi-briefcase', 'bi-envelope-heart', 'bi-phone',
+    'bi-lightning-charge', 'bi-droplet', 'bi-wifi', 'bi-heart', 'bi-star',
+    'bi-cart', 'bi-scissors', 'bi-tools', 'bi-three-dots',
+];
+
+const DEFAULT_CATEGORIES = [
+    { id: 'food',          label: 'Food & Drinks',  bucket: 'needs',  icon: 'bi-cup-hot',      tone: 'amber',
+      hint: 'Groceries, kopitiam, food delivery',
+      subs: ['Breakfast', 'Lunch', 'Dinner', 'Drinks', 'Snacks'] },
+    { id: 'transport',     label: 'Transportation', bucket: 'needs',  icon: 'bi-car-front',    tone: 'sky',
+      hint: 'Petrol, tolls, parking, Grab, car loan',
+      subs: ['Petrol', 'Toll', 'Parking', 'Grab', 'Public Transport', 'Car Maintenance'] },
+    { id: 'shopping',      label: 'Shopping',       bucket: 'wants',  icon: 'bi-bag',          tone: 'rose',
+      hint: 'Clothes, electronics, the weekly run',
+      subs: ['Clothes', 'Electronics', 'Groceries', 'Personal Items'] },
+    { id: 'housing',       label: 'Housing',        bucket: 'needs',  icon: 'bi-house-door',   tone: 'jade',
+      hint: 'Rent, mortgage, maintenance fee',
+      subs: ['Rent', 'Maintenance', 'Utilities', 'Household'] },
+    { id: 'entertainment', label: 'Entertainment',  bucket: 'wants',  icon: 'bi-controller',   tone: 'violet',
+      hint: 'Outings, hobbies, going out',
+      subs: ['Movies', 'Games', 'Events', 'Hobbies'] },
+    { id: 'healthcare',    label: 'Healthcare',     bucket: 'needs',  icon: 'bi-heart-pulse',  tone: 'red',
+      hint: 'Clinic, pharmacy, dentist',
+      subs: ['Clinic', 'Medicine', 'Dental'] },
+    { id: 'travel',        label: 'Travel',         bucket: 'wants',  icon: 'bi-airplane',     tone: 'sky',
+      hint: 'Flights, hotels, the holiday itself',
+      subs: ['Flight', 'Hotel', 'Activities', 'Food', 'Transportation'] },
+    { id: 'bills',         label: 'Bills',          bucket: 'needs',  icon: 'bi-receipt',      tone: 'amber',
+      hint: 'TNB, water, Unifi, phone, subscriptions',
+      subs: ['Electricity', 'Water', 'Internet', 'Phone', 'Subscriptions'] },
+    { id: 'education',     label: 'Education',      bucket: 'needs',  icon: 'bi-mortarboard',  tone: 'indigo',
+      hint: 'Courses, books, training',
+      subs: ['Courses', 'Books', 'Training'] },
+    { id: 'family',        label: 'Family',         bucket: 'needs',  icon: 'bi-people',       tone: 'rose',
+      hint: 'Parents, children, gifts',
+      subs: ['Parents', 'Children', 'Gifts'] },
+    { id: 'finance',       label: 'Finance',        bucket: 'needs',  icon: 'bi-bank',         tone: 'slate',
+      hint: 'Bank charges and interest paid',
+      subs: ['Bank Fees', 'Interest'] },
+    { id: 'insurance',     label: 'Insurance',      bucket: 'needs',  icon: 'bi-shield-check', tone: 'jade',
+      hint: 'Medical, life, motor, takaful',
+      subs: ['Medical', 'Life', 'Motor', 'Takaful'] },
+    { id: 'savings',       label: 'Savings',        bucket: 'save',   icon: 'bi-piggy-bank',   tone: 'indigo',
+      hint: 'ASB, unit trust, emergency fund, gold',
+      subs: ['Emergency fund', 'ASB', 'Unit trust', 'Gold'] },
+    { id: 'debt',          label: 'Debt',           bucket: 'save',   icon: 'bi-credit-card',  tone: 'indigo',
+      hint: 'Credit card, PTPTN, personal loan',
+      subs: ['Credit card', 'PTPTN', 'Personal loan'] },
+    { id: 'other',         label: 'Others',         bucket: 'wants',  icon: 'bi-three-dots',   tone: 'slate',
+      hint: 'Anything that does not fit', subs: [] },
+
+    { id: 'salary',        label: 'Salary',         bucket: 'income', icon: 'bi-cash-stack',   tone: 'jade',
+      hint: 'What lands after EPF, SOCSO and PCB', subs: [] },
+    { id: 'bonus',         label: 'Bonus',          bucket: 'income', icon: 'bi-gift',         tone: 'jade',
+      hint: 'Yearly, contractual or otherwise', subs: [] },
+    { id: 'side',          label: 'Side income',    bucket: 'income', icon: 'bi-briefcase',    tone: 'jade',
+      hint: 'Freelance, part-time, a small business', subs: [] },
+    { id: 'refund',        label: 'Refund',         bucket: 'income', icon: 'bi-arrow-counterclockwise', tone: 'jade',
+      hint: 'Claims, returns, money coming back', subs: [] },
+    { id: 'gift',          label: 'Angpao',         bucket: 'income', icon: 'bi-envelope-heart', tone: 'rose',
+      hint: 'Gifts and angpao', subs: [] },
+    { id: 'other-in',      label: 'Other',          bucket: 'income', icon: 'bi-three-dots',   tone: 'slate',
+      hint: 'Anything else that came in', subs: [] },
+];
+
+let categorySeq = 0;
+const newCategoryId = (prefix) => prefix + (++categorySeq);
+
+let categoryState = { list: [] };
+
+const seedCategories = () => DEFAULT_CATEGORIES.map((cat) => ({
+    id: cat.id,
+    label: cat.label,
+    bucket: cat.bucket,
+    icon: cat.icon,
+    tone: cat.tone,
+    hint: cat.hint,
+    enabled: true,
+    subs: cat.subs.map((label, i) => ({ id: cat.id + '-s' + (i + 1), label, enabled: true })),
+}));
+
+const categoryById = (id) => categoryState.list.find((c) => c.id === id) || null;
+
+/** A category with no name yet is still a category; it just has no name yet. */
+const categoryLabel = (cat, index) => (cat.label || '').trim() || 'Category ' + (index + 1);
+
+const shapedCategoryRow = (cat, i) => ({
+    id: cat.id,
+    label: categoryLabel(cat, i),
+    bucket: cat.bucket,
+    icon: cat.icon,
+    tone: cat.tone,
+    hint: cat.hint,
+});
+
+/**
+ * What a picker should offer for a transaction type: enabled, on the right
+ * side of the ledger, and "Other" last — `categoryOf` falls back to the final
+ * row when an id no longer resolves, and Other is the only honest place for
+ * an orphaned entry to land.
+ */
+function categoryListFor(type) {
+    const wantIncome = type === 'income';
+    const rows = categoryState.list
+        .map((cat, i) => (cat.enabled && (cat.bucket === 'income') === wantIncome
+            ? shapedCategoryRow(cat, i) : null))
+        .filter(Boolean);
+
+    const catchAll = wantIncome ? 'other-in' : 'other';
+    const tail = rows.filter((cat) => cat.id === catchAll);
+    return rows.filter((cat) => cat.id !== catchAll).concat(tail);
+}
+
+/** Sub-categories of one category, for the second picker. */
+function subListFor(id) {
+    const cat = categoryById(id);
+    return cat ? cat.subs.filter((sub) => sub.enabled && sub.label.trim()) : [];
+}
+
+/** The name to print for a sub-category id, or '' if it no longer resolves. */
+function subLabelOf(categoryId, subId) {
+    const cat = categoryById(categoryId);
+    const sub = cat && cat.subs.find((s) => s.id === subId);
+    return sub ? sub.label.trim() : '';
+}
+
+function saveCategories() {
+    try {
+        localStorage.setItem(CATEGORY_KEY, JSON.stringify({
+            seq: categorySeq,
+            list: categoryState.list,
+        }));
+    } catch (err) { /* storage unavailable — the session still works */ }
+}
+
+function loadCategories() {
+    let saved = null;
+    try { saved = JSON.parse(storedRaw(CATEGORY_KEY) || 'null'); } catch (err) { saved = null; }
+
+    const rows = saved && Array.isArray(saved.list) ? saved.list : null;
+    categorySeq = Number(saved && saved.seq) || 0;
+
+    if (!rows || !rows.length) { categoryState.list = seedCategories(); return; }
+
+    categoryState.list = rows.filter((c) => c && c.id).map((c) => ({
+        id: String(c.id),
+        label: String(c.label || ''),
+        bucket: CATEGORY_BUCKETS[c.bucket] ? c.bucket : 'wants',
+        icon: String(c.icon || 'bi-tag'),
+        tone: CATEGORY_TONES.includes(c.tone) ? c.tone : 'jade',
+        hint: String(c.hint || ''),
+        enabled: c.enabled !== false,
+        subs: (Array.isArray(c.subs) ? c.subs : []).filter((s) => s && s.id).map((s) => ({
+            id: String(s.id),
+            label: String(s.label || ''),
+            enabled: s.enabled !== false,
+        })),
+    }));
+}
+
+/**
+ * ====================================================================
  * BUDGET PLANNER
  * ====================================================================
- * The eight categories below are fixed, so their inputs are built once and
- * read straight off the DOM — no rebuild while typing, no lost caret. Only the
- * user's own extra categories live in `budgetState`.
+ * The rows are the reader's own categories, so this module owns none of them
+ * — it owns the amounts. Those are still read straight off the DOM, which is
+ * what keeps the caret where it was while a figure is being typed.
  *
- * Every category belongs to one of three buckets, which is what makes the
- * 50/30/20 comparison possible:
+ * Every category belongs to one of three spending buckets, which is what makes
+ * the 50/30/20 comparison possible:
  *
  *   needs — the month happens whether you like it or not
  *   wants — the part you could cut this month if you had to
@@ -402,16 +609,12 @@ function onSplitEdit(event) {
  * building net worth the same way a deposit does, and 50/30/20 treats it that
  * way too.
  */
-const BUDGET_CATEGORIES = [
-    { id: 'housing',       label: 'Housing',       bucket: 'needs', icon: 'bi-house-door',  hint: 'Rent, mortgage, maintenance fee' },
-    { id: 'food',          label: 'Food',          bucket: 'needs', icon: 'bi-basket',      hint: 'Groceries, kopitiam, food delivery' },
-    { id: 'transport',     label: 'Transport',     bucket: 'needs', icon: 'bi-car-front',   hint: 'Petrol, tolls, parking, Grab, car loan' },
-    { id: 'bills',         label: 'Bills',         bucket: 'needs', icon: 'bi-receipt',     hint: 'TNB, water, Unifi, phone, subscriptions' },
-    { id: 'insurance',     label: 'Insurance',     bucket: 'needs', icon: 'bi-shield-check',hint: 'Medical, life, motor, takaful' },
-    { id: 'entertainment', label: 'Entertainment', bucket: 'wants', icon: 'bi-controller',  hint: 'Outings, hobbies, shopping, travel fund' },
-    { id: 'savings',       label: 'Savings',       bucket: 'save',  icon: 'bi-piggy-bank',  hint: 'ASB, unit trust, emergency fund, gold' },
-    { id: 'debt',          label: 'Debt',          bucket: 'save',  icon: 'bi-credit-card', hint: 'Credit card, PTPTN, personal loan' },
-];
+/** The planner plans against the reader's own categories, so that a rename
+ *  in the Expense Recorder is the same rename here. Only spending is planned:
+ *  income categories have nothing to budget. */
+const budgetCategories = () => categoryState.list
+    .map((cat, i) => (cat.enabled && cat.bucket !== 'income' ? shapedCategoryRow(cat, i) : null))
+    .filter(Boolean);
 
 const BUDGET_BUCKETS = {
     needs: { label: 'Needs',           tone: 'jade' },
@@ -449,7 +652,7 @@ function buildBudgetRows() {
     if (!host) return;
     host.innerHTML = '';
 
-    BUDGET_CATEGORIES.forEach((cat) => {
+    budgetCategories().forEach((cat) => {
         const row = document.createElement('div');
         row.className = 'bgt-row';
         row.dataset.cat = cat.id;
@@ -457,8 +660,8 @@ function buildBudgetRows() {
         row.innerHTML =
             '<span class="bgt-icon"><i class="bi ' + cat.icon + '"></i></span>' +
             '<div class="bgt-meta">' +
-                '<label for="bgt_' + cat.id + '">' + cat.label + '</label>' +
-                '<small>' + cat.hint + '</small>' +
+                '<label for="bgt_' + cat.id + '">' + escapeHtml(cat.label) + '</label>' +
+                '<small>' + escapeHtml(cat.hint || CATEGORY_BUCKETS[cat.bucket]) + '</small>' +
                 '<div class="bgt-bar"><i id="bar_' + cat.id + '" style="width:0%"></i></div>' +
             '</div>' +
             '<div class="money-input money-input-sm"><span class="affix">RM</span>' +
@@ -504,7 +707,7 @@ function buildBudgetCustom() {
 
 /** The eight fixed categories plus whatever the user added, in one flat list. */
 function budgetRowValues() {
-    const rows = BUDGET_CATEGORIES.map((cat) => ({
+    const rows = budgetCategories().map((cat) => ({
         id: cat.id,
         label: cat.label,
         bucket: cat.bucket,
@@ -796,7 +999,7 @@ function onBudgetBucketChange(event) {
  */
 function saveBudget() {
     const amounts = {};
-    BUDGET_CATEGORIES.forEach((cat) => { amounts[cat.id] = ($('bgt_' + cat.id) || {}).value || ''; });
+    budgetCategories().forEach((cat) => { amounts[cat.id] = ($('bgt_' + cat.id) || {}).value || ''; });
 
     try {
         localStorage.setItem(BUDGET_KEY, JSON.stringify({
@@ -1299,32 +1502,221 @@ function loadCard() {
  */
 const LEDGER_KEY = 'moneyflow.ledger.v1';
 
-const LEDGER_CATEGORIES = BUDGET_CATEGORIES.concat([
-    { id: 'other', label: 'Other', bucket: 'wants', icon: 'bi-three-dots', hint: 'Anything that does not fit' },
-]);
+/**
+ * --------------------------------------------------------------------
+ * Accounts and wallets
+ * --------------------------------------------------------------------
+ * An account is a place money sits. `type` is what kind of place, and it is
+ * what the balance panel groups by. `purpose` is the reader's own note about
+ * what the account is *for* — salary in, savings, day-to-day spending — which
+ * is the thing that actually explains a transfer six months later. `status`
+ * retires an account without deleting its history: a closed account keeps
+ * every entry against it and stops appearing in the pickers.
+ */
+const ACCOUNT_TYPES = {
+    bank:    'Bank',
+    cash:    'Cash',
+    ewallet: 'E-wallet',
+    credit:  'Credit card',
+    other:   'Other',
+};
 
-const INCOME_CATEGORIES = [
-    { id: 'salary',   label: 'Salary',      icon: 'bi-cash-stack' },
-    { id: 'bonus',    label: 'Bonus',       icon: 'bi-gift' },
-    { id: 'side',     label: 'Side income', icon: 'bi-briefcase' },
-    { id: 'refund',   label: 'Refund',      icon: 'bi-arrow-counterclockwise' },
-    { id: 'gift',     label: 'Angpao',      icon: 'bi-envelope-heart' },
-    { id: 'other-in', label: 'Other',       icon: 'bi-three-dots' },
+/* Savings was a type of its own before accounts had a purpose. It is a purpose,
+   not a kind of institution, so it moves — and old data is migrated on load. */
+const ACCOUNT_PURPOSES = ['', 'Salary', 'Savings', 'Daily expenses', 'Bills', 'Emergency fund', 'Investment'];
+
+const ACCOUNT_STATUSES = { active: 'Active', closed: 'Closed' };
+
+/**
+ * Every ISO 4217 currency in circulation: code, name, the symbol where one is
+ * commonly written, and the countries that use it. That fourth column is the
+ * whole point — nobody remembers that Thailand's money is called the Baht,
+ * they remember Thailand, and "Thai Baht" does not contain the word they
+ * would type.
+ *
+ * A symbol is only ever printed for the amount being recorded. Totals stay
+ * in the base currency: converting at entry would freeze one day's rate into
+ * a permanent record, and a rate is not a thing this app is allowed to
+ * invent.
+ */
+const BASE_CURRENCY = 'MYR';
+
+const CURRENCY_TABLE = [
+    ['MYR', 'Malaysian Ringgit', 'RM', 'Malaysia'],
+    ['SGD', 'Singapore Dollar', 'S$', 'Singapore'],
+    ['USD', 'US Dollar', '$', 'United States America USA'],
+    ['EUR', 'Euro', '€', 'Eurozone Europe Germany France Spain Italy Netherlands Ireland Portugal Greece Austria Belgium Finland'],
+    ['GBP', 'Pound Sterling', '£', 'United Kingdom Britain England Scotland Wales'],
+    ['JPY', 'Japanese Yen', '¥', 'Japan'],
+    ['CNY', 'Chinese Yuan', 'CN¥', 'China'],
+    ['HKD', 'Hong Kong Dollar', 'HK$', 'Hong Kong'],
+    ['TWD', 'New Taiwan Dollar', 'NT$', 'Taiwan'],
+    ['KRW', 'South Korean Won', '₩', 'South Korea'],
+    ['THB', 'Thai Baht', '฿', 'Thailand'],
+    ['IDR', 'Indonesian Rupiah', 'Rp', 'Indonesia'],
+    ['PHP', 'Philippine Peso', '₱', 'Philippines'],
+    ['VND', 'Vietnamese Dong', '₫', 'Vietnam'],
+    ['BND', 'Brunei Dollar', 'B$', 'Brunei'],
+    ['KHR', 'Cambodian Riel', '៛', 'Cambodia'],
+    ['LAK', 'Lao Kip', '₭', 'Laos'],
+    ['MMK', 'Myanmar Kyat', 'K', 'Myanmar Burma'],
+    ['INR', 'Indian Rupee', '₹', 'India'],
+    ['PKR', 'Pakistani Rupee', '₨', 'Pakistan'],
+    ['BDT', 'Bangladeshi Taka', '৳', 'Bangladesh'],
+    ['LKR', 'Sri Lankan Rupee', 'Rs', 'Sri Lanka'],
+    ['NPR', 'Nepalese Rupee', 'Rs', 'Nepal'],
+    ['AUD', 'Australian Dollar', 'A$', 'Australia'],
+    ['NZD', 'New Zealand Dollar', 'NZ$', 'New Zealand'],
+    ['CAD', 'Canadian Dollar', 'C$', 'Canada'],
+    ['CHF', 'Swiss Franc', '', 'Switzerland Liechtenstein'],
+    ['SEK', 'Swedish Krona', 'kr', 'Sweden'],
+    ['NOK', 'Norwegian Krone', 'kr', 'Norway'],
+    ['DKK', 'Danish Krone', 'kr', 'Denmark'],
+    ['ISK', 'Icelandic Krona', 'kr', 'Iceland'],
+    ['PLN', 'Polish Zloty', 'zł', 'Poland'],
+    ['CZK', 'Czech Koruna', 'Kč', 'Czechia Czech Republic'],
+    ['HUF', 'Hungarian Forint', 'Ft', 'Hungary'],
+    ['RON', 'Romanian Leu', 'lei', 'Romania'],
+    ['BGN', 'Bulgarian Lev', 'лв', 'Bulgaria'],
+    ['HRK', 'Croatian Kuna', 'kn', 'Croatia'],
+    ['RSD', 'Serbian Dinar', '', 'Serbia'],
+    ['TRY', 'Turkish Lira', '₺', 'Turkey Turkiye'],
+    ['RUB', 'Russian Ruble', '₽', 'Russia'],
+    ['UAH', 'Ukrainian Hryvnia', '₴', 'Ukraine'],
+    ['KZT', 'Kazakhstani Tenge', '₸', 'Kazakhstan'],
+    ['GEL', 'Georgian Lari', '₾', 'Georgia'],
+    ['AMD', 'Armenian Dram', '֏', 'Armenia'],
+    ['AZN', 'Azerbaijani Manat', '₼', 'Azerbaijan'],
+    ['ILS', 'Israeli New Shekel', '₪', 'Israel'],
+    ['AED', 'UAE Dirham', '', 'United Arab Emirates Dubai Abu Dhabi'],
+    ['SAR', 'Saudi Riyal', '', 'Saudi Arabia'],
+    ['QAR', 'Qatari Riyal', '', 'Qatar'],
+    ['KWD', 'Kuwaiti Dinar', '', 'Kuwait'],
+    ['BHD', 'Bahraini Dinar', '', 'Bahrain'],
+    ['OMR', 'Omani Rial', '', 'Oman'],
+    ['JOD', 'Jordanian Dinar', '', 'Jordan'],
+    ['LBP', 'Lebanese Pound', '', 'Lebanon'],
+    ['EGP', 'Egyptian Pound', '', 'Egypt'],
+    ['IQD', 'Iraqi Dinar', '', 'Iraq'],
+    ['IRR', 'Iranian Rial', '', 'Iran'],
+    ['AFN', 'Afghan Afghani', '؋', 'Afghanistan'],
+    ['ZAR', 'South African Rand', 'R', 'South Africa'],
+    ['NGN', 'Nigerian Naira', '₦', 'Nigeria'],
+    ['KES', 'Kenyan Shilling', 'KSh', 'Kenya'],
+    ['TZS', 'Tanzanian Shilling', 'TSh', 'Tanzania'],
+    ['UGX', 'Ugandan Shilling', 'USh', 'Uganda'],
+    ['GHS', 'Ghanaian Cedi', '₵', 'Ghana'],
+    ['ETB', 'Ethiopian Birr', '', 'Ethiopia'],
+    ['MAD', 'Moroccan Dirham', '', 'Morocco'],
+    ['DZD', 'Algerian Dinar', '', 'Algeria'],
+    ['TND', 'Tunisian Dinar', '', 'Tunisia'],
+    ['LYD', 'Libyan Dinar', '', 'Libya'],
+    ['SDG', 'Sudanese Pound', '', 'Sudan'],
+    ['XOF', 'West African CFA Franc', '', 'Senegal Ivory Coast Mali Benin Burkina Faso Niger Togo'],
+    ['XAF', 'Central African CFA Franc', '', 'Cameroon Chad Gabon Congo Central African Republic'],
+    ['MUR', 'Mauritian Rupee', '', 'Mauritius'],
+    ['BWP', 'Botswana Pula', 'P', 'Botswana'],
+    ['ZMW', 'Zambian Kwacha', '', 'Zambia'],
+    ['MZN', 'Mozambican Metical', '', 'Mozambique'],
+    ['AOA', 'Angolan Kwanza', '', 'Angola'],
+    ['NAD', 'Namibian Dollar', '', 'Namibia'],
+    ['RWF', 'Rwandan Franc', '', 'Rwanda'],
+    ['MWK', 'Malawian Kwacha', '', 'Malawi'],
+    ['BRL', 'Brazilian Real', 'R$', 'Brazil'],
+    ['MXN', 'Mexican Peso', 'MX$', 'Mexico'],
+    ['ARS', 'Argentine Peso', '', 'Argentina'],
+    ['CLP', 'Chilean Peso', '', 'Chile'],
+    ['COP', 'Colombian Peso', '', 'Colombia'],
+    ['PEN', 'Peruvian Sol', 'S/', 'Peru'],
+    ['UYU', 'Uruguayan Peso', '', 'Uruguay'],
+    ['BOB', 'Bolivian Boliviano', 'Bs', 'Bolivia'],
+    ['PYG', 'Paraguayan Guarani', '₲', 'Paraguay'],
+    ['VES', 'Venezuelan Bolivar', '', 'Venezuela'],
+    ['CRC', 'Costa Rican Colon', '₡', 'Costa Rica'],
+    ['GTQ', 'Guatemalan Quetzal', 'Q', 'Guatemala'],
+    ['PAB', 'Panamanian Balboa', '', 'Panama'],
+    ['DOP', 'Dominican Peso', '', 'Dominican Republic'],
+    ['JMD', 'Jamaican Dollar', 'J$', 'Jamaica'],
+    ['TTD', 'Trinidad and Tobago Dollar', '', 'Trinidad Tobago'],
+    ['BBD', 'Barbadian Dollar', '', 'Barbados'],
+    ['BSD', 'Bahamian Dollar', '', 'Bahamas'],
+    ['CUP', 'Cuban Peso', '', 'Cuba'],
+    ['HNL', 'Honduran Lempira', 'L', 'Honduras'],
+    ['NIO', 'Nicaraguan Cordoba', 'C$', 'Nicaragua'],
+    ['BZD', 'Belize Dollar', '', 'Belize'],
+    ['XCD', 'East Caribbean Dollar', '', 'Antigua Dominica Grenada Saint Lucia Saint Vincent'],
+    ['MNT', 'Mongolian Tugrik', '₮', 'Mongolia'],
+    ['UZS', 'Uzbekistani Som', '', 'Uzbekistan'],
+    ['KGS', 'Kyrgyzstani Som', '', 'Kyrgyzstan'],
+    ['TJS', 'Tajikistani Somoni', '', 'Tajikistan'],
+    ['TMT', 'Turkmenistani Manat', '', 'Turkmenistan'],
+    ['MVR', 'Maldivian Rufiyaa', '', 'Maldives'],
+    ['BTN', 'Bhutanese Ngultrum', '', 'Bhutan'],
+    ['MOP', 'Macanese Pataca', '', 'Macau Macao'],
+    ['PGK', 'Papua New Guinean Kina', '', 'Papua New Guinea'],
+    ['FJD', 'Fijian Dollar', '', 'Fiji'],
+    ['WST', 'Samoan Tala', '', 'Samoa'],
+    ['TOP', 'Tongan Paanga', '', 'Tonga'],
+    ['VUV', 'Vanuatu Vatu', '', 'Vanuatu'],
+    ['SBD', 'Solomon Islands Dollar', '', 'Solomon Islands'],
+    ['XPF', 'CFP Franc', '', 'French Polynesia New Caledonia Tahiti'],
+    ['ALL', 'Albanian Lek', '', 'Albania'],
+    ['MKD', 'Macedonian Denar', '', 'North Macedonia'],
+    ['BAM', 'Bosnia and Herzegovina Mark', '', 'Bosnia Herzegovina'],
+    ['MDL', 'Moldovan Leu', '', 'Moldova'],
+    ['BYN', 'Belarusian Ruble', '', 'Belarus'],
+    ['SYP', 'Syrian Pound', '', 'Syria'],
+    ['YER', 'Yemeni Rial', '', 'Yemen'],
+    ['SOS', 'Somali Shilling', '', 'Somalia'],
+    ['DJF', 'Djiboutian Franc', '', 'Djibouti'],
+    ['ERN', 'Eritrean Nakfa', '', 'Eritrea'],
+    ['SSP', 'South Sudanese Pound', '', 'South Sudan'],
+    ['GMD', 'Gambian Dalasi', '', 'Gambia'],
+    ['GNF', 'Guinean Franc', '', 'Guinea'],
+    ['SLE', 'Sierra Leonean Leone', '', 'Sierra Leone'],
+    ['LRD', 'Liberian Dollar', '', 'Liberia'],
+    ['CVE', 'Cape Verdean Escudo', '', 'Cape Verde'],
+    ['STN', 'Sao Tome and Principe Dobra', '', 'Sao Tome Principe'],
+    ['SCR', 'Seychellois Rupee', '', 'Seychelles'],
+    ['MGA', 'Malagasy Ariary', '', 'Madagascar'],
+    ['KMF', 'Comorian Franc', '', 'Comoros'],
+    ['BIF', 'Burundian Franc', '', 'Burundi'],
+    ['CDF', 'Congolese Franc', '', 'Congo Kinshasa DRC'],
+    ['ZWL', 'Zimbabwean Dollar', '', 'Zimbabwe'],
+    ['LSL', 'Lesotho Loti', '', 'Lesotho'],
+    ['SZL', 'Eswatini Lilangeni', '', 'Eswatini Swaziland'],
+    ['GIP', 'Gibraltar Pound', '', 'Gibraltar'],
+    ['FKP', 'Falkland Islands Pound', '', 'Falkland Islands'],
+    ['SHP', 'Saint Helena Pound', '', 'Saint Helena'],
+    ['AWG', 'Aruban Florin', '', 'Aruba'],
+    ['ANG', 'Netherlands Antillean Guilder', '', 'Curacao Sint Maarten'],
+    ['SRD', 'Surinamese Dollar', '', 'Suriname'],
+    ['GYD', 'Guyanese Dollar', '', 'Guyana'],
+    ['HTG', 'Haitian Gourde', '', 'Haiti'],
+    ['KYD', 'Cayman Islands Dollar', '', 'Cayman Islands'],
+    ['BMD', 'Bermudian Dollar', '', 'Bermuda'],
+    ['XDR', 'IMF Special Drawing Rights', '', 'International Monetary Fund'],
 ];
 
-const ACCOUNT_GROUPS = {
-    cash:    'Cash',
-    bank:    'Bank',
-    ewallet: 'E-wallet',
-    savings: 'Savings',
-    credit:  'Credit card',
+const CURRENCIES = CURRENCY_TABLE.map(([code]) => code);
+
+const currencyRow = (code) => CURRENCY_TABLE.find(([c]) => c === code) || null;
+
+const currencySymbol = (code) => {
+    const row = currencyRow(code);
+    return (row && row[2]) || code || BASE_CURRENCY;
+};
+
+const currencyName = (code) => {
+    const row = currencyRow(code);
+    return row ? row[1] : '';
 };
 
 const DEFAULT_ACCOUNTS = [
-    { name: 'Cash',        group: 'cash',    opening: '' },
-    { name: 'Bank',        group: 'bank',    opening: '' },
-    { name: "Touch 'n Go", group: 'ewallet', opening: '' },
-    { name: 'Credit card', group: 'credit',  opening: '' },
+    { name: 'Cash',        type: 'cash',    purpose: 'Daily expenses', opening: '' },
+    { name: 'Bank',        type: 'bank',    purpose: 'Salary',         opening: '' },
+    { name: "Touch 'n Go", type: 'ewallet', purpose: 'Daily expenses', opening: '' },
+    { name: 'Credit card', type: 'credit',  purpose: '',               opening: '' },
 ];
 
 const DAY_NAMES = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
@@ -1377,8 +1769,21 @@ const accountById = (id) => ledgerState.accounts.find((a) => a.id === id) || nul
 const accountName = (id) => (accountById(id) || {}).name.trim() || 'Unnamed account';
 
 function seedAccounts() {
-    ledgerState.accounts = DEFAULT_ACCOUNTS.map((a) => ({ id: ledgerId('a'), name: a.name, group: a.group, opening: a.opening }));
+    ledgerState.accounts = DEFAULT_ACCOUNTS.map((a) => ({
+        id: ledgerId('a'), name: a.name, type: a.type, purpose: a.purpose,
+        currency: BASE_CURRENCY, opening: a.opening, status: 'active',
+    }));
 }
+
+/**
+ * A closed account leaves the pickers and nothing else. It keeps every entry
+ * filed against it, and it keeps its balance on the account panels — money in
+ * a closed account is still money, and hiding it there would leave the rows
+ * no longer adding up to Total Balance.
+ */
+const openAccounts = () => ledgerState.accounts.filter((a) => a.status !== 'closed');
+
+
 
 /** Opening balance, then every entry that touched the account. */
 function accountBalances() {
@@ -1407,9 +1812,12 @@ function readLedgerAccounts() {
     document.querySelectorAll('#ledgerAccounts .bgt-row').forEach((row) => {
         const account = accountById(row.dataset.cat);
         if (!account) return;
-        account.name    = row.querySelector('.bgt-label').value;
-        account.group   = row.querySelector('.bgt-bucket').value;
-        account.opening = row.querySelector('.bgt-amount').value;
+        account.name     = row.querySelector('.bgt-label').value;
+        account.opening  = row.querySelector('.bgt-amount').value;
+        account.type     = row.querySelector('.acct-type').value;
+        account.purpose  = row.querySelector('.acct-purpose').value;
+        account.currency = row.querySelector('.acct-currency').value;
+        account.status   = row.querySelector('.acct-status').value;
     });
 }
 
@@ -1420,29 +1828,438 @@ function buildLedgerAccounts() {
 
     ledgerState.accounts.forEach((account, index) => {
         const row = document.createElement('div');
-        row.className = 'bgt-row is-custom';
+        row.className = 'bgt-row is-custom is-acct' + (account.status === 'closed' ? ' is-off' : '');
         row.dataset.cat = account.id;
+        const options = (map, chosen) => Object.entries(map).map(([key, label]) =>
+            '<option value="' + key + '"' + (key === chosen ? ' selected' : '') + '>' +
+            escapeHtml(label) + '</option>').join('');
+        const plainOptions = (list, chosen, blank) => list.map((value) =>
+            '<option value="' + escapeHtml(value) + '"' + (value === chosen ? ' selected' : '') + '>' +
+            escapeHtml(value || blank) + '</option>').join('');
+
         row.innerHTML =
             '<span class="bgt-icon"><i class="bi bi-wallet2"></i></span>' +
             '<div class="bgt-meta"><input type="text" class="bgt-label"></div>' +
-            '<select class="bgt-bucket" aria-label="Kind of account">' +
-                Object.entries(ACCOUNT_GROUPS).map(([key, label]) =>
-                    '<option value="' + key + '">' + label + '</option>').join('') +
-            '</select>' +
-            '<div class="money-input money-input-sm"><span class="affix">RM</span>' +
+            '<select class="bgt-bucket acct-type" aria-label="Kind of account">' +
+                options(ACCOUNT_TYPES, account.type) + '</select>' +
+            '<div class="money-input money-input-sm"><span class="affix">' +
+                escapeHtml(currencySymbol(account.currency)) + '</span>' +
                 '<input type="number" class="bgt-amount" step="10" placeholder="0" inputmode="decimal"></div>' +
             '<button type="button" class="split-x" data-remove-account aria-label="Remove account">' +
-                '<i class="bi bi-x-lg"></i></button>';
+                '<i class="bi bi-x-lg"></i></button>' +
+
+            '<div class="acct-more">' +
+                '<select class="acct-purpose" aria-label="What the account is for">' +
+                    plainOptions(ACCOUNT_PURPOSES, account.purpose, 'No stated purpose') + '</select>' +
+                '<select class="acct-currency" aria-label="Currency">' +
+                    plainOptions(CURRENCIES, account.currency, BASE_CURRENCY) + '</select>' +
+                '<select class="acct-status" aria-label="Status">' +
+                    options(ACCOUNT_STATUSES, account.status) + '</select>' +
+            '</div>';
 
         // Assigned rather than interpolated — these are user-typed strings.
         const label = row.querySelector('.bgt-label');
         label.value = account.name;
         label.placeholder = 'Account ' + (index + 1);
         row.querySelector('.bgt-amount').value = account.opening;
-        row.querySelector('.bgt-bucket').value = ACCOUNT_GROUPS[account.group] ? account.group : 'bank';
 
         host.appendChild(row);
     });
+}
+
+/**
+ * --------------------------------------------------------------------
+ * The categories card
+ * --------------------------------------------------------------------
+ * Rows are the state, so they are read back before anything structural
+ * happens to them — the same rule the accounts card follows. A row that is
+ * being typed into is never rebuilt underneath the caret; only the pickers
+ * that read the list are.
+ */
+/** Which of the three lists the card is showing. */
+const categorySide = () => (($('categorySide') || {}).dataset || {}).value || 'spend';
+
+function readCategoryRows() {
+    // Payment methods are accounts, and accounts are read back by their own
+    // reader — the one the Accounts card uses, so the two cannot drift.
+    document.querySelectorAll('#categoryList .cat-row[data-account]').forEach((row) => {
+        const account = accountById(row.dataset.account);
+        if (account) account.name = row.querySelector('.cat-name').value;
+    });
+
+    document.querySelectorAll('#categoryList .cat-row[data-cat]').forEach((row) => {
+        const cat = categoryById(row.dataset.cat);
+        if (!cat) return;
+        cat.label  = row.querySelector('.cat-name').value;
+        cat.bucket = row.querySelector('.cat-bucket').value;
+
+        row.querySelectorAll('.cat-sub').forEach((subRow) => {
+            const sub = cat.subs.find((x) => x.id === subRow.dataset.sub);
+            if (sub) sub.label = subRow.querySelector('.cat-sub-name').value;
+        });
+    });
+}
+
+/** Which categories have their sub-list open. Not saved: it is a view, not data. */
+const categoryOpen = new Set();
+
+function categoryRowHtml(cat, index, useCount) {
+    const label = categoryLabel(cat, index);
+    const subs  = cat.subs.length;
+
+    const bucketOptions = Object.entries(CATEGORY_BUCKETS).map(([key, name]) =>
+        '<option value="' + key + '"' + (key === cat.bucket ? ' selected' : '') + '>' +
+        escapeHtml(name) + '</option>').join('');
+
+    const subRows = cat.subs.map((sub) =>
+        '<div class="cat-sub" data-sub="' + sub.id + '">' +
+            '<input type="text" class="cat-sub-name" value="' + escapeHtml(sub.label) +
+                '" placeholder="Sub-category" aria-label="Sub-category name">' +
+            '<button type="button" class="split-x" data-drop-sub aria-label="Remove sub-category">' +
+                '<i class="bi bi-x-lg"></i></button>' +
+        '</div>').join('');
+
+    return '' +
+        '<div class="cat-main">' +
+            '<button type="button" class="cat-disc tone-' + cat.tone + '" data-open-look ' +
+                'aria-label="Icon and colour for ' + escapeHtml(label) + '">' +
+                '<i class="bi ' + escapeHtml(cat.icon) + '"></i></button>' +
+
+            '<div class="cat-id">' +
+                '<input type="text" class="cat-name" value="' + escapeHtml(cat.label) +
+                    '" placeholder="Category ' + (index + 1) + '" aria-label="Category name">' +
+                '<small>' + escapeHtml(CATEGORY_BUCKETS[cat.bucket]) + ' · ' + (useCount
+                    ? useCount + (useCount === 1 ? ' entry' : ' entries')
+                    : 'nothing recorded yet') +
+                    (subs ? ' · ' + subs + (subs === 1 ? ' sub-category' : ' sub-categories') : '') +
+                '</small>' +
+            '</div>' +
+
+            '<button type="button" class="cat-act" data-toggle-subs aria-expanded="' +
+                (categoryOpen.has(cat.id) ? 'true' : 'false') + '" title="Sub-categories">' +
+                '<i class="bi bi-diagram-2"></i><b>' + subs + '</b></button>' +
+
+            '<button type="button" class="cat-act" data-toggle-on title="' +
+                (cat.enabled ? 'In use — click to retire it' : 'Retired — click to bring it back') + '">' +
+                '<i class="bi ' + (cat.enabled ? 'bi-eye' : 'bi-eye-slash') + '"></i></button>' +
+
+            '<button type="button" class="split-x" data-drop-cat aria-label="Delete category">' +
+                '<i class="bi bi-trash3"></i></button>' +
+        '</div>' +
+
+        '<div class="cat-look" hidden>' +
+            '<label class="cat-look-row"><span>Bucket</span>' +
+                '<select class="cat-bucket" aria-label="Bucket">' + bucketOptions + '</select>' +
+            '</label>' +
+            '<div class="cat-swatches">' + CATEGORY_TONES.map((tone) =>
+                '<button type="button" class="cat-swatch tone-' + tone + (tone === cat.tone ? ' is-on' : '') +
+                '" data-tone="' + tone + '" aria-label="' + tone + '"></button>').join('') + '</div>' +
+            '<div class="cat-icons">' + CATEGORY_ICONS.map((icon) =>
+                '<button type="button" class="cat-icon' + (icon === cat.icon ? ' is-on' : '') +
+                '" data-icon="' + icon + '"><i class="bi ' + icon + '"></i></button>').join('') + '</div>' +
+        '</div>' +
+
+        '<div class="cat-subs"' + (categoryOpen.has(cat.id) ? '' : ' hidden') + '>' +
+            subRows +
+            '<button type="button" class="field-add" data-add-sub>' +
+                '<i class="bi bi-plus-circle"></i> Add sub-category</button>' +
+        '</div>';
+}
+
+/**
+ * Closing a payment method takes it out of the pickers and leaves every entry
+ * against it alone — the same bargain a retired category gets, for the same
+ * reason: the history is a record of what happened, not of what is current.
+ */
+function onMethodClick(event, row) {
+    const account = accountById(row.dataset.account);
+    if (!account) return;
+
+    if (event.target.closest('[data-toggle-on]')) {
+        readCategoryRows();
+        readLedgerAccounts();
+
+        const open = ledgerState.accounts.filter((a) => a.status !== 'closed');
+        if (account.status !== 'closed' && open.length <= 1) {
+            ledgerHint('Keep one open — an entry has to come out of something.');
+            return;
+        }
+
+        account.status = account.status === 'closed' ? 'active' : 'closed';
+        buildLedgerAccounts();
+        buildCategoryManager();
+        renderLedger();
+        return;
+    }
+
+    if (!event.target.closest('[data-drop-cat]')) return;
+
+    readCategoryRows();
+    readLedgerAccounts();
+
+    const held = ledgerState.entries.filter(
+        (e) => e.account === account.id || e.toAccount === account.id).length;
+
+    if (held || ledgerState.accounts.length <= 1) {
+        row.classList.add('is-locked');
+        setTimeout(() => row.classList.remove('is-locked'), 1400);
+        ledgerHint(held
+            ? held + (held === 1 ? ' entry is' : ' entries are') +
+              ' paid from that — close it with the eye instead, or move them first.'
+            : 'Keep at least one: an entry has to come out of something.');
+        return;
+    }
+
+    ledgerState.accounts = ledgerState.accounts.filter((a) => a.id !== account.id);
+    buildLedgerAccounts();
+    buildCategoryManager();
+    renderLedger();
+}
+
+/**
+ * A payment method row. Narrower than a category's: an account has no bucket,
+ * no sub-categories and no tint, and its money — opening balance, kind,
+ * currency — belongs on the Accounts card rather than here. This is for
+ * naming them, which is the part that gets done often.
+ */
+function accountRowHtml(account, index, useCount) {
+    const balance = accountBalances()[account.id] || 0;
+
+    return '' +
+        '<div class="cat-main">' +
+            '<span class="cat-disc tone-jade"><i class="bi bi-wallet2"></i></span>' +
+            '<div class="cat-id">' +
+                '<input type="text" class="cat-name" value="' + escapeHtml(account.name) +
+                    '" placeholder="Account ' + (index + 1) + '" aria-label="Payment method name">' +
+                '<small>' + escapeHtml(ACCOUNT_TYPES[account.type] || 'Bank') +
+                    (account.purpose ? ' \u00b7 ' + escapeHtml(account.purpose) : '') +
+                    ' \u00b7 ' + signedMoney(balance) +
+                    ' \u00b7 ' + (useCount ? useCount + (useCount === 1 ? ' entry' : ' entries')
+                                            : 'nothing recorded yet') +
+                '</small>' +
+            '</div>' +
+            '<button type="button" class="cat-act" data-toggle-on title="' +
+                (account.status !== 'closed' ? 'In use — click to close it'
+                                             : 'Closed — click to reopen it') + '">' +
+                '<i class="bi ' + (account.status !== 'closed' ? 'bi-eye' : 'bi-eye-slash') + '"></i></button>' +
+            '<button type="button" class="split-x" data-drop-cat aria-label="Delete payment method">' +
+                '<i class="bi bi-trash3"></i></button>' +
+        '</div>';
+}
+
+function buildMethodManager(host) {
+    const used = {};
+    ledgerState.entries.forEach((e) => {
+        used[e.account] = (used[e.account] || 0) + 1;
+        if (e.toAccount) used[e.toAccount] = (used[e.toAccount] || 0) + 1;
+    });
+
+    host.innerHTML = '';
+    if (!ledgerState.accounts.length) {
+        paintEmpty(host, 'No payment methods yet',
+            'Add one — an entry has to come out of something.', 'bi-wallet2');
+        return;
+    }
+    clearEmpty(host);
+
+    ledgerState.accounts.forEach((account, i) => {
+        const row = document.createElement('div');
+        row.className = 'cat-row is-method' + (account.status === 'closed' ? ' is-off' : '');
+        row.dataset.account = account.id;
+        row.innerHTML = accountRowHtml(account, i, used[account.id] || 0);
+        host.appendChild(row);
+    });
+}
+
+function buildCategoryManager() {
+    const host = $('categoryList');
+    if (!host) return;
+
+    const side = categorySide();
+    // The card explains two different lists, so it carries two closing lines
+    // and shows whichever one is being looked at.
+    if ($('categoryMethodHint')) $('categoryMethodHint').hidden = side !== 'method';
+    if ($('categoryListHint'))   $('categoryListHint').hidden = side === 'method';
+
+    if (side === 'method') { buildMethodManager(host); return; }
+
+    // How often each category is actually used decides whether it may be
+    // deleted, so it is counted once here rather than per row.
+    const used = {};
+    ledgerState.entries.forEach((e) => { used[e.category] = (used[e.category] || 0) + 1; });
+
+    const rows = categoryState.list
+        .map((cat, i) => ({ cat, i }))
+        .filter(({ cat }) => (cat.bucket === 'income') === (side === 'income'));
+
+    host.innerHTML = '';
+
+    if (!rows.length) {
+        paintEmpty(host, 'No categories on this side yet',
+            'Add one and it joins the picker straight away.', 'bi-tags');
+        return;
+    }
+    clearEmpty(host);
+
+    rows.forEach(({ cat, i }) => {
+        const row = document.createElement('div');
+        row.className = 'cat-row' + (cat.enabled ? '' : ' is-off');
+        row.dataset.cat = cat.id;
+        row.innerHTML = categoryRowHtml(cat, i, used[cat.id] || 0);
+        host.appendChild(row);
+    });
+}
+
+/** Everything that reads a category has to be told when one changes. */
+function afterCategoryChange(rebuildRows) {
+    saveCategories();
+    if (rebuildRows) buildCategoryManager();
+    buildCategoryOptions();
+    buildBudgetRows();
+    renderLedger();
+    renderBudget();
+}
+
+function addCategory() {
+    readCategoryRows();
+    const side = categorySide();
+
+    if (side === 'method') {
+        ledgerState.accounts.push({
+            id: ledgerId('a'), name: '', type: 'bank', purpose: '',
+            currency: BASE_CURRENCY, opening: '', status: 'active',
+        });
+        buildLedgerAccounts();
+        buildCategoryManager();
+        renderLedger();
+        const fresh = document.querySelector('#categoryList .cat-row:last-child .cat-name');
+        if (fresh) { fresh.focus({ preventScroll: true }); fresh.scrollIntoView({ block: 'center', behavior: 'smooth' }); }
+        return;
+    }
+
+    categoryState.list.push({
+        id: newCategoryId('c'),
+        label: '',
+        bucket: side === 'income' ? 'income' : 'wants',
+        icon: 'bi-tag',
+        tone: 'jade',
+        hint: '',
+        enabled: true,
+        subs: [],
+    });
+    afterCategoryChange(true);
+
+    const input = document.querySelector('#categoryList .cat-row:last-child .cat-name');
+    if (input) { input.focus({ preventScroll: true }); input.scrollIntoView({ block: 'center', behavior: 'smooth' }); }
+}
+
+function onCategoryClick(event) {
+    const row = event.target.closest('.cat-row');
+    if (!row) return;
+
+    if (row.dataset.account) { onMethodClick(event, row); return; }
+
+    const cat = categoryById(row.dataset.cat);
+    if (!cat) return;
+
+    const hit = (sel) => event.target.closest(sel);
+
+    if (hit('[data-toggle-subs]')) {
+        if (categoryOpen.has(cat.id)) categoryOpen.delete(cat.id); else categoryOpen.add(cat.id);
+        const subs = row.querySelector('.cat-subs');
+        subs.hidden = !categoryOpen.has(cat.id);
+        row.querySelector('[data-toggle-subs]').setAttribute('aria-expanded', String(!subs.hidden));
+        return;
+    }
+
+    if (hit('[data-open-look]')) {
+        const look = row.querySelector('.cat-look');
+        look.hidden = !look.hidden;
+        return;
+    }
+
+    const swatch = hit('[data-tone]');
+    if (swatch) {
+        readCategoryRows();
+        cat.tone = swatch.dataset.tone;
+        afterCategoryChange(true);
+        return;
+    }
+
+    const icon = hit('[data-icon]');
+    if (icon) {
+        readCategoryRows();
+        cat.icon = icon.dataset.icon;
+        afterCategoryChange(true);
+        return;
+    }
+
+    if (hit('[data-toggle-on]')) {
+        readCategoryRows();
+        cat.enabled = !cat.enabled;
+        afterCategoryChange(true);
+        ledgerHint(cat.enabled
+            ? categoryLabel(cat, 0) + ' is back in the pickers.'
+            : categoryLabel(cat, 0) + ' is retired — its entries keep it, new ones cannot pick it.');
+        return;
+    }
+
+    if (hit('[data-add-sub]')) {
+        readCategoryRows();
+        cat.subs.push({ id: newCategoryId('s'), label: '', enabled: true });
+        categoryOpen.add(cat.id);
+        afterCategoryChange(true);
+        const last = document.querySelector('.cat-row[data-cat="' + cat.id + '"] .cat-sub:last-of-type .cat-sub-name');
+        if (last) last.focus({ preventScroll: true });
+        return;
+    }
+
+    const dropSub = hit('[data-drop-sub]');
+    if (dropSub) {
+        readCategoryRows();
+        const subRow = dropSub.closest('.cat-sub');
+        const subId  = subRow.dataset.sub;
+
+        // A sub-category with entries behind it would take their detail with
+        // it, so it stays until those entries are moved.
+        const held = ledgerState.entries.filter((e) => e.sub === subId).length;
+        if (held) {
+            subRow.classList.add('is-locked');
+            setTimeout(() => subRow.classList.remove('is-locked'), 1400);
+            ledgerHint(held + (held === 1 ? ' entry is' : ' entries are') +
+                ' filed under that sub-category — move those first.');
+            return;
+        }
+
+        cat.subs = cat.subs.filter((s) => s.id !== subId);
+        afterCategoryChange(true);
+        return;
+    }
+
+    if (hit('[data-drop-cat]')) {
+        readCategoryRows();
+        const held = ledgerState.entries.filter((e) => e.category === cat.id).length;
+
+        // Deleting a category with history would rename a year of entries to
+        // "Other" behind the reader's back. Retiring it is the honest move,
+        // and the button says so rather than failing silently.
+        if (held) {
+            row.classList.add('is-locked');
+            setTimeout(() => row.classList.remove('is-locked'), 1400);
+            ledgerHint(held + (held === 1 ? ' entry is' : ' entries are') +
+                ' filed under that category — retire it with the eye instead, or move them first.');
+            return;
+        }
+
+        const spending = categoryState.list.filter((c) => c.bucket !== 'income');
+        if (cat.bucket !== 'income' && spending.length <= 1) {
+            ledgerHint('Keep at least one spending category — an expense has to be called something.');
+            return;
+        }
+
+        categoryState.list = categoryState.list.filter((c) => c.id !== cat.id);
+        afterCategoryChange(true);
+    }
 }
 
 /** Keep the two account pickers in step with the account list. */
@@ -1452,7 +2269,7 @@ function buildAccountOptions() {
         if (!select) return;
         const previous = select.value;
         select.innerHTML = '';
-        ledgerState.accounts.forEach((account, index) => {
+        openAccounts().forEach((account, index) => {
             const option = document.createElement('option');
             option.value = account.id;
             // Names are user-typed, so they are set as text rather than markup.
@@ -1466,7 +2283,7 @@ function buildAccountOptions() {
 function buildCategoryOptions() {
     const select = $('ledgerCategory');
     if (!select) return;
-    const list = ledgerFormType() === 'income' ? INCOME_CATEGORIES : LEDGER_CATEGORIES;
+    const list = categoryListFor(ledgerFormType());
     const previous = select.value;
 
     select.innerHTML = '';
@@ -1477,19 +2294,87 @@ function buildCategoryOptions() {
         select.appendChild(option);
     });
     if (list.some((c) => c.id === previous)) select.value = previous;
+    buildSubOptions();
 }
 
-const categoryOf = (entry) => {
-    const list = entry.type === 'income' ? INCOME_CATEGORIES : LEDGER_CATEGORIES;
-    return list.find((c) => c.id === entry.category) || list[list.length - 1];
-};
+/** The currency list never changes while the app is open, so it is built
+ *  once at start-up rather than on every repaint. */
+function buildStaticOptions() {
+    buildCurrencyList();
+    setLedgerCurrency(BASE_CURRENCY);
+}
+
+/** The second picker. Rebuilt whenever the first one moves, and hidden
+ *  entirely for a category that has no sub-categories under it. */
+function buildSubOptions() {
+    const select = $('ledgerSub');
+    const field  = $('ledgerFieldSub');
+    if (!select) return;
+
+    const subs = subListFor((($('ledgerCategory') || {}).value) || '');
+    const previous = select.value;
+
+    select.innerHTML = '<option value="">' + (subs.length ? 'No sub-category' : 'None') + '</option>';
+    subs.forEach((sub) => {
+        const option = document.createElement('option');
+        option.value = sub.id;
+        option.textContent = sub.label.trim();
+        select.appendChild(option);
+    });
+
+    if (subs.some((sub) => sub.id === previous)) select.value = previous;
+    if (field) field.hidden = !subs.length;
+}
+
+/**
+ * Any category by id, retired or not. Only the pickers filter on `enabled` —
+ * a record keeps the name it was filed under, or retiring a category would
+ * quietly rewrite a year of history as "Others". The fallback is for an id
+ * that is genuinely gone, which is the only case where there is nothing
+ * truthful left to print.
+ */
+function resolveCategory(id, type) {
+    const cat = categoryById(id);
+    if (cat) return shapedCategoryRow(cat, categoryState.list.indexOf(cat));
+    const list = categoryListFor(type || 'expense');
+    return list[list.length - 1] || null;
+}
+
+const categoryOf = (entry) => resolveCategory(entry.category, entry.type);
 
 /**
  * --------------------------------------------------------------------
  * Reading the book
  * --------------------------------------------------------------------
  */
-const entrySen = (entry) => Math.max(0, toSen(parseFloat(entry.amount) || 0));
+/**
+ * --------------------------------------------------------------------
+ * Money in two currencies
+ * --------------------------------------------------------------------
+ * An entry spent abroad carries two figures: `amount`, in the currency it was
+ * actually paid in, and `base`, what that cost in ringgit. Every total in the
+ * app is built from `base`, because 80,000 is a fortune in ringgit and lunch
+ * in dong, and a column that mixes them is not a column of anything.
+ *
+ * The rate is not fetched and not guessed. It is whatever the two figures
+ * imply, frozen at the moment of the transaction — which is also the truthful
+ * one: you really did part with that many ringgit that day, whatever the rate
+ * did afterwards. A rate looked up today would rewrite last year's holiday.
+ */
+const isForeign = (entry) => !!entry.currency && entry.currency !== BASE_CURRENCY;
+
+/** A foreign entry with no ringgit figure cannot be totalled. It is not worth
+ *  zero and it is not worth its face value — it is worth "not yet said". */
+const entryNeedsRate = (entry) => isForeign(entry) && !(parseFloat(entry.base) > 0);
+
+const entrySen = (entry) => {
+    if (isForeign(entry)) return Math.max(0, toSen(parseFloat(entry.base) || 0));
+    return Math.max(0, toSen(parseFloat(entry.amount) || 0));
+};
+
+/** What was handed over, in the currency it was handed over in. */
+const entryFaceValue = (entry) =>
+    currencySymbol(entry.currency) + ' ' + fmt(parseFloat(entry.amount) || 0);
 
 /** Newest day first, and within a day the most recently added sits on top. */
 function ledgerEntriesFor(monthKey) {
@@ -1521,7 +2406,7 @@ function ledgerCompute() {
     });
 
     const categories = Object.entries(byCategory)
-        .map(([id, sen]) => ({ cat: LEDGER_CATEGORIES.find((c) => c.id === id), sen }))
+        .map(([id, sen]) => ({ cat: resolveCategory(id, 'expense'), sen }))
         .filter((row) => row.cat)
         .sort((a, b) => b.sen - a.sen);
 
@@ -1549,19 +2434,28 @@ function paintLedgerList(book) {
     host.innerHTML = '';
 
     set('ledgerListTitle', monthKeyLabel(book.month));
+    const unrated = book.entries.filter(entryNeedsRate).length;
+
     set('ledgerListNote', book.entries.length
         ? book.entries.length + (book.entries.length === 1 ? ' entry' : ' entries') +
           (book.movedSen ? ' · ' + money(fromSen(book.movedSen)) + ' moved between accounts' : '')
         : '');
 
+    const warn = $('ledgerRateWarn');
+    if (warn) {
+        warn.hidden = !unrated;
+        warn.textContent = unrated + (unrated === 1
+            ? ' entry was paid in another currency and has no ringgit figure, so it counts as nothing in every total below. Open it and say what it cost.'
+            : ' entries were paid in another currency and have no ringgit figure, so they count as nothing in every total below. Open each one and say what it cost.');
+    }
+
     if (!book.entries.length) {
-        const empty = document.createElement('p');
-        empty.className = 'split-empty';
-        empty.textContent = 'Nothing written down for ' + monthKeyLabel(book.month) +
-            ' yet. Put in what you spent above — amount, what it was, done.';
-        host.appendChild(empty);
+        paintEmpty(host, 'Nothing written down for ' + monthKeyLabel(book.month),
+            'Put in what you spent above — amount, what it was, done.', 'bi-journal-text');
         return;
     }
+
+    clearEmpty(host);
 
     // Group by day, keeping the order the entries already arrived in.
     const days = [];
@@ -1592,7 +2486,7 @@ function paintLedgerList(book) {
         day.entries.forEach((entry) => {
             const cat = categoryOf(entry);
             const row = document.createElement('div');
-            row.className = 'led-entry';
+            row.className = 'led-entry' + (entryNeedsRate(entry) ? ' needs-rate' : '');
             row.dataset.entry = entry.id;
 
             const sign = entry.type === 'income' ? '+ ' : entry.type === 'expense' ? '− ' : '';
@@ -1603,7 +2497,12 @@ function paintLedgerList(book) {
                     (entry.type === 'transfer' ? 'bi-arrow-left-right' : cat.icon) + '"></i></span>' +
                 '<button type="button" class="led-meta" data-edit-entry>' +
                     '<b></b><small></small></button>' +
-                '<span class="led-amount ' + tone + '">' + sign + money(fromSen(entrySen(entry))) + '</span>' +
+                '<span class="led-amount ' + tone + '">' + sign +
+                    money(fromSen(entrySen(entry))) +
+                    (isForeign(entry)
+                        ? '<em>' + escapeHtml(entryFaceValue(entry)) + '</em>'
+                        : '') +
+                '</span>' +
                 '<button type="button" class="split-x" data-remove-entry aria-label="Delete entry">' +
                     '<i class="bi bi-x-lg"></i></button>';
 
@@ -1628,13 +2527,18 @@ function paintLedgerCategories(book) {
     legend.innerHTML = '';
     body.innerHTML = '';
 
+    const table = body.closest('.table-wrap');
+    showWithData(!!book.expenseSen, dist, legend, table);
+
     if (!book.expenseSen) {
-        dist.innerHTML = '<span class="dist-left" style="width:100%"></span>';
-        legend.innerHTML = '<span class="legend-empty">Nothing spent this month yet.</span>';
+        paintEmpty(dist, 'Nothing spent in ' + monthKeyLabel(book.month),
+            'File an entry above and the breakdown builds itself.', 'bi-pie-chart');
+        dist.hidden = false;
         set('ledgerCatNote', '');
-        body.appendChild(emptyRow('No spending recorded for ' + monthKeyLabel(book.month) + '.', 5));
         return;
     }
+
+    clearEmpty(dist);
 
     set('ledgerCatNote', book.categories.length +
         (book.categories.length === 1 ? ' category' : ' categories') +
@@ -1716,8 +2620,8 @@ function paintLedgerBalances(book) {
     set('ledgerWorthNote', ledgerState.accounts.length +
         (ledgerState.accounts.length === 1 ? ' account' : ' accounts'));
 
-    Object.entries(ACCOUNT_GROUPS).forEach(([key, label]) => {
-        const inGroup = ledgerState.accounts.filter((a) => a.group === key);
+    Object.entries(ACCOUNT_TYPES).forEach(([key, label]) => {
+        const inGroup = ledgerState.accounts.filter((a) => a.type === key);
         if (!inGroup.length) return;
 
         const groupSen = inGroup.reduce((sum, a) => sum + (book.balances[a.id] || 0), 0);
@@ -1767,7 +2671,11 @@ function paintLedger(book) {
 
 function renderLedger() {
     readLedgerAccounts();
+    readCategoryRows();
     buildAccountOptions();
+    // The picker is rebuilt, the rows are not: rebuilding the rows would take
+    // the caret with them while a name is still being typed.
+    buildCategoryOptions();
     paintLedger(ledgerCompute());
     saveLedger();
 }
@@ -1789,15 +2697,261 @@ const ledgerStoreHint = () => {
     if (hint) hint.innerHTML = '<i class="bi bi-hdd"></i> Saved on this device only — nothing leaves your browser.';
 };
 
+/**
+ * Text to a currency code, for anything that arrives as words rather than as a
+ * choice — a restored backup, or an older record. Returns null when nothing
+ * matches, never the base currency: silently calling an unknown currency
+ * "ringgit" would rewrite the record rather than reject the input.
+ */
+function normaliseCurrency(raw) {
+    const text = String(raw || '').trim();
+    if (!text) return BASE_CURRENCY;
+
+    const upper = text.toUpperCase();
+    if (CURRENCIES.includes(upper)) return upper;
+
+    // The datalist shows "MYR · Malaysian Ringgit", so a pick arrives whole.
+    const head = upper.split(/[^A-Z]/)[0];
+    if (CURRENCIES.includes(head)) return head;
+
+    const lower = text.toLowerCase();
+    const startsWord = (hay) => (' ' + hay.toLowerCase()).indexOf(' ' + lower) >= 0;
+
+    const hit = CURRENCY_TABLE.find(([, name]) => name.toLowerCase().startsWith(lower))
+        || CURRENCY_TABLE.find(([, , , country]) => startsWord(country))
+        || CURRENCY_TABLE.find(([, name]) => name.toLowerCase().includes(lower))
+        || CURRENCY_TABLE.find(([, , , country]) => country.toLowerCase().includes(lower));
+
+    // Null, not the base currency. Text that resolves to nothing must not
+    // quietly become ringgit — that records a currency the reader never
+    // chose, on an entry they believed they had got right.
+    return hit ? hit[0] : null;
+}
+
+/**
+ * --------------------------------------------------------------------
+ * Exchange rates
+ * --------------------------------------------------------------------
+ * Fetched once a day and kept in localStorage, so the app still converts on
+ * a plane with the wifi off — it just says how old the rate it used is.
+ *
+ * The converted figure is filled in, not enforced. What a bank actually takes
+ * is the mid-market rate plus a spread plus whatever fee, and no public rate
+ * knows any of that. So the box stays editable, and typing in it stops the
+ * conversion overwriting you: the statement wins over the estimate, always.
+ *
+ * `rate` is stored on the entry alongside the two amounts. A record that
+ * carries the rate it was converted at can be checked years later; one that
+ * only carries the result cannot.
+ */
+const FX_KEY = 'moneyflow.fx.v1';
+const FX_URL = 'https://open.er-api.com/v6/latest/' + BASE_CURRENCY;
+
+let fxState = { fetched: '', rates: {}, pending: false };
+
+function loadRates() {
+    let saved = null;
+    try { saved = JSON.parse(storedRaw(FX_KEY) || 'null'); } catch (err) { saved = null; }
+    if (saved && saved.rates && typeof saved.rates === 'object') {
+        fxState.rates = saved.rates;
+        fxState.fetched = String(saved.fetched || '');
+    }
+}
+
+/** How many units of `code` one ringgit buys, or 0 when it is not known. */
+const rateFor = (code) => Number(fxState.rates[code]) || 0;
+
+const ratesAreStale = () => fxState.fetched !== todayIso();
+
+/**
+ * Asks for today's rates, at most once at a time. Failure is not an error
+ * worth shouting about — it just means the reader types the figure themselves,
+ * which is what they were doing before this existed.
+ */
+function fetchRates(onDone) {
+    if (fxState.pending) return;
+    fxState.pending = true;
+    paintRateState();
+
+    fetch(FX_URL, { cache: 'no-store' })
+        .then((res) => (res.ok ? res.json() : Promise.reject(new Error('HTTP ' + res.status))))
+        .then((data) => {
+            if (!data || data.result !== 'success' || !data.rates) throw new Error('bad payload');
+            fxState.rates = data.rates;
+            fxState.fetched = todayIso();
+            try {
+                localStorage.setItem(FX_KEY, JSON.stringify({
+                    fetched: fxState.fetched,
+                    stamp: String(data.time_last_update_utc || ''),
+                    rates: data.rates,
+                }));
+            } catch (err) { /* storage unavailable — the session still works */ }
+        })
+        .catch(() => { /* offline, blocked, or down — the cached rates stand */ })
+        .then(() => {
+            fxState.pending = false;
+            if (onDone) onDone();
+            paintRateState();
+        });
+}
+
+/**
+ * Fill the ringgit box from the day's rate — unless the reader has typed in
+ * it, in which case what they typed is the better number and stays.
+ */
+function convertLedgerAmount() {
+    const box = $('ledgerBase');
+    const code = ledgerCurrency();
+    if (!box || code === BASE_CURRENCY) return;
+    if (box.dataset.touched === '1') { paintRateState(); return; }
+
+    const rate = rateFor(code);
+    const paid = parseFloat(($('ledgerAmount') || {}).value) || 0;
+
+    box.value = rate && paid ? (paid / rate).toFixed(2) : '';
+    paintRateState();
+}
+
+/** Where the number in the box came from, and how much to trust it. */
+function paintRateState() {
+    const note = $('ledgerRateNote');
+    const box = $('ledgerBase');
+    if (!note || !box) return;
+
+    const code = ledgerCurrency();
+    if (code === BASE_CURRENCY) { note.textContent = ''; return; }
+
+    if (fxState.pending && !rateFor(code)) {
+        note.textContent = 'Looking up today\u2019s rate\u2026';
+        return;
+    }
+
+    const rate = rateFor(code);
+    if (!rate) {
+        note.textContent = 'No rate for ' + code + ' — put in what it cost you and the entry is still exact.';
+        return;
+    }
+
+    const typed = box.dataset.touched === '1';
+    const age = fxState.fetched === todayIso() ? 'today'
+        : fxState.fetched ? dayShort(fxState.fetched) : 'an earlier session';
+
+    note.textContent = (typed ? 'Yours, kept. ' : 'Converted at ') +
+        '1 ' + currencySymbol(BASE_CURRENCY) + ' = ' + fmt(rate) + ' ' + code +
+        ', rates from ' + age + '. Your bank will differ — its spread is not in any public rate, so correct this from your statement when you have it.';
+}
+
+/** The affix in front of the amount is the currency actually being recorded. */
+function syncLedgerCurrency() {
+    const code = ledgerCurrency();
+
+    const affix = document.querySelector('#ledgerFieldAmount .affix');
+    if (affix) affix.textContent = currencySymbol(code);
+
+    document.querySelectorAll('#ledgerCurrencyList .combo-row').forEach((row) => {
+        row.classList.toggle('is-on', row.dataset.code === code);
+    });
+
+    const note = $('ledgerCurrencyNote');
+    if (!note) return;
+
+    const foreign = code !== BASE_CURRENCY;
+    if ($('ledgerFieldBase')) $('ledgerFieldBase').hidden = !foreign;
+
+    // Rates are fetched the first time one is actually wanted, not at start-up:
+    // most entries are in ringgit and need no network at all.
+    if (foreign && !rateFor(code) && ratesAreStale()) fetchRates(convertLedgerAmount);
+    else convertLedgerAmount();
+
+    note.hidden = code === BASE_CURRENCY;
+    note.textContent = code === BASE_CURRENCY ? '' : currencyName(code) +
+        ' — recorded as paid. Totals are in ' + currencySymbol(BASE_CURRENCY) +
+        ', so this entry needs what it actually cost you.';
+}
+
+/**
+ * The currency combobox.
+ *
+ * A <datalist> was tried first and rendered every option as the whole string
+ * it filters on — "MYR · Malaysian Ringgit · Malaysia" and the symbol beneath
+ * it — which is a search index, not a menu. A real popup keeps the two apart:
+ * the closed control reads like the select it replaced, and the words that
+ * make searching work live in the list rather than in the field.
+ */
+function buildCurrencyList() {
+    const list = $('ledgerCurrencyList');
+    if (!list) return;
+
+    list.innerHTML = '';
+    CURRENCY_TABLE.forEach(([code, name, symbol, country]) => {
+        const row = document.createElement('button');
+        row.type = 'button';
+        row.className = 'combo-row';
+        row.dataset.code = code;
+        row.setAttribute('role', 'option');
+        // Everything searchable, in one place, out of sight.
+        row.dataset.find = (code + ' ' + name + ' ' + country).toLowerCase();
+        row.innerHTML =
+            '<b>' + code + '</b>' +
+            '<span>' + escapeHtml(name) + '</span>' +
+            '<small>' + escapeHtml(country) + '</small>' +
+            '<i>' + escapeHtml(symbol || code) + '</i>';
+        list.appendChild(row);
+    });
+}
+
+/** The code the form will record. The hidden input is the single truth. */
+const ledgerCurrency = () => {
+    const raw = ($('ledgerCurrency') || {}).value;
+    return CURRENCIES.includes(raw) ? raw : BASE_CURRENCY;
+};
+
+function setLedgerCurrency(code) {
+    const valid = CURRENCIES.includes(code) ? code : BASE_CURRENCY;
+    if ($('ledgerCurrency')) $('ledgerCurrency').value = valid;
+    set('ledgerCurrencyLabel', valid + ' \u00b7 ' + currencySymbol(valid));
+    syncLedgerCurrency();
+}
+
+/** Filter the list to what was typed. Matches a code, a currency or a country. */
+function filterCurrencyList(query) {
+    const q = String(query || '').trim().toLowerCase();
+    let shown = 0;
+    document.querySelectorAll('#ledgerCurrencyList .combo-row').forEach((row) => {
+        const hit = !q || row.dataset.find.includes(q);
+        row.hidden = !hit;
+        if (hit) shown++;
+    });
+    if ($('ledgerCurrencyNone')) $('ledgerCurrencyNone').hidden = shown > 0;
+}
+
+function openCurrencyPop(open) {
+    const pop = $('ledgerCurrencyPop');
+    const btn = $('ledgerCurrencyBtn');
+    if (!pop || !btn) return;
+
+    pop.hidden = !open;
+    btn.setAttribute('aria-expanded', String(open));
+    if (!open) return;
+
+    const search = $('ledgerCurrencySearch');
+    if (search) { search.value = ''; filterCurrencyList(''); search.focus(); }
+
+    // Bring the current choice into view rather than reopening at the top.
+    const current = document.querySelector('#ledgerCurrencyList .combo-row.is-on');
+    if (current) current.scrollIntoView({ block: 'center' });
+}
+
 /** A transfer swaps the category picker for a second account. */
 function syncLedgerForm() {
     const type = ledgerFormType();
     const transfer = type === 'transfer';
 
     if ($('ledgerFieldCategory')) $('ledgerFieldCategory').hidden = transfer;
+    if ($('ledgerFieldSub'))      $('ledgerFieldSub').hidden = transfer;
     if ($('ledgerFieldTo'))       $('ledgerFieldTo').hidden = !transfer;
 
-    set('ledgerAccountLabel', transfer ? 'Out of' : type === 'income' ? 'Into' : 'Paid from');
+    set('ledgerAccountLabel', transfer ? 'Out of' : type === 'income' ? 'Received into' : 'Payment method');
     buildCategoryOptions();
 }
 
@@ -1806,6 +2960,9 @@ function ledgerClearForm() {
     if ($('ledgerAmount')) $('ledgerAmount').value = '';
     if ($('ledgerNote'))   $('ledgerNote').value = '';
     if ($('ledgerDate'))   $('ledgerDate').value = todayIso();
+    if ($('ledgerSub'))    $('ledgerSub').value = '';
+    if ($('ledgerBase'))   { $('ledgerBase').value = ''; delete $('ledgerBase').dataset.touched; }
+    setLedgerCurrency(BASE_CURRENCY);
 
     set('ledgerFormTitle', 'Add an entry');
     if ($('ledgerSubmit')) $('ledgerSubmit').innerHTML = '<i class="bi bi-plus-lg"></i> Add entry';
@@ -1830,16 +2987,38 @@ function ledgerSubmit() {
         return;
     }
 
+    const currency = ledgerCurrency();
+    const base = parseFloat(($('ledgerBase') || {}).value) || 0;
+
+    // Filing a foreign amount with nothing to convert it by would put a number
+    // into a ringgit total that is not ringgit. Better to stop and ask.
+    if (currency !== BASE_CURRENCY && base <= 0) {
+        ledgerHint('Put in what it cost you in ' + currencySymbol(BASE_CURRENCY) +
+            ' — without it, ' + currencySymbol(currency) + ' ' + fmt(amount) +
+            ' would be counted as ringgit.');
+        if ($('ledgerBase')) $('ledgerBase').focus();
+        return;
+    }
+
+    const existing = ledgerState.entries.find((e) => e.id === ledgerState.editing);
+    const stamp = todayIso();
+
     const entry = {
         id:        ledgerState.editing || ledgerId('e'),
         seq:       ++ledgerSeq,
         type:      type,
         amount:    String(amount),
+        currency:  currency,
+        base:      currency === BASE_CURRENCY ? '' : String(base),
+        rate:      currency === BASE_CURRENCY || !base ? '' : String(amount / base),
         date:      ($('ledgerDate') || {}).value || todayIso(),
         category:  type === 'transfer' ? '' : ($('ledgerCategory') || {}).value,
+        sub:       type === 'transfer' ? '' : ($('ledgerSub') || {}).value || '',
         account:   from,
         toAccount: type === 'transfer' ? into : '',
         note:      ($('ledgerNote') || {}).value || '',
+        created:   existing ? existing.created : stamp,
+        updated:   stamp,
     };
 
     const at = ledgerState.entries.findIndex((e) => e.id === entry.id);
@@ -1868,11 +3047,24 @@ function ledgerEdit(id) {
     syncLedgerForm();
 
     if ($('ledgerAmount')) $('ledgerAmount').value = entry.amount;
+    // A saved entry's figure is the reader's own, whatever produced it.
+    if ($('ledgerBase')) {
+        $('ledgerBase').value = entry.base || '';
+        if (entry.base) $('ledgerBase').dataset.touched = '1';
+        else delete $('ledgerBase').dataset.touched;
+    }
+    setLedgerCurrency(entry.currency || BASE_CURRENCY);
     if ($('ledgerDate'))   $('ledgerDate').value = entry.date;
     if ($('ledgerNote'))   $('ledgerNote').value = entry.note;
     if ($('ledgerCategory') && entry.category) $('ledgerCategory').value = entry.category;
+
+    // The sub-category list depends on the category that was just restored.
+    buildSubOptions();
+    if ($('ledgerSub') && entry.sub) $('ledgerSub').value = entry.sub;
+
     if ($('ledgerAccount')) $('ledgerAccount').value = entry.account;
     if ($('ledgerTo') && entry.toAccount) $('ledgerTo').value = entry.toAccount;
+    syncLedgerCurrency();
 
     set('ledgerFormTitle', 'Edit this entry');
     if ($('ledgerSubmit')) $('ledgerSubmit').innerHTML = '<i class="bi bi-check-lg"></i> Save changes';
@@ -1974,12 +3166,23 @@ function loadLedger() {
 
     ledgerState.accounts = (Array.isArray(saved.accounts) ? saved.accounts : [])
         .filter((a) => a && a.id)
-        .map((a) => ({
-            id: String(a.id),
-            name: String(a.name || ''),
-            group: ACCOUNT_GROUPS[a.group] ? a.group : 'bank',
-            opening: String(a.opening || ''),
-        }));
+        .map((a) => {
+            // Accounts used to carry a `group`, and "Savings" was one of its
+            // values. Savings is what an account is *for*, not what kind of
+            // thing it is, so it becomes a bank account with that purpose.
+            const legacy = a.type ? '' : String(a.group || 'bank');
+            return {
+                id: String(a.id),
+                name: String(a.name || ''),
+                type: ACCOUNT_TYPES[a.type] ? a.type
+                    : legacy === 'savings' ? 'bank'
+                    : ACCOUNT_TYPES[legacy] ? legacy : 'bank',
+                purpose: String(a.purpose || (legacy === 'savings' ? 'Savings' : '')),
+                currency: CURRENCIES.includes(a.currency) ? a.currency : BASE_CURRENCY,
+                opening: String(a.opening || ''),
+                status: ACCOUNT_STATUSES[a.status] ? a.status : 'active',
+            };
+        });
     if (!ledgerState.accounts.length) seedAccounts();
 
     const known = new Set(ledgerState.accounts.map((a) => a.id));
@@ -1990,11 +3193,19 @@ function loadLedger() {
             seq: Number(e.seq) || index + 1,
             type: ['expense', 'income', 'transfer'].includes(e.type) ? e.type : 'expense',
             amount: String(e.amount || '0'),
+            // Everything below arrived after the first entries were written,
+            // so every one of them has to read as absent rather than wrong.
+            currency: CURRENCIES.includes(e.currency) ? e.currency : BASE_CURRENCY,
+            base: String(e.base || ''),
+            rate: String(e.rate || ''),
             date: String(e.date),
             category: String(e.category || ''),
+            sub: String(e.sub || ''),
             account: String(e.account),
             toAccount: known.has(e.toAccount) ? String(e.toAccount) : '',
             note: String(e.note || ''),
+            created: String(e.created || e.date),
+            updated: String(e.updated || e.date),
         }))
         // A transfer that lost its far side is no longer a transfer.
         .filter((e) => e.type !== 'transfer' || e.toAccount);
@@ -2013,6 +3224,27 @@ function cell(html, cls) {
     if (cls) td.className = cls;
     td.innerHTML = html;
     return td;
+}
+
+/**
+ * A card with nothing to show says so once, in a block with real height —
+ * not with an empty chart, an empty legend and a table head over no rows.
+ * `hide` takes the furniture that only makes sense with data off the page
+ * entirely; passing it nothing is fine for a card with none.
+ */
+function paintEmpty(host, title, line, icon) {
+    if (!host) return;
+    host.classList.add('is-empty');
+    host.innerHTML = '<div class="empty-state"><i class="bi ' + (icon || 'bi-inbox') + '"></i>' +
+        '<p><b>' + escapeHtml(title) + '</b>' + escapeHtml(line) + '</p></div>';
+}
+
+/** The other half of it: this host has data again and must stop stretching. */
+const clearEmpty = (host) => { if (host) host.classList.remove('is-empty'); };
+
+/** Show or hide the parts of a card that only mean anything with data in it. */
+function showWithData(has, ...nodes) {
+    nodes.forEach((node) => { if (node) node.hidden = !has; });
 }
 
 function emptyRow(message, span) {
@@ -2230,8 +3462,8 @@ function dashCompute() {
     ledgerState.accounts.forEach((account) => {
         const balance = balances[account.id] || 0;
         if (balance >= 0) assetsSen += balance; else owingSen -= balance;
-        if (account.group === 'savings') savingsSen += balance;
-        if (account.group === 'credit') {
+        if (/savings|emergency|investment/i.test(account.purpose || '')) savingsSen += balance;
+        if (account.type === 'credit') {
             creditCount++;
             if (balance < 0) creditOwingSen -= balance;
         }
@@ -2638,13 +3870,24 @@ function paintDashHero(book) {
         : 'Nothing went out');
 }
 
+/**
+ * The icon leads, in a tinted disc: ten figures in a grid are hard to scan by
+ * their words alone, and the tint says which kind of figure this is before the
+ * label is read. `badge` names the meaning, not the colour — money in is jade
+ * wherever it appears, money owed amber, and a figure with no module behind it
+ * yet stays grey rather than borrowing a meaning it has not earned.
+ */
 function kpiTile(kpi) {
     const tile = document.createElement('div');
     tile.className = 'kpi' + (kpi.pending ? ' is-pending' : '');
     tile.innerHTML =
-        '<span class="kpi-label"><i class="bi ' + kpi.icon + '"></i>' + escapeHtml(kpi.label) + '</span>' +
-        '<b class="kpi-value ' + (kpi.tone || '') + '">' + kpi.value + '</b>' +
-        '<small class="kpi-foot">' + escapeHtml(kpi.foot) + '</small>';
+        '<span class="kpi-badge is-' + (kpi.pending ? 'grey' : kpi.badge || 'jade') + '">' +
+            '<i class="bi ' + kpi.icon + '"></i></span>' +
+        '<span class="kpi-body">' +
+            '<span class="kpi-label">' + escapeHtml(kpi.label) + '</span>' +
+            '<b class="kpi-value ' + (kpi.tone || '') + '">' + kpi.value + '</b>' +
+            '<small class="kpi-foot">' + escapeHtml(kpi.foot) + '</small>' +
+        '</span>';
     return tile;
 }
 
@@ -2657,23 +3900,23 @@ function paintDashKpis(book) {
 
     const kpis = [
         {
-            label: 'Total balance', icon: 'bi-wallet2',
+            label: 'Total balance', icon: 'bi-wallet2', badge: 'jade',
             value: signedMoney(book.totalSen),
             tone: book.totalSen < 0 ? 'is-minus' : '',
             foot: 'Every account, all time',
         },
         {
-            label: 'Total income', icon: 'bi-arrow-down-left-circle',
+            label: 'Total income', icon: 'bi-arrow-down-left-circle', badge: 'jade',
             value: money(fromSen(book.incomeSen)), tone: book.incomeSen ? 'is-plus' : '',
             foot: book.range.label.toLowerCase(),
         },
         {
-            label: 'Total expenses', icon: 'bi-arrow-up-right-circle',
+            label: 'Total expenses', icon: 'bi-arrow-up-right-circle', badge: 'red',
             value: money(fromSen(book.expenseSen)), tone: book.expenseSen ? 'is-minus' : '',
             foot: book.range.label.toLowerCase(),
         },
         {
-            label: 'Net cash flow', icon: 'bi-arrow-left-right',
+            label: 'Net cash flow', icon: 'bi-arrow-left-right', badge: 'indigo',
             value: signedMoney(book.netSen),
             tone: book.netSen < 0 ? 'is-minus' : book.netSen > 0 ? 'is-plus' : '',
             foot: book.incomeSen
@@ -2681,9 +3924,9 @@ function paintDashKpis(book) {
                 : 'Income − expenses',
         },
         {
-            label: 'Total savings', icon: 'bi-piggy-bank',
+            label: 'Total savings', icon: 'bi-piggy-bank', badge: 'indigo',
             value: money(fromSen(book.savingsSen)),
-            foot: 'Accounts marked Savings',
+            foot: 'Accounts kept for savings',
         },
         {
             label: 'Investment value', icon: 'bi-graph-up-arrow',
@@ -2696,7 +3939,7 @@ function paintDashKpis(book) {
             foot: 'Arrives with Commit (M5)',
         },
         {
-            label: 'Credit card outstanding', icon: 'bi-credit-card-2-front',
+            label: 'Credit card outstanding', icon: 'bi-credit-card-2-front', badge: 'amber',
             value: money(fromSen(book.creditSen)),
             tone: book.creditSen ? 'is-minus' : '',
             foot: book.creditFromCard ? 'From Card Payoff — no credit account on the books'
@@ -2709,7 +3952,7 @@ function paintDashKpis(book) {
             foot: 'Needs due dates — Commit (M5)',
         },
         {
-            label: 'Budget remaining', icon: 'bi-clipboard-check',
+            label: 'Budget remaining', icon: 'bi-clipboard-check', badge: 'amber',
             value: book.plannedSen ? signedMoney(book.budgetLeftSen) : '—',
             tone: !book.plannedSen ? '' : book.budgetLeftSen < 0 ? 'is-minus' : 'is-plus',
             pending: !book.plannedSen,
@@ -2741,10 +3984,14 @@ function paintDashFlow(book) {
 
     const base = Math.max(book.incomeSen, book.expenseSen);
     if (!base) {
-        dist.innerHTML = '<span class="dist-left" style="width:100%"></span>';
-        set('dashFlowVerdict', 'Nothing recorded in this period.');
+        paintEmpty(dist, 'Nothing recorded in ' + book.range.sub,
+            'Income and spending are measured against each other — this needs one of them.',
+            'bi-arrow-left-right');
+        set('dashFlowVerdict', '');
         return;
     }
+
+    clearEmpty(dist);
 
     const spent = document.createElement('span');
     spent.className = book.expenseSen > book.incomeSen ? 'dist-red' : 'dist-jade';
@@ -2779,8 +4026,8 @@ function paintDashAccounts(book) {
         return;
     }
 
-    Object.entries(ACCOUNT_GROUPS).forEach(([key, label]) => {
-        const inGroup = ledgerState.accounts.filter((account) => account.group === key);
+    Object.entries(ACCOUNT_TYPES).forEach(([key, label]) => {
+        const inGroup = ledgerState.accounts.filter((account) => account.type === key);
         if (!inGroup.length) return;
 
         const groupSen = inGroup.reduce((sum, account) => sum + (book.balances[account.id] || 0), 0);
@@ -2892,13 +4139,17 @@ function paintDashBreakdown(book) {
 
     set('dashDimHead', DASH_DIMS[dim] || 'Category');
 
+    const table = body.closest('.table-wrap');
+    showWithData(!!rows.length, legend, table);
+
     if (!rows.length) {
-        chart.innerHTML = '<p class="split-empty">Nothing spent in this period, so there is nothing to break down.</p>';
-        legend.innerHTML = '<span class="legend-empty">No spending in ' + escapeHtml(book.range.sub) + '.</span>';
+        paintEmpty(chart, 'Nothing spent in ' + book.range.sub,
+            'Record something in Expenses, or widen the period above.', 'bi-pie-chart');
         set('dashBreakdownNote', '—');
-        body.appendChild(emptyRow('No spending recorded.', 4));
         return;
     }
+
+    clearEmpty(chart);
 
     set('dashBreakdownNote', rows.length + ' ' +
         (rows.length === 1 ? (DASH_DIMS[dim] || 'Category').toLowerCase() : DASH_DIM_PLURAL[dim] || 'categories') +
@@ -2951,14 +4202,22 @@ function paintDashTrend(book) {
     const endIso = book.range.to > today ? today : book.range.to;
     const points = dashTrend(grain, endIso);
 
-    host.innerHTML = trendSvg(points, view);
-
     const spent = points.filter((point) => point.sen > 0);
+
+    // With no spending at all the scale falls back to a nominal RM1, and the
+    // axis prints 1, 1, 1, 0, 0 down the side of an empty grid. A chart of
+    // nothing is worse than saying there is nothing.
     if (!spent.length) {
+        paintEmpty(host, 'No spending to plot',
+            'The trend needs at least one entry in the last ' + points.length + ' periods.',
+            'bi-graph-up');
         set('dashTrendNote', 'Nothing spent across these ' + points.length + ' periods');
         set('dashTrendFoot', '—');
         return;
     }
+
+    clearEmpty(host);
+    host.innerHTML = trendSvg(points, view);
 
     const peak = spent.reduce((top, point) => (point.sen > top.sen ? point : top), spent[0]);
     const low  = spent.reduce((bottom, point) => (point.sen < bottom.sen ? point : bottom), spent[0]);
@@ -3047,7 +4306,7 @@ function paintDashCompare() {
     }
 
     ids.map((id) => {
-        const cat = LEDGER_CATEGORIES.find((c) => c.id === id);
+        const cat = resolveCategory(id, 'expense');
         return {
             label: cat ? cat.label : 'Other',
             tone:  cat ? BUDGET_BUCKETS[cat.bucket].tone : 'jade',
@@ -3137,74 +4396,85 @@ function dashSummaryText() {
  * ====================================================================
  * THEME
  * ====================================================================
- * Three settings, not two: light, dark, and whatever this device is set
- * to. The third is the default and the only one that can change while
- * you are looking at the page, so it is the only one that needs a
- * listener.
+ * There is no theme code any more, and that is the whole design: MoneyFlow
+ * is a dark app, the same one for everybody. `data-theme="dark"` is written
+ * on <html> in the markup, so the palette is settled before the first byte
+ * of this file is parsed — nothing to resolve, nothing to flash, and no
+ * preference to lose when the browser is cleared.
  *
- * The attribute is stamped on <html> by the inline script in the page
- * head, before the first paint — everything here only keeps it in step.
- * It is deliberately not in BACKUP_STORES: how this screen looks is a
- * property of the screen, not of your records, and restoring a backup
- * onto a different machine should not change its brightness.
+ * The light tokens still sit at the top of the stylesheet as the base layer
+ * the dark ones are written against; nothing selects them.
  * ====================================================================
  */
-const THEME_KEY = 'moneyflow.theme.v1';
-const THEME_ORDER = ['system', 'light', 'dark'];
 
-const THEME_FACE = {
-    system: { icon: 'bi-circle-half',  label: 'System' },
-    light:  { icon: 'bi-sun',          label: 'Light'  },
-    dark:   { icon: 'bi-moon-stars',   label: 'Dark'   },
-};
+/**
+ * ====================================================================
+ * NAVIGATION
+ * ====================================================================
+ * The same button does two different jobs, because it is answering the same
+ * question in two shapes of window.
+ *
+ * On a phone the sidebar is a drawer: it is not on the page at all until it
+ * is asked for, which is the only honest way to spend 264px on a 375px
+ * screen. Choosing a module closes it, because on a phone choosing a module
+ * is the reason it was opened.
+ *
+ * On a desktop there is room for the column, so the button collapses it to a
+ * rail of icons instead — narrower, still always there, and remembered
+ * between visits because it is a preference rather than a state.
+ * ====================================================================
+ */
+const NAV_KEY = 'moneyflow.nav.v1';
 
-let themeChoice = 'system';
+/** Below this the sidebar is a drawer; above it, a column. Matches the CSS. */
+const navIsDrawer = () => window.matchMedia('(max-width: 1000px)').matches;
 
-const prefersDark = () =>
-    !!(window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches);
+function paintNav() {
+    const app = document.querySelector('.app');
+    const btn = $('navToggle');
+    const scrim = $('navScrim');
+    if (!app || !btn) return;
 
-const themeIsDark = () => themeChoice === 'dark' || (themeChoice === 'system' && prefersDark());
+    const drawer = navIsDrawer();
+    const open = app.classList.contains('is-open');
+    const rail = app.classList.contains('is-rail');
 
-function applyTheme() {
-    const dark = themeIsDark();
-    document.documentElement.setAttribute('data-theme', dark ? 'dark' : 'light');
+    if (scrim) scrim.hidden = !(drawer && open);
+    btn.setAttribute('aria-expanded', String(drawer ? open : !rail));
 
-    const face = THEME_FACE[themeChoice] || THEME_FACE.system;
-    const btn  = $('themeToggle');
-    if (btn) {
-        const icon = btn.querySelector('i');
-        if (icon) icon.className = 'bi ' + face.icon;
-        // The label is hidden on a narrow topbar, so the title carries it.
-        btn.title = face.label + (themeChoice === 'system' ? ' (' + (dark ? 'dark' : 'light') + ' right now)' : '') +
-            ' — click for ' + THEME_FACE[THEME_ORDER[(THEME_ORDER.indexOf(themeChoice) + 1) % THEME_ORDER.length]].label.toLowerCase();
+    const icon = btn.querySelector('i');
+    if (icon) icon.className = 'bi ' + (drawer && open ? 'bi-x-lg' : 'bi-list');
+    set('navToggleLabel', drawer ? (open ? 'Close' : 'Menu') : rail ? 'Expand' : 'Collapse');
+}
+
+function toggleNav() {
+    const app = document.querySelector('.app');
+    if (!app) return;
+
+    if (navIsDrawer()) {
+        app.classList.toggle('is-open');
+    } else {
+        app.classList.toggle('is-rail');
+        try { localStorage.setItem(NAV_KEY, app.classList.contains('is-rail') ? 'rail' : 'full'); }
+        catch (err) { /* storage unavailable — the session still works */ }
     }
-    set('themeLabel', face.label);
-
-    // The wordmark is a file, not markup, and its "Money" is set in near-black
-    // — invisible on a dark topbar. The dark file is the same mark, lifted.
-    const mark = document.querySelector('.brand img');
-    if (mark) mark.setAttribute('src', dark ? 'logo-dark.svg' : 'logo.svg');
+    paintNav();
 }
 
-/** The charts take their colours from the stylesheet at paint time, so a
- *  theme change has to redraw whichever of them is on screen. */
-function repaintTheme() {
-    applyTheme();
-    const dash = $('module-dash');
-    if (dash && !dash.hidden) renderDash();
+function closeDrawer() {
+    const app = document.querySelector('.app');
+    if (!app) return;
+    app.classList.remove('is-open');
+    paintNav();
 }
 
-function loadTheme() {
+function loadNav() {
+    const app = document.querySelector('.app');
+    if (!app) return;
     let saved = null;
-    try { saved = localStorage.getItem(THEME_KEY); } catch (err) { saved = null; }
-    themeChoice = THEME_ORDER.includes(saved) ? saved : 'system';
-    applyTheme();
-}
-
-function cycleTheme() {
-    themeChoice = THEME_ORDER[(THEME_ORDER.indexOf(themeChoice) + 1) % THEME_ORDER.length];
-    try { localStorage.setItem(THEME_KEY, themeChoice); } catch (err) { /* storage unavailable */ }
-    repaintTheme();
+    try { saved = localStorage.getItem(NAV_KEY); } catch (err) { saved = null; }
+    app.classList.toggle('is-rail', saved === 'rail');
+    paintNav();
 }
 
 /**
@@ -3272,7 +4542,7 @@ function resetForm(which) {
     }
 
     if (which === 'budget') {
-        BUDGET_CATEGORIES.forEach((cat) => { if ($('bgt_' + cat.id)) $('bgt_' + cat.id).value = ''; });
+        budgetCategories().forEach((cat) => { if ($('bgt_' + cat.id)) $('bgt_' + cat.id).value = ''; });
         budgetState = { custom: [] };
         buildBudgetCustom();
         renderBudget();
@@ -3321,7 +4591,10 @@ const BACKUP_FORMAT  = 'moneyflow.backup';
 const BACKUP_VERSION = 1;
 
 /** Every store the app persists. A new module adds its key here or it is not backed up. */
-const BACKUP_STORES = [LEDGER_KEY, BUDGET_KEY, CARD_KEY];
+// Categories belong in here: they are records, not a display preference.
+// A backup without them would restore a year of entries under names the
+// reader never chose.
+const BACKUP_STORES = [LEDGER_KEY, CATEGORY_KEY, BUDGET_KEY, CARD_KEY];
 
 /**
  * Reads the stores as they sit on disk. `storedRaw` is used rather than the
@@ -3560,14 +4833,18 @@ function setSegment(seg, value) {
 }
 
 document.addEventListener('DOMContentLoaded', () => {
-    // --- theme: first, so nothing paints in the wrong palette ---
-    loadTheme();
 
     // --- bill split ---
     buildSplitPeople();
     buildSplitShared();
 
-    // --- budget planner: build the fixed rows before restoring their values ---
+    loadNav();
+    loadRates();
+
+    // --- categories: everything below names one, so they load first ---
+    loadCategories();
+
+    // --- budget planner: build the rows before restoring their values ---
     buildBudgetRows();
     loadBudget();
     buildBudgetCustom();
@@ -3577,8 +4854,10 @@ document.addEventListener('DOMContentLoaded', () => {
     syncCardTier();
 
     // --- daily ledger: accounts first, they are what entries point at ---
+    buildStaticOptions();
     loadLedger();
     buildLedgerAccounts();
+    buildCategoryManager();
     buildAccountOptions();
     syncLedgerForm();
     ledgerClearForm();
@@ -3613,7 +4892,11 @@ document.addEventListener('DOMContentLoaded', () => {
     const ledgerForm = $('ledger-form');
     if (ledgerForm) {
         ledgerForm.addEventListener('keydown', (event) => {
-            if (event.key === 'Enter') { event.preventDefault(); ledgerSubmit(); }
+            // Enter files the entry — except inside the notes box, where it is
+            // what a new line is made of.
+            if (event.key !== 'Enter' || event.target.tagName === 'TEXTAREA') return;
+            event.preventDefault();
+            ledgerSubmit();
         });
     }
 
@@ -3680,6 +4963,29 @@ document.addEventListener('DOMContentLoaded', () => {
     const ledgerList = $('ledgerList');
     if (ledgerList) ledgerList.addEventListener('click', onLedgerListClick);
 
+    const ledgerCategories = $('ledgerCategories');
+    const categoryList = $('categoryList');
+    if (categoryList) {
+        // Typing a name repaints what reads the list, never the rows — a
+        // rebuild here would take the caret with it.
+        categoryList.addEventListener('input', () => {
+            readCategoryRows();
+            saveCategories();
+            buildCategoryOptions();
+            buildAccountOptions();
+            buildLedgerAccounts();
+            renderLedger();
+            renderBudget();
+        });
+        categoryList.addEventListener('change', (event) => {
+            if (event.target.closest('.cat-bucket')) { readCategoryRows(); afterCategoryChange(true); }
+        });
+        categoryList.addEventListener('click', onCategoryClick);
+    }
+
+    const addCategoryCard = $('categoryAdd');
+    if (addCategoryCard) addCategoryCard.addEventListener('click', addCategory);
+
     const ledgerAccounts = $('ledgerAccounts');
     if (ledgerAccounts) {
         ledgerAccounts.addEventListener('input', renderLedger);
@@ -3695,9 +5001,28 @@ document.addEventListener('DOMContentLoaded', () => {
         });
     });
 
+    // Editing accounts is the rare visit; reading their balances is every
+    // visit. Adding one opens the editor if it was closed, because the row it
+    // creates is blank and lives in there.
+    const editAccounts = $('ledgerEditAccounts');
+    const accountEditor = (open) => {
+        const panel = $('ledgerAccountEdit');
+        if (!panel) return;
+        const show = open === undefined ? panel.hidden : open;
+        panel.hidden = !show;
+        if (editAccounts) {
+            editAccounts.setAttribute('aria-expanded', String(show));
+            editAccounts.innerHTML = show
+                ? '<i class="bi bi-check-lg"></i> Done'
+                : '<i class="bi bi-pencil"></i> Edit';
+        }
+    };
+    if (editAccounts) editAccounts.addEventListener('click', () => accountEditor());
+
     const addAccount = $('ledgerAddAccount');
     if (addAccount) {
         addAccount.addEventListener('click', () => {
+            accountEditor(true);
             readLedgerAccounts();
             ledgerState.accounts.push({ id: ledgerId('a'), name: '', group: 'bank', opening: '' });
             buildLedgerAccounts();
@@ -3706,6 +5031,63 @@ document.addEventListener('DOMContentLoaded', () => {
             if (last) last.focus();
         });
     }
+
+    const categoryPicker = $('ledgerCategory');
+    if (categoryPicker) categoryPicker.addEventListener('change', buildSubOptions);
+
+    // Changing the amount reconverts; typing in the ringgit box says the
+    // reader has the real figure, and the conversion stops arguing with them.
+    const amountBox = $('ledgerAmount');
+    if (amountBox) amountBox.addEventListener('input', convertLedgerAmount);
+
+    const baseBox = $('ledgerBase');
+    if (baseBox) {
+        baseBox.addEventListener('input', () => {
+            if (baseBox.value.trim()) baseBox.dataset.touched = '1';
+            else delete baseBox.dataset.touched;
+            paintRateState();
+        });
+    }
+
+    const currencyBtn = $('ledgerCurrencyBtn');
+    if (currencyBtn) {
+        currencyBtn.addEventListener('click', () => openCurrencyPop($('ledgerCurrencyPop').hidden));
+    }
+
+    const currencySearch = $('ledgerCurrencySearch');
+    if (currencySearch) {
+        currencySearch.addEventListener('input', () => filterCurrencyList(currencySearch.value));
+        currencySearch.addEventListener('keydown', (event) => {
+            if (event.key === 'Escape') { openCurrencyPop(false); currencyBtn.focus(); return; }
+            if (event.key !== 'Enter') return;
+            // Enter takes the first row still showing, which is what the
+            // search was narrowing towards.
+            event.preventDefault();
+            event.stopPropagation();
+            const first = document.querySelector('#ledgerCurrencyList .combo-row:not([hidden])');
+            if (first) { setLedgerCurrency(first.dataset.code); openCurrencyPop(false); currencyBtn.focus(); }
+        });
+    }
+
+    const currencyList = $('ledgerCurrencyList');
+    if (currencyList) {
+        currencyList.addEventListener('click', (event) => {
+            const row = event.target.closest('.combo-row');
+            if (!row) return;
+            setLedgerCurrency(row.dataset.code);
+            openCurrencyPop(false);
+            currencyBtn.focus();
+        });
+    }
+
+    // Anywhere else on the page closes it, the way a menu should.
+    document.addEventListener('click', (event) => {
+        if (!event.target.closest('#ledgerCurrencyCombo')) openCurrencyPop(false);
+    });
+
+    // The side switch is a view of the same list, not a filter on the data.
+    const categorySide = $('categorySide');
+    if (categorySide) categorySide.addEventListener('click', () => buildCategoryManager());
 
     const ledgerAdd = $('ledgerSubmit');
     if (ledgerAdd) ledgerAdd.addEventListener('click', ledgerSubmit);
@@ -3756,26 +5138,32 @@ document.addEventListener('DOMContentLoaded', () => {
         renderDash();
     });
 
-    const themeToggle = $('themeToggle');
-    if (themeToggle) themeToggle.addEventListener('click', cycleTheme);
-
-    // On "System", the answer can change under us — at sunset, on a schedule,
-    // or because someone flipped a switch in another window.
-    if (window.matchMedia) {
-        const watch = window.matchMedia('(prefers-color-scheme: dark)');
-        const onSystemChange = () => { if (themeChoice === 'system') repaintTheme(); };
-        if (watch.addEventListener) watch.addEventListener('change', onSystemChange);
-        else if (watch.addListener) watch.addListener(onSystemChange);   // older Safari
-    }
-
     const dashCopy = $('dashCopy');
     if (dashCopy) dashCopy.addEventListener('click', () => copySummary(dashCopy, dashSummaryText(), 'Copy summary'));
+
+    const navToggle = $('navToggle');
+    if (navToggle) navToggle.addEventListener('click', toggleNav);
+
+    const navScrim = $('navScrim');
+    if (navScrim) navScrim.addEventListener('click', closeDrawer);
+
+    document.addEventListener('keydown', (event) => {
+        if (event.key === 'Escape') closeDrawer();
+    });
+
+    // A drawer left open across a resize would sit over a page with room for
+    // the column it was standing in for.
+    window.addEventListener('resize', () => {
+        if (!navIsDrawer()) closeDrawer(); else paintNav();
+    });
 
     const tabs = $('tabs');
     if (tabs) {
         tabs.addEventListener('click', (event) => {
             const btn = event.target.closest('button[data-module]');
-            if (btn) showModule(btn.dataset.module);
+            if (!btn) return;
+            showModule(btn.dataset.module);
+            closeDrawer();
         });
     }
 

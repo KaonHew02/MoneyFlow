@@ -60,6 +60,18 @@
 
     --red:         #cc3a34;
     --red-soft:    #fdecea;
+
+    /* Four more, for categories only. A bucket still has exactly one colour —
+       these tint a category disc so a list of twenty is scannable, and carry
+       no meaning of their own. */
+    --violet:      #7a3fc4;
+    --violet-soft: #f2eafc;
+    --sky:         #1c74a8;
+    --sky-soft:    #e3f1f9;
+    --rose:        #bf3a70;
+    --rose-soft:   #fbe9f0;
+    --slate:       #5b6b72;
+    --slate-soft:  #eceff0;
     --red-line:    #f3ccc8;
     --red-ink:     #8c2723;
     --red-2:       #b8322d;   /* the hover of a destructive button */
@@ -94,11 +106,12 @@
    meanings do not move — jade is still needs, amber still wants, indigo still
    savings and debt, and red is still reserved for being over budget.
 
-   There is one selector here rather than the usual pair, because the theme is
-   always an explicit `data-theme` on <html>: the inline script in the page
-   head resolves "follow my system" into `light` or `dark` before the first
-   paint, so a dark-mode reader never gets a white flash, and app.js keeps it
-   in step if the system setting changes mid-session.
+   There is one selector here rather than the usual pair, and no
+   `prefers-color-scheme` query: `data-theme="dark"` is written on <html> in
+   index.html itself, so this block is simply always on. MoneyFlow is a dark
+   app — there is no toggle, no stored preference, and nothing to resolve
+   before the first paint. The light tokens above stay as the base layer this
+   one is written against.
    -------------------------------------------------------------------------- */
 :root[data-theme="dark"] {
     color-scheme: dark;
@@ -135,6 +148,15 @@
 
     --red:         #e4635c;
     --red-soft:    #351a19;
+
+    --violet:      #a986ee;
+    --violet-soft: #261c3d;
+    --sky:         #58acd8;
+    --sky-soft:    #122b38;
+    --rose:        #e07aa5;
+    --rose-soft:   #351b28;
+    --slate:       #9aabb2;
+    --slate-soft:  #1e2729;
     --red-line:    #5a2b28;
     --red-ink:     #f2aca7;
     --red-2:       #c9453f;
@@ -171,55 +193,55 @@ body {
     -webkit-font-smoothing: antialiased;
 }
 
-.app { display: flex; flex-direction: column; min-height: 100vh; }
+/* Sidebar beside everything else, and the everything else scrolls under a
+   topbar of its own. The sidebar does not scroll with the page: five items
+   are always within reach, whatever a module is doing below. */
+.app { display: flex; min-height: 100vh; }
+
+.shell { flex: 1 1 auto; min-width: 0; display: flex; flex-direction: column; }
 
 .module[hidden] { display: none; }
 
 /* ==========================================================================
-   Top bar — brand on the left, the two modules on the right. No sidebar:
-   this app is two screens, not a directory of calculators.
+   Sidebar — the brand, and the way between modules
    ========================================================================== */
-.topbar {
+.sidebar {
     position: sticky;
     top: 0;
-    z-index: 10;
+    align-self: flex-start;
+    z-index: 12;
+    flex: 0 0 236px;
     display: flex;
-    align-items: center;
-    gap: 20px;
-    padding: 14px 32px;
-    background: var(--topbar);
-    backdrop-filter: blur(12px);
-    border-bottom: 1px solid var(--line);
+    flex-direction: column;
+    gap: 4px;
+    height: 100vh;
+    padding: 22px 16px;
+    background: var(--paper);
+    border-right: 1px solid var(--line);
 }
 
-.brand { display: block; flex: 0 0 auto; }
+.brand { display: block; flex: 0 0 auto; padding: 0 8px; }
 .brand img { display: block; width: 152px; height: auto; }
 
-/* The slogan rides beside the wordmark, and is the first thing dropped
-   when the bar gets tight — the tabs matter more than it does. */
 .tagline {
-    margin: 0;
-    font-size: 12.5px;
+    margin: 6px 0 22px;
+    padding: 0 8px;
+    font-size: 12px;
     font-weight: 600;
     letter-spacing: .04em;
     color: var(--muted);
 }
 
-.tabs {
-    display: flex;
-    flex: 0 0 auto;
-    gap: 4px;
-    margin-left: auto;
-    padding: 4px;
-    border-radius: 14px;
-    background: var(--canvas);
-}
+.tabs { display: flex; flex-direction: column; gap: 3px; }
 
+/* Full-width rows, so the target is the column rather than the word — and so
+   a long module name costs nothing that a short one does not. */
 .tabs button {
-    display: inline-flex;
+    display: flex;
     align-items: center;
-    gap: 8px;
-    padding: 9px 16px;
+    gap: 11px;
+    width: 100%;
+    padding: 11px 12px;
     border: 0;
     border-radius: 11px;
     background: transparent;
@@ -227,36 +249,168 @@ body {
     font-size: 13.5px;
     font-weight: 650;
     color: var(--ink-2);
+    text-align: left;
     cursor: pointer;
     white-space: nowrap;
     transition: all .16s ease;
 }
 
-.tabs button i { font-size: 13px; opacity: .75; }
-.tabs button:hover { color: var(--ink); }
+.tabs button i { font-size: 15px; opacity: .7; }
+.tabs button:hover { background: var(--paper-2); color: var(--ink); }
 
-/* Filled, not a white chip on grey — the switch should be the loudest
-   control on the bar. */
+/* Filled, not a tint — the live module should be the loudest thing here. */
 .tabs button.is-on {
     background: var(--jade);
     color: var(--on-jade);
-    box-shadow: 0 2px 8px rgba(14, 124, 102, .28);
+    box-shadow: 0 2px 10px rgba(14, 124, 102, .3);
 }
 
 .tabs button.is-on i { opacity: 1; }
 
+/* --------------------------------------------------------------------------
+   Collapsed to a rail
+   --------------------------------------------------------------------------
+   Icons only, and the wordmark becomes the mark. The labels are clipped out
+   of the layout rather than removed from the page: `display: none` would take
+   the only name each button has away from a screen reader as well, leaving
+   five buttons that announce nothing.
+   -------------------------------------------------------------------------- */
+.app.is-rail .sidebar { flex-basis: 76px; padding-left: 12px; padding-right: 12px; }
+.app.is-rail .tagline { display: none; }
+.app.is-rail .brand { padding: 0; }
+.app.is-rail .brand img { width: 40px; content: url(logo-icon.svg); }
+.app.is-rail .tabs button { justify-content: center; padding: 12px 0; }
+.app.is-rail .tabs button i { font-size: 17px; }
+
+.app.is-rail .tabs button span {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    margin: -1px;
+    padding: 0;
+    overflow: hidden;
+    clip-path: inset(50%);
+    white-space: nowrap;
+}
+
 /* ==========================================================================
-   Main column — everything in one centred stack, inputs and answers alike.
+   Top bar
+
+/* The one control that folds the sidebar away. What it does depends on how
+   much room there is: a drawer on a phone, a rail on a desktop. */
+.nav-toggle {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    margin-right: auto;
+    padding: 8px 12px;
+    border: 1px solid var(--line);
+    border-radius: 10px;
+    background: transparent;
+    font: inherit;
+    font-size: 12.5px;
+    font-weight: 650;
+    color: var(--ink-2);
+    cursor: pointer;
+    transition: all .16s ease;
+}
+
+.nav-toggle:hover { border-color: var(--jade); background: var(--jade-soft); color: var(--jade); }
+.nav-toggle i { font-size: 15px; }
+
+.scrim {
+    position: fixed;
+    inset: 0;
+    z-index: 30;
+    background: rgba(0, 0, 0, .5);
+    backdrop-filter: blur(2px);
+}
+
+/* ==========================================================================
+   Top bar — what is left of it: the file and Drive controls
+   ========================================================================== */
+.topbar {
+    position: sticky;
+    top: 0;
+    z-index: 10;
+    display: flex;
+    align-items: center;
+    justify-content: flex-end;
+    gap: 20px;
+    padding: 12px 32px;
+    background: var(--topbar);
+    backdrop-filter: blur(12px);
+    border-bottom: 1px solid var(--line);
+}
+
+/* ==========================================================================
+   Main column
+   ==========================================================================
+   1020px was a reading measure, and it was the wrong measure: nothing on
+   these screens is prose. It is tables, charts and figures, and on a 1900px
+   monitor that cap left a third of the window empty on each side while the
+   cards inside it stayed cramped. 1340px is wide enough to stand two cards
+   side by side and still narrow enough that a full-width table does not run
+   away from its own row heads.
    ========================================================================== */
 .main {
     flex: 1;
     width: 100%;
-    max-width: 1020px;
+    max-width: 1340px;
     margin: 0 auto;
     padding: 26px 32px 64px;
 }
 
 .stack { display: flex; flex-direction: column; gap: 18px; }
+
+/* --------------------------------------------------------------------------
+   Two panes
+   --------------------------------------------------------------------------
+   A stack is right for cards that each need the whole width, and wrong for
+   the four or five that do not — those turned the page into a column you
+   scrolled past rather than a page you read.
+
+   This is a multi-column deck rather than two hand-filled columns, because
+   the cards change height with the data in them. "Where it went" is 378px on
+   an empty book and 704px on a full one; any fixed assignment that balanced
+   one left a hole in the other. Multicol re-balances on every layout, so
+   neither state has a short column sitting beside a long one.
+   -------------------------------------------------------------------------- */
+.deck {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 18px;
+}
+
+/* A card that has no partner takes the whole row rather than leaving the
+   space beside it empty. */
+.deck > .card.is-wide { grid-column: 1 / -1; }
+
+/* Grid rows stretch their cards to the tallest in the row, so the two columns
+   always end level — there is no strip of page left over beside the shorter
+   one. The slack goes inside the shorter card, where it reads as its own
+   padding, and `flex` below hands it to whatever part of the card can
+   usefully grow into it. */
+.deck > .card { display: flex; flex-direction: column; min-width: 0; }
+
+/* A flex item's `min-width` defaults to its content, which means a card that
+   became a flex container stopped letting its wide table scroll inside its
+   own wrapper and pushed the page sideways instead. Nothing in a card needs
+   to be wider than the card. */
+.deck > .card > * { min-width: 0; }
+
+/* An empty state is exactly that part: a block that says a card is waiting
+   should fill the card it is waiting in. `.is-empty` is set by whichever
+   painter put it there. */
+.deck .is-empty { display: flex; flex: 1 1 auto; }
+.deck .is-empty > .empty-state { flex: 1 1 auto; }
+.deck .chart-row:has(.is-empty) { flex: 1 1 auto; }
+
+/* Cards that end on a closing line put the row's leftover height above it
+   rather than below. The line then sits on the card's bottom edge the way a
+   footer does, and the slack reads as the card breathing instead of as a
+   card that ran out of things to say. */
+.deck > .card > p.hint { margin-top: auto; }
 
 /* ==========================================================================
    Hero band — the one number the screen exists to answer, plus the two
@@ -465,7 +619,22 @@ input[type="date"]:hover::-webkit-calendar-picker-indicator { opacity: .85; }
 .money-input-sm .affix { left: 11px; font-size: 11.5px; }
 
 /* Segmented control — the live option is filled, not a white chip. */
-.seg { display: flex; gap: 4px; padding: 4px; background: var(--canvas); border-radius: var(--radius-sm); }
+.seg {
+    display: flex;
+    gap: 4px;
+    padding: 4px;
+    background: var(--canvas);
+    border: 1px solid var(--line);
+    border-radius: var(--radius-sm);
+}
+
+/* A seg is a control, not a caption's neighbour: the note under it needs
+   air, and so does a custom range that opens beneath it. Without this the
+   picker sits hard against its hint while the card rule floats well above
+   it, and the card reads lopsided. */
+.seg + .hint,
+.seg + .field-grid,
+.seg + * + .hint { margin-top: 12px; }
 
 .seg button {
     flex: 1;
@@ -618,6 +787,56 @@ input[type="date"]:hover::-webkit-calendar-picker-indicator { opacity: .85; }
 
 .split-empty { margin: 0; font-size: 13px; line-height: 1.55; color: var(--ink-3); }
 
+/* --------------------------------------------------------------------------
+   Empty state
+   --------------------------------------------------------------------------
+   A card with nothing in it was showing the nothing four times over: a full
+   width bar with no segments, a line of legend text, a table head with no
+   rows under it, and a row that said so again. Four pieces of furniture for
+   an empty room. One block replaces all of it, and it has real height, so a
+   card that is waiting still holds its place in a column instead of
+   collapsing and leaving a hole beside its neighbour.
+   -------------------------------------------------------------------------- */
+.empty-state {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 10px;
+    min-height: 168px;
+    padding: 24px 20px;
+    border: 1px dashed var(--line);
+    border-radius: 14px;
+    text-align: center;
+}
+
+.empty-state i {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 40px;
+    height: 40px;
+    border-radius: 13px;
+    background: var(--canvas);
+    color: var(--ink-3);
+    font-size: 17px;
+}
+
+.empty-state p { margin: 0; font-size: 13px; line-height: 1.55; color: var(--ink-3); max-width: 34ch; }
+.empty-state b { display: block; font-size: 13.5px; font-weight: 700; color: var(--ink-2); }
+
+/* Both hosts are shaped for the thing that is missing — a 176px donut slot,
+   an 18px bar with its ends clipped — so each one stands down for the block
+   that says why it is missing. */
+.chart-figure.is-empty { flex: 1 1 100%; }
+
+.dist.is-empty {
+    height: auto;
+    border-radius: 0;
+    background: none;
+    overflow: visible;
+}
+
 /* ==========================================================================
    Budget planner
    ========================================================================== */
@@ -712,6 +931,328 @@ input[type="date"]:hover::-webkit-calendar-picker-indicator { opacity: .85; }
     color: var(--ink-2);
     cursor: pointer;
 }
+
+/* ==========================================================================
+   Category manager
+   ==========================================================================
+   Twenty-one rows that each carry a name, a bucket, a tint, an icon and a
+   list of sub-categories. Everything that is not the name stays collapsed:
+   the icon opens a palette, the count opens the sub-list, and neither is on
+   screen until it is asked for. A row that showed all of it at once would be
+   three lines tall before it had said anything.
+   ========================================================================== */
+.cat-list { display: grid; gap: 9px; }
+
+/* Fifteen rows is a card taller than the screen, and it sits beside a card
+   that is not. The list scrolls inside itself so the card stays the size of
+   its neighbour and the page keeps one scrollbar that means something. */
+.cat-list {
+    max-height: 460px;
+    overflow-y: auto;
+    padding-right: 4px;
+    scrollbar-width: thin;
+}
+
+.cat-list::-webkit-scrollbar { width: 8px; }
+.cat-list::-webkit-scrollbar-thumb { background: var(--line-strong); border-radius: 999px; }
+.cat-list::-webkit-scrollbar-track { background: transparent; }
+
+.cat-row {
+    padding: 10px 12px;
+    border: 1px solid var(--line-2);
+    border-radius: 14px;
+    background: var(--paper-2);
+    transition: border-color .16s ease, opacity .16s ease;
+}
+
+.cat-row:focus-within { border-color: var(--line-strong); }
+
+/* A retired category is still on the page — it has history behind it — but
+   it is no longer offered anywhere, and it should not read as if it is. */
+.cat-row.is-off { opacity: .55; }
+
+/* A payment method has no bucket, no sub-categories and no tint to choose:
+   the row is a name, whether it is in use, and a way to drop it. */
+.cat-row.is-method .cat-main { grid-template-columns: 38px minmax(0, 1fr) auto auto; }
+.cat-row.is-method .cat-disc { cursor: default; }
+.cat-row.is-method .cat-disc:hover { transform: none; }
+.cat-row.is-off .cat-name { text-decoration: line-through; }
+
+/* The bucket left this row for the panel behind the disc: it is chosen once
+   when a category is invented and hardly ever again, and it was the widest
+   control here carrying the least traffic. */
+.cat-main {
+    display: grid;
+    grid-template-columns: 38px minmax(0, 1fr) auto auto auto;
+    gap: 10px;
+    align-items: center;
+}
+
+/* The disc is a button, not an ornament: it opens the icon and colour picker. */
+.cat-disc {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 38px;
+    height: 38px;
+    padding: 0;
+    border: 0;
+    border-radius: 12px;
+    font-size: 16px;
+    cursor: pointer;
+    transition: transform .12s ease;
+}
+
+.cat-disc:hover { transform: scale(1.06); }
+
+.cat-id { min-width: 0; }
+
+.cat-name {
+    width: 100%;
+    padding: 7px 10px;
+    font-size: 13.5px;
+    font-weight: 650;
+}
+
+.cat-id small {
+    display: block;
+    margin-top: 3px;
+    padding-left: 2px;
+    font-size: 11px;
+    color: var(--ink-3);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.cat-bucket { padding: 8px 10px; font-size: 12.5px; font-weight: 600; color: var(--ink-2); cursor: pointer; }
+
+.cat-act {
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    padding: 8px 10px;
+    border: 1px solid var(--line);
+    border-radius: 10px;
+    background: transparent;
+    font: inherit;
+    font-size: 12px;
+    font-weight: 650;
+    color: var(--ink-2);
+    cursor: pointer;
+    transition: all .16s ease;
+}
+
+.cat-act:hover { border-color: var(--jade); color: var(--jade); }
+.cat-act[aria-expanded="true"] { border-color: var(--jade); background: var(--jade-soft); color: var(--jade); }
+.cat-act b { font-weight: 700; font-variant-numeric: tabular-nums; }
+
+/* --- the icon and colour picker, folded away until the disc is clicked --- */
+.cat-look {
+    margin-top: 10px;
+    padding: 12px;
+    border: 1px solid var(--line-2);
+    border-radius: 12px;
+    background: var(--paper);
+}
+
+.cat-look-row {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    margin-bottom: 11px;
+    padding-bottom: 11px;
+    border-bottom: 1px solid var(--line-2);
+}
+
+.cat-look-row span {
+    font-size: 11px;
+    font-weight: 700;
+    letter-spacing: .06em;
+    text-transform: uppercase;
+    color: var(--ink-3);
+}
+
+.cat-look-row select { flex: 0 0 auto; width: 180px; padding: 7px 10px; font-size: 12.5px; }
+
+.cat-swatches { display: flex; flex-wrap: wrap; gap: 7px; margin-bottom: 10px; }
+
+.cat-swatch {
+    width: 26px;
+    height: 26px;
+    padding: 0;
+    border: 2px solid transparent;
+    border-radius: 9px;
+    cursor: pointer;
+}
+
+.cat-swatch.is-on { border-color: var(--ink); }
+
+.cat-icons { display: flex; flex-wrap: wrap; gap: 5px; }
+
+.cat-icon {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 30px;
+    height: 30px;
+    padding: 0;
+    border: 1px solid var(--line-2);
+    border-radius: 9px;
+    background: transparent;
+    color: var(--ink-2);
+    font-size: 14px;
+    cursor: pointer;
+    transition: all .14s ease;
+}
+
+.cat-icon:hover { border-color: var(--jade); color: var(--jade); }
+.cat-icon.is-on { border-color: var(--jade); background: var(--jade-soft); color: var(--jade); }
+
+/* --- sub-categories, one level in --- */
+.cat-subs {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 8px;
+    margin: 10px 0 2px;
+    padding: 10px 0 0 48px;
+    border-top: 1px dashed var(--line-2);
+}
+
+.cat-sub { display: flex; align-items: center; gap: 2px; }
+
+.cat-sub-name {
+    width: 148px;
+    padding: 6px 9px;
+    font-size: 12.5px;
+}
+
+.cat-sub .split-x { width: 26px; height: 26px; flex: 0 0 auto; }
+.cat-subs .field-add { margin: 0; }
+
+/* A sub-category that cannot be removed says so the way its parent does. */
+.cat-sub.is-locked .cat-sub-name { border-color: var(--red-line); background: var(--red-soft); }
+.cat-row.is-locked { border-color: var(--red-line); background: var(--red-soft); animation: nudge .3s ease; }
+
+/* --- the tints a category may carry --- */
+.tone-jade   { background: var(--jade-soft);   color: var(--jade); }
+.tone-amber  { background: var(--amber-soft);  color: var(--amber); }
+.tone-indigo { background: var(--indigo-soft); color: var(--indigo); }
+.tone-red    { background: var(--red-soft);    color: var(--red); }
+.tone-violet { background: var(--violet-soft); color: var(--violet); }
+.tone-sky    { background: var(--sky-soft);    color: var(--sky); }
+.tone-rose   { background: var(--rose-soft);   color: var(--rose); }
+.tone-slate  { background: var(--slate-soft);  color: var(--slate); }
+
+/* ==========================================================================
+   Two controls sharing one field, and the line under a field
+   ========================================================================== */
+.field-pair { display: flex; gap: 8px; align-items: stretch; }
+.field-pair > :first-child { flex: 1 1 auto; min-width: 0; }
+.field-pair > select { flex: 0 0 auto; width: 122px; }
+
+/* Codes read better as codes: fixed width, and not shouted at in lower case. */
+/* ==========================================================================
+   Combobox — a select that happens to hold 154 things
+   ==========================================================================
+   The closed control says one short thing, the way the six-option select it
+   replaced did. Everything that makes 154 currencies findable — the currency
+   name, the countries that use it — lives in the popup, not in the field.
+   ========================================================================== */
+.combo { position: relative; flex: 0 0 auto; width: 132px; }
+
+.combo-btn {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+    width: 100%;
+    height: 100%;
+    padding: 11px 12px;
+    border: 1px solid var(--field-line);
+    border-radius: var(--radius-sm);
+    background: var(--paper);
+    font: inherit;
+    font-size: 13.5px;
+    font-weight: 600;
+    color: var(--ink);
+    cursor: pointer;
+    white-space: nowrap;
+    transition: border-color .16s ease;
+}
+
+.combo-btn:hover  { border-color: var(--field-hover, var(--line-strong)); }
+.combo-btn:focus-visible,
+.combo-btn[aria-expanded="true"] { border-color: var(--jade); outline: none; }
+.combo-btn i { font-size: 11px; color: var(--ink-3); }
+
+.combo-pop {
+    position: absolute;
+    z-index: 30;
+    top: calc(100% + 6px);
+    right: 0;
+    width: 320px;
+    max-width: 78vw;
+    padding: 8px;
+    border: 1px solid var(--line);
+    border-radius: 14px;
+    background: var(--paper);
+    box-shadow: 0 18px 44px rgba(0, 0, 0, .34);
+}
+
+.combo-search { width: 100%; margin-bottom: 6px; padding: 9px 11px; font-size: 13px; }
+
+.combo-list { max-height: 264px; overflow-y: auto; scrollbar-width: thin; }
+.combo-list::-webkit-scrollbar { width: 8px; }
+.combo-list::-webkit-scrollbar-thumb { background: var(--line-strong); border-radius: 999px; }
+
+/* One line per currency: the code leads because it is what gets recorded,
+   the country trails because it is what gets searched. */
+.combo-row {
+    display: grid;
+    grid-template-columns: 42px minmax(0, 1fr) auto;
+    gap: 2px 8px;
+    width: 100%;
+    padding: 7px 9px;
+    border: 0;
+    border-radius: 9px;
+    background: transparent;
+    font: inherit;
+    text-align: left;
+    cursor: pointer;
+}
+
+.combo-row:hover { background: var(--paper-2); }
+.combo-row.is-on { background: var(--jade-soft); }
+
+.combo-row b     { grid-row: 1 / 3; align-self: center; font-size: 12.5px; font-weight: 700; color: var(--ink); font-variant-numeric: tabular-nums; }
+.combo-row span  { font-size: 13px; color: var(--ink); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.combo-row small { grid-column: 2; font-size: 11px; color: var(--ink-3); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.combo-row i     { grid-row: 1 / 3; align-self: center; font-style: normal; font-size: 12px; font-weight: 650; color: var(--ink-3); }
+.combo-row.is-on b, .combo-row.is-on i { color: var(--jade); }
+
+.combo-none { margin: 0; padding: 14px 9px; font-size: 12.5px; color: var(--ink-3); text-align: center; }
+
+.field-note { font-size: 11px; line-height: 1.45; color: var(--ink-3); }
+
+/* ==========================================================================
+   Account editor — the second line only exists while Edit is open
+   ========================================================================== */
+.bgt-row.is-acct { grid-template-columns: 38px minmax(0, 1fr) 124px 140px 30px; }
+
+.acct-more {
+    grid-column: 2 / -1;
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    margin-top: 2px;
+}
+
+.acct-more select { flex: 1 1 130px; padding: 7px 10px; font-size: 12px; color: var(--ink-2); }
+
+/* A closed account keeps its row and stops looking current. */
+.bgt-row.is-off { opacity: .58; }
 
 /* ==========================================================================
    Stacked share bar + legend
@@ -901,6 +1442,103 @@ input[type="date"]:hover::-webkit-calendar-picker-indicator { opacity: .85; }
 
 .month-nav button:hover { background: rgba(255, 255, 255, .26); }
 
+/* ==========================================================================
+   Filter bar — a card that is really one control
+   ==========================================================================
+   A heading, a rule and 24px of padding announce a section. "Period" is not a
+   section; it is a switch the rest of the page hangs off. So it keeps the card
+   surface — it still has to look like it belongs to the page — and gives up
+   everything that was framing it.
+   ========================================================================== */
+.card.is-bar { padding: 13px 16px; }
+
+.bar-row {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 12px 14px;
+}
+
+.bar-row .seg { flex: 1 1 420px; }
+
+.bar-label {
+    display: inline-flex;
+    align-items: center;
+    gap: 7px;
+    flex: 0 0 auto;
+    padding-left: 4px;
+    font-size: 11px;
+    font-weight: 700;
+    letter-spacing: .06em;
+    text-transform: uppercase;
+    color: var(--ink-3);
+}
+
+.bar-label i { font-size: 13px; color: var(--jade); }
+
+/* The seg is nested inside the row now, so the spacing rules that key off it
+   as a sibling no longer reach what follows it. */
+.card.is-bar .field-grid { margin-top: 14px; }
+.card.is-bar .hint { margin-top: 12px; }
+
+/* ==========================================================================
+   Two-column form — a rule down the middle, not one long run of fields.
+   ==========================================================================
+   `.field-grid` packs fields by width, which is right for a form that is all
+   one kind of question. The entry form is not: half of it is the money and
+   half is where the money lands, and reflowing those two halves into each
+   other's rows is what made it read as an unbroken column. So the split is
+   declared rather than discovered, and the rule between the columns is the
+   thing that says so. */
+.form-split {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+    gap: 0 24px;
+}
+
+.form-col { display: flex; flex-direction: column; gap: 16px; min-width: 0; }
+
+/* The line sits 24px from each side's content, so it reads as a divider
+   between two columns rather than as an edge belonging to the right one. */
+.form-col + .form-col {
+    padding-left: 24px;
+    border-left: 1px solid var(--line-2);
+}
+
+.form-col-head {
+    display: flex;
+    align-items: center;
+    gap: 7px;
+    font-size: 11px;
+    font-weight: 700;
+    letter-spacing: .06em;
+    text-transform: uppercase;
+    color: var(--ink-3);
+}
+
+.form-col-head i { font-size: 13px; color: var(--jade); }
+
+/* "Add category", sitting under the picker it adds to. A link, not a button:
+   it opens a row further down the page rather than doing anything here. */
+.field-add {
+    align-self: flex-start;
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    margin-top: -2px;
+    padding: 0;
+    border: 0;
+    background: transparent;
+    font: inherit;
+    font-size: 12.5px;
+    font-weight: 650;
+    color: var(--jade);
+    cursor: pointer;
+}
+
+.field-add:hover { text-decoration: underline; }
+.field-add i { font-size: 13px; }
+
 /* The primary action of the whole app: file this entry. */
 .form-foot {
     display: flex;
@@ -913,6 +1551,10 @@ input[type="date"]:hover::-webkit-calendar-picker-indicator { opacity: .85; }
 }
 
 .form-foot .hint { margin: 0; flex: 1 1 220px; }
+
+/* The same footer shape without the weight: a secondary action and its note,
+   closing a panel rather than a form. */
+.form-foot.is-quiet { margin-top: 14px; padding-top: 14px; }
 
 .primary-btn {
     display: inline-flex;
@@ -1085,6 +1727,32 @@ input[type="date"]:hover::-webkit-calendar-picker-indicator { opacity: .85; }
 .acct-row b { font-weight: 700; color: var(--ink); font-variant-numeric: tabular-nums; }
 .acct-row b.is-minus { color: var(--red); }
 
+/* The ringgit figure leads, because it is what every total was built from;
+   what was actually handed over sits under it, so the receipt still matches. */
+.led-amount em {
+    display: block;
+    margin-top: 2px;
+    font-style: normal;
+    font-size: 11px;
+    font-weight: 600;
+    color: var(--ink-3);
+}
+
+/* An entry that cannot be totalled has to look like one. */
+.led-entry.needs-rate { background: var(--amber-soft); border-radius: 10px; }
+.led-entry.needs-rate .led-amount { color: var(--amber); }
+
+.rate-warn {
+    margin: 0 0 14px;
+    padding: 11px 13px;
+    border: 1px solid var(--amber);
+    border-radius: 12px;
+    background: var(--amber-soft);
+    font-size: 12.5px;
+    line-height: 1.5;
+    color: var(--amber);
+}
+
 /* An account that cannot be removed says so by flinching. */
 .bgt-row.is-locked {
     border-color: var(--red-line);
@@ -1101,16 +1769,22 @@ input[type="date"]:hover::-webkit-calendar-picker-indicator { opacity: .85; }
 /* ==========================================================================
    Responsive
    ========================================================================== */
+/* Two panes stop paying for themselves once each column is under about 600px:
+   that is where the five-column table in "Where it went" starts scrolling
+   sideways inside a card with room to spare below it. Below this the columns
+   are worth less than the width they cost, so they become one. */
+@media (max-width: 1320px) {
+    .deck { grid-template-columns: minmax(0, 1fr); }
+}
+
 @media (max-width: 1080px) {
     .tagline { display: none; }
 }
 
 @media (max-width: 900px) {
     .topbar { gap: 12px; padding: 12px 18px; }
+    .sidebar { padding: 10px 16px; }
     .brand img { width: 122px; }
-    .tabs button span { display: none; }
-    .tabs button { padding: 9px 14px; }
-    .tabs button i { font-size: 15px; }
 
     .main { padding: 18px 16px 48px; }
 
@@ -1125,7 +1799,12 @@ input[type="date"]:hover::-webkit-calendar-picker-indicator { opacity: .85; }
     /* Title, running total and the action button need their own lines here. */
     .card-head { flex-direction: column; align-items: flex-start; gap: 10px; }
     .card-note { text-align: left; }
-    .card-actions { width: 100%; justify-content: space-between; }
+
+    /* Three controls in one head — a note, a switch and a button — stopped
+       fitting on one line once the categories card had all three. */
+    .card-actions { width: 100%; flex-wrap: wrap; gap: 10px 12px; justify-content: space-between; }
+    .card-actions .seg.is-compact { flex: 1 1 100%; }
+    .card-actions .seg.is-compact button { flex: 1 1 auto; }
 
     .tally { gap: 14px 0; }
     .tally-cell { flex: 1 1 44%; padding: 0 14px; }
@@ -1167,24 +1846,89 @@ input[type="date"]:hover::-webkit-calendar-picker-indicator { opacity: .85; }
     .acct-summary .tally-cell { flex: 1 1 44%; padding: 0 14px; }
     .acct-summary .tally-cell:nth-child(odd) { border-left: 0; }
 
+    /* Two columns side by side stop being two columns at this width — each
+       one is narrower than a single date field. The divider turns 90°. */
+    .form-split { grid-template-columns: minmax(0, 1fr); gap: 20px 0; }
+
+    .form-col + .form-col {
+        padding: 20px 0 0;
+        border-left: 0;
+        border-top: 1px solid var(--line-2);
+    }
+
+    /* The manager's rows give up their side-by-side controls first. */
+    .cat-main {
+        grid-template-columns: 38px minmax(0, 1fr) auto;
+        grid-template-areas:
+            "disc name name"
+            ".    subs acts";
+        gap: 8px;
+    }
+
+    .cat-main .cat-disc          { grid-area: disc; }
+    .cat-main .cat-id            { grid-area: name; }
+    .cat-main [data-toggle-subs] { grid-area: subs; justify-self: start; }
+    .cat-main [data-toggle-on]   { grid-area: acts; justify-self: end; }
+    .cat-main [data-drop-cat]    { grid-area: acts; justify-self: end; margin-right: 46px; }
+
+    .cat-list { max-height: none; overflow: visible; padding-right: 0; }
+    .cat-look-row select { flex: 1 1 auto; width: auto; }
+
+    .cat-subs { padding-left: 0; }
+    .cat-sub-name { width: 128px; }
+
+    .field-pair { flex-wrap: wrap; }
+    .field-pair > select { width: 100%; }
+    .field-pair > .combo { width: 100%; }
+    .combo-pop { right: auto; left: 0; width: 100%; max-width: none; }
+
     .form-foot { gap: 12px; }
     .primary-btn { width: 100%; justify-content: center; }
 }
 
-/* Under 700px the brand, the tabs and the file buttons cannot share a line at
-   any sane size — the bar already ran off the edge at four tabs, and the
-   Dashboard only made it obvious sooner. So the tabs take a row of their own
-   and scroll sideways if a sixth module ever arrives. */
-@media (max-width: 700px) {
-    .topbar { flex-wrap: wrap; gap: 10px 12px; padding: 10px 14px; }
-    .tabs {
-        order: 3;
-        width: 100%;
-        margin-left: 0;
-        overflow-x: auto;
-        justify-content: space-between;
+/* A 236px column is a quarter of a 1000px window, and on a phone it is most
+   of the screen. Below this the sidebar stops being a column at all and
+   becomes a drawer: off the page until it is asked for, full width for its
+   labels when it is, and gone again the moment a module is chosen. Nothing
+   permanent is spent on navigation on a screen that has none to spare. */
+@media (max-width: 1000px) {
+    .sidebar {
+        position: fixed;
+        top: 0;
+        left: 0;
+        z-index: 40;
+        width: 264px;
+        max-width: 82vw;
+        height: 100vh;
+        padding: 22px 16px;
+        transform: translateX(-100%);
+        transition: transform .22s ease;
+        box-shadow: 0 0 44px rgba(0, 0, 0, .4);
     }
-    .backup { margin-left: auto; }
+
+    .app.is-open .sidebar { transform: none; }
+
+    /* The rail is a desktop idea; in a drawer there is room for the words. */
+    .app.is-rail .sidebar { flex-basis: auto; width: 264px; padding: 22px 16px; }
+    .app.is-rail .tagline { display: block; }
+    .app.is-rail .brand { padding: 0 8px; }
+    .app.is-rail .brand img { width: 152px; content: normal; }
+    .app.is-rail .tabs button { justify-content: flex-start; padding: 11px 12px; }
+
+    .app.is-rail .tabs button span {
+        position: static;
+        width: auto;
+        height: auto;
+        margin: 0;
+        overflow: visible;
+        clip-path: none;
+    }
+}
+
+@media (max-width: 700px) {
+    .topbar { padding: 10px 14px; }
+    .nav-toggle span { display: none; }
+    .nav-toggle { padding: 8px 10px; }
 }
 
 @media (max-width: 460px) {
@@ -1202,7 +1946,6 @@ input[type="date"]:hover::-webkit-calendar-picker-indicator { opacity: .85; }
     display: flex;
     align-items: center;
     gap: 8px;
-    margin-left: 16px;
     flex: 0 0 auto;
 }
 
@@ -1380,27 +2123,43 @@ input[type="date"]:hover::-webkit-calendar-picker-indicator { opacity: .85; }
 }
 
 .kpi {
-    display: flex;
-    flex-direction: column;
-    gap: 5px;
-    padding: 14px 15px;
+    display: grid;
+    grid-template-columns: 38px minmax(0, 1fr);
+    gap: 12px;
+    align-items: start;
+    padding: 15px;
     border: 1px solid var(--line);
     border-radius: var(--radius-sm);
     background: var(--paper-2);
 }
 
-.kpi-label {
-    display: flex;
+.kpi-body { display: flex; flex-direction: column; gap: 5px; min-width: 0; }
+
+/* A tinted disc rather than a bare glyph. Ten figures in one grid are slow to
+   tell apart by their words; the tint sorts them before the label is read. */
+.kpi-badge {
+    display: inline-flex;
     align-items: center;
-    gap: 7px;
+    justify-content: center;
+    width: 38px;
+    height: 38px;
+    border-radius: 12px;
+    font-size: 16px;
+}
+
+.kpi-badge.is-jade   { background: var(--jade-soft);   color: var(--jade); }
+.kpi-badge.is-amber  { background: var(--amber-soft);  color: var(--amber); }
+.kpi-badge.is-indigo { background: var(--indigo-soft); color: var(--indigo); }
+.kpi-badge.is-red    { background: var(--red-soft);    color: var(--red); }
+.kpi-badge.is-grey   { background: var(--track);       color: var(--ink-3); }
+
+.kpi-label {
     font-size: 11px;
     font-weight: 700;
     letter-spacing: .06em;
     text-transform: uppercase;
     color: var(--ink-3);
 }
-
-.kpi-label i { font-size: 12.5px; color: var(--jade); }
 
 .kpi-value {
     font-size: 19px;
@@ -1421,7 +2180,6 @@ input[type="date"]:hover::-webkit-calendar-picker-indicator { opacity: .85; }
     background: transparent;
 }
 
-.kpi.is-pending .kpi-label i,
 .kpi.is-pending .kpi-value { color: var(--ink-3); }
 
 /* --------------------------------------------------------------------------
