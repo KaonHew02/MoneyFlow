@@ -395,8 +395,14 @@
     /**
      * Three states, and only one of them says anything.
      *
-     * The words used to be there in every state, and the reader said plainly
-     * that they were confusing — which they were: "Not in Drive yet" and
+     * There are no words in any of them. The reader said three times that the
+     * wording confused rather than helped, and they were right: a sentence in
+     * a toolbar is something to decode every time you glance at it. A crossed
+     * cloud beside the button you have to press says the same thing without
+     * asking anyone to read anything, and the full explanation is a hover away
+     * for whoever wants it.
+     *
+     * The earlier wording was confusing — which they were: "Not in Drive yet" and
      * "Saved to Drive today" are both *statuses*, and a status you have to
      * interpret every time you glance at the toolbar is a tax on nothing. So a
      * working backup is a small green tick with the detail in its tooltip, and
@@ -423,7 +429,7 @@
             // Auto cannot make the first push itself: Google only signs anyone
             // in when they ask it to. Say what to do, not what is true.
             if (autoOn() && configured()) {
-                return show('warn', 'Press To Drive to start Auto',
+                return show('warn', '<i class="bi bi-cloud-slash-fill"></i>',
                     'Auto is on, but Google will only sign you in when you ask it to — so the '
                     + 'very first copy has to be one you send. Press "To Drive" once; after that '
                     + 'Auto keeps it up to date on its own.');
@@ -437,7 +443,7 @@
 
         // A week without a copy is worth interrupting for; anything less is not.
         if (days >= 7) {
-            return show('warn', 'Not saved for ' + days + ' days — press To Drive',
+            return show('warn', '<i class="bi bi-cloud-slash-fill"></i>',
                 'The last copy went to Drive on ' + then.toLocaleString() + '. If Auto is on, '
                 + 'Google has probably stopped signing you in without being asked — one press '
                 + 'fixes that.');

@@ -19,9 +19,13 @@ nothing here can touch it afterwards.
 **With Auto off, nothing leaves this browser unless you press a button.** That
 is the default, and it is the state the app ships in.
 
-Beside them sits the only status worth showing: *Saved to Drive today*, or *5
-days ago*, going amber after a week. If it says **Not in Drive yet**, nothing
-from this browser has ever been sent.
+Beside them sits one small icon, and no words:
+
+| | |
+|---|---|
+| a **cloud with a tick** | there is a copy in Drive — hover it for the date |
+| a **crossed-out cloud**, red | there is not, and pressing **To Drive** is what fixes it |
+| nothing at all | Drive is not set up, and there is nothing to say |
 
 ---
 
@@ -37,8 +41,8 @@ button. Two rules keep it out of the way:
   and one that is not blocked is worse.
 - **It cannot make the first push itself.** Signing in to Google has to be
   something you asked for, so on a browser that has never pushed, Auto stands
-  down every time. The stamp says **"Press To Drive to start Auto"** in red when
-  that is what is happening — press it once and Auto takes over.
+  down every time. A crossed-out cloud appears beside the button when that is what is
+  happening — press it once and Auto takes over.
 - **After that it renews itself.** A Google token lasts about an hour, so Auto
   quietly asks for a fresh one when it needs to. That works for as long as the
   permission you granted is still in place. If Google ever wants you to sign in
