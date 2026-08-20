@@ -37,8 +37,13 @@ button. Two rules keep it out of the way:
   and one that is not blocked is worse.
 - **It cannot make the first push itself.** Signing in to Google has to be
   something you asked for, so on a browser that has never pushed, Auto stands
-  down every time. The stamp says **"Auto is waiting on you"** in red when that
-  is what is happening — press **To Drive** once and it takes over from there.
+  down every time. The stamp says **"Press To Drive to start Auto"** in red when
+  that is what is happening — press it once and Auto takes over.
+- **After that it renews itself.** A Google token lasts about an hour, so Auto
+  quietly asks for a fresh one when it needs to. That works for as long as the
+  permission you granted is still in place. If Google ever wants you to sign in
+  again, Auto stands down rather than putting a window in front of you, and the
+  stamp goes red — one press and it carries on.
 - **It waits for the typing to stop.** One evening's entries is one upload, not
   a hundred.
 

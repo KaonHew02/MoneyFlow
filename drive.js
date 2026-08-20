@@ -343,8 +343,21 @@
 
     async function run() {
         if (!autoOn() || !configured()) return;
-        // Silent or not at all — see above.
-        if (!valid()) { showStamp(); return; }
+
+        // A token is good for about an hour and is held in memory only, so a
+        // reload loses it. Without this, Auto worked until the first reload
+        // after a manual push and then stopped for good — which is not what a
+        // switch called Auto should mean.
+        //
+        // `authorize(false)` asks Google for a fresh one *without* a prompt.
+        // Where the grant is still in place it comes back silently; where it
+        // is not, it fails, this stands down, and the stamp turns red asking
+        // for one press. Only ever while the tab is actually being looked at —
+        // nothing should be waking a background tab into a sign-in window.
+        if (!valid()) {
+            if (document.visibilityState !== 'visible') return;
+            try { await authorize(false); } catch (err) { showStamp(); return; }
+        }
 
         try {
             await writeFile(backupEnvelope());
