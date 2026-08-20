@@ -392,6 +392,19 @@
         showStamp();
     }
 
+    /**
+     * Three states, and only one of them says anything.
+     *
+     * The words used to be there in every state, and the reader said plainly
+     * that they were confusing — which they were: "Not in Drive yet" and
+     * "Saved to Drive today" are both *statuses*, and a status you have to
+     * interpret every time you glance at the toolbar is a tax on nothing. So a
+     * working backup is a small green tick with the detail in its tooltip, and
+     * words appear **only when something needs pressing**.
+     *
+     * What must never happen is silence *and* a broken backup. That one case
+     * is the whole reason this exists.
+     */
     function showStamp() {
         const el = $('driveStamp');
         if (!el) return;
@@ -399,39 +412,39 @@
         let stamp = null;
         try { stamp = localStorage.getItem(STAMP_KEY); } catch (err) { stamp = null; }
 
+        const show = (state, html, title) => {
+            el.dataset.state = state;
+            el.innerHTML = html;
+            el.title = title + storageNote();
+            el.classList.toggle('is-stale', state === 'warn');
+        };
+
         if (!stamp) {
-            // Auto cannot start itself. It never opens a Google sign-in window
-            // — a popup nobody asked for gets blocked — so on a browser that
-            // has never pushed, it stands down every time and does so in
-            // silence. Left as a neutral "Not in Drive yet", that reads like a
-            // fact rather than the switch quietly doing nothing.
-            const waiting = autoOn() && configured();
-            // An instruction, not a riddle. "Auto is waiting on you" was read
-            // as a status and left the reader asking whether they had to do
-            // anything — which is the one thing the label exists to answer.
-            el.textContent = waiting ? 'Press To Drive to start Auto' : 'Not in Drive yet';
-            el.classList.toggle('is-stale', waiting);
-            el.title = (waiting
-                ? 'Auto is on, but Google will only sign you in when you ask it to — so the '
-                  + 'very first copy has to be one you send. Press "To Drive" once; after that '
-                  + 'Auto keeps it up to date on its own.'
-                : 'Nothing has been sent to Drive from this browser.') + storageNote();
-            return;
+            // Auto cannot make the first push itself: Google only signs anyone
+            // in when they ask it to. Say what to do, not what is true.
+            if (autoOn() && configured()) {
+                return show('warn', 'Press To Drive to start Auto',
+                    'Auto is on, but Google will only sign you in when you ask it to — so the '
+                    + 'very first copy has to be one you send. Press "To Drive" once; after that '
+                    + 'Auto keeps it up to date on its own.');
+            }
+            return show('none', '', 'Nothing has been sent to Drive from this browser.');
         }
 
         const then = new Date(stamp);
         const days = Math.floor((Date.now() - then.getTime()) / 86400000);
-        el.textContent = days === 0 ? 'Saved to Drive today'
-            : days === 1 ? 'Saved to Drive yesterday'
-            : 'Saved to Drive ' + days + ' days ago';
-        // Stale is worth noticing, and worth noticing quietly.
-        el.classList.toggle('is-stale', days >= 7);
+        const when = days === 0 ? 'today' : days === 1 ? 'yesterday' : days + ' days ago';
 
-        // The storage figure has nowhere else sensible to live. It is not
-        // worth a line on screen until it matters — the alert bar handles
-        // that — but someone who wonders should be able to look without
-        // opening the console.
-        el.title = 'Last sent ' + then.toLocaleString() + storageNote();
+        // A week without a copy is worth interrupting for; anything less is not.
+        if (days >= 7) {
+            return show('warn', 'Not saved for ' + days + ' days — press To Drive',
+                'The last copy went to Drive on ' + then.toLocaleString() + '. If Auto is on, '
+                + 'Google has probably stopped signing you in without being asked — one press '
+                + 'fixes that.');
+        }
+
+        show('ok', '<i class="bi bi-cloud-check-fill"></i>',
+            'Saved to Drive ' + when + ' · ' + then.toLocaleString());
     }
 
     /* ------------------------------------------------------------------ */
