@@ -417,6 +417,11 @@
      * It offers rather than does. A pull replaces what is here, and a silent
      * one would be a network call and a sign-in nobody asked for — and a
      * sign-in popup not started by a click gets blocked anyway.
+     *
+     * **It must not be asked before the records are loaded.** They come out of
+     * IndexedDB asynchronously, so for a moment after DOMContentLoaded the
+     * store is legitimately empty and this would announce that a full book was
+     * missing. That is exactly what it did until it was made to wait.
      */
     function offerPull() {
         const bar = $('driveOffer');
@@ -458,7 +463,12 @@
 
         paintAuto();
         showStamp();
-        offerPull();
+
+        // Only once app.js says the records are in memory. Either order is
+        // possible: on the localStorage fallback the app is ready before this
+        // runs, and on IndexedDB it is not.
+        if (window.MFReady) offerPull();
+        else document.addEventListener('moneyflow:ready', offerPull, { once: true });
     }
 
     if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', start);

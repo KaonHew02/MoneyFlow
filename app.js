@@ -10526,4 +10526,10 @@ function startApp() {
     // permission prompt and a prompt about an empty book is a prompt about
     // nothing.
     if (MFStore.persist && !storeIsEmpty()) MFStore.persist();
+
+    // The records are in memory now. Anything that needs to ask about them —
+    // the Drive layer's "this browser is empty" offer — waits for this, because
+    // before it the store is legitimately empty and the answer would be a lie.
+    window.MFReady = true;
+    document.dispatchEvent(new Event('moneyflow:ready'));
 }
