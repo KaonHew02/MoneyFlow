@@ -6,7 +6,7 @@
  *
  *   Expenses        — the daily ledger the whole app is really for
  *   Bill Split      — a Malaysian restaurant bill, split by what you ate
- *   Budget Planner  — where a month's income actually goes
+ *   Planner         — where a period's income should go, and where it went
  *   Card Payoff     — how long a credit card balance really takes to clear
  *
  * The ledger is the one that keeps data; the other three only ever read what
@@ -20,21 +20,154 @@
  * the old "moneysplitor." prefix, so a missing key falls back to it once —
  * the next save writes it back under the current name.
  */
+/** Records come from `MFStore`, which mirrors them in memory so this can stay
+ *  synchronous whatever it is sitting on. See store.js. */
 function storedRaw(key) {
-    try {
-        return localStorage.getItem(key)
-            || localStorage.getItem(key.replace('moneyflow.', 'moneysplitor.'));
-    } catch (err) {
-        return null;
-    }
+    return MFStore.get(key);
 }
 
-const CHARGE_PRESETS = {
-    none: { service: 0,  tax: 0 },
-    tax:  { service: 0,  tax: 6 },
-    svc:  { service: 10, tax: 0 },
-    both: { service: 10, tax: 6 },
+/**
+ * --------------------------------------------------------------------
+ * Writing, and admitting when it did not work
+ * --------------------------------------------------------------------
+ * Every store used to end in `catch (err) { /* storage unavailable *\/ }`. That
+ * is right about a private window, where nothing can be written and the
+ * session should still work. It is badly wrong about a full quota: the app
+ * would keep running, showing everything typed, and lose the lot on reload —
+ * and a Drive copy is no help, because it uploads what was *written*, not
+ * what is on screen.
+ *
+ * So there is one door out, it remembers whether the last write landed, and
+ * the topbar says so when it did not.
+ */
+let storeBroken = false;
+let storeBrokenWhy = '';
+let storeMeasured = 0;
+
+function storeWrite(key, value) {
+    MFStore.set(key, value);
+    if (Date.now() - storeMeasured > 10000) paintStoreAlert();
+
+    // On the localStorage fallback the write has already happened by now, so
+    // this is the truth. On IndexedDB it is optimistic — the flush lands a
+    // moment later, and `storeReport` is what says otherwise.
+    if (storeBroken) return false;
+
+    // Tell the Drive layer a record moved. It does nothing unless the reader
+    // has switched auto-push on, and it is absent entirely when drive.js did
+    // not load — so this stays a one-way nudge. A write that did not land must
+    // not trigger one, or Drive would be sent a copy that is already stale.
+    if (typeof window.MFDriveTouch === 'function') window.MFDriveTouch();
+    return true;
+}
+
+/** Handed to `MFStore` at start-up: the one place a write's fate is noticed.
+ *  `null` means the last one landed, which is how the warning clears. */
+function storeReport(err) {
+    if (!err) {
+        if (!storeBroken) return;
+        storeBroken = false;
+        storeBrokenWhy = '';
+        paintStoreAlert();
+        return;
+    }
+    storeBroken = true;
+    storeBrokenWhy = (err && err.name === 'QuotaExceededError')
+        || /quota|exceeded|full/i.test(String(err && err.message))
+        ? 'quota'
+        : 'blocked';
+    paintStoreAlert();
+}
+
+/**
+ * Roughly what MoneyFlow is using, in bytes, broken down by store.
+ *
+ * `navigator.storage.estimate()` reports the whole origin and is a promise,
+ * and neither helps someone deciding what to prune. A per-store figure does:
+ * "your bill splits are 2.6 MB of it" is advice you can act on, where
+ * "you are at 82%" is only an alarm.
+ */
+const STORE_LABELS = {
+    'moneyflow.ledger.v1':     'entries in Expenses',
+    'moneyflow.split.v1':      'saved bill splits',
+    'moneyflow.budget.v1':     'saved budgets',
+    'moneyflow.goals.v1':      'savings goals',
+    'moneyflow.commit.v1':     'instalment plans',
+    'moneyflow.card.v1':       'credit cards',
+    'moneyflow.grow.v1':       'investments',
+    'moneyflow.categories.v1': 'categories and accounts',
 };
+
+function storeUsage() {
+    return MFStore.usage().map((row) => ({
+        key: row.key,
+        label: STORE_LABELS[row.key] || row.key,
+        bytes: row.bytes,
+    }));
+}
+
+function storeUsedBytes() {
+    return storeUsage().reduce((sum, row) => sum + row.bytes, 0);
+}
+
+/** The two or three worth naming when space is running short. */
+function storeBiggest(total) {
+    return storeUsage()
+        .filter((row) => row.bytes / total >= 0.1)
+        .slice(0, 3)
+        .map((row) => (row.bytes / 1024 / 1024).toFixed(2) + ' MB of ' + row.label);
+}
+
+/**
+ * What the store will actually take. On IndexedDB the browser is asked and
+ * answers in gigabytes; on the localStorage fallback it is the five megabytes
+ * every browser allows and none of them will tell you.
+ */
+const storeBudgetBytes = () => MFStore.budgetBytes();
+
+function paintStoreAlert() {
+    const bar = document.getElementById('storeAlert');
+    if (!bar) return;
+
+    storeMeasured = Date.now();
+    const used = storeUsedBytes();
+    const share = used / storeBudgetBytes() * 100;
+    const text = document.getElementById('storeAlertText');
+
+    if (storeBroken) {
+        bar.hidden = false;
+        bar.dataset.tone = 'red';
+        if (text) {
+            text.textContent = storeBrokenWhy === 'quota'
+                ? 'This browser is full, so the last change was NOT saved. Export now, or send a copy ' +
+                  'to Drive from another tab, before closing this one — anything typed since the last ' +
+                  'successful save exists only on this screen.'
+                : 'This browser is refusing to save — a private window does that. Nothing typed here ' +
+                  'will survive a reload. Export it to a file before you close the tab.';
+        }
+        return;
+    }
+
+    // Quiet until it is worth saying. Under four fifths of the budget there is
+    // nothing useful to tell anyone.
+    if (share >= 80) {
+        bar.hidden = false;
+        bar.dataset.tone = 'amber';
+        if (text) {
+            const big = storeBiggest(used);
+            // Nothing is ever deleted for you. Naming what is large turns a
+            // warning into something you can act on.
+            text.textContent = 'MoneyFlow is using about ' + Math.round(share) + '% of the space this ' +
+                'browser allows (' + (used / 1024 / 1024).toFixed(1) + ' MB) — mostly ' +
+                big.join(', ') + '. Nothing is deleted for you. Archive a dated copy first — the ' +
+                'ordinary Drive file is overwritten on every save, so deleting here would delete ' +
+                'there too — then remove what you no longer need from those tabs.';
+        }
+        return;
+    }
+
+    bar.hidden = true;
+}
 
 // Money is counted in sen so the shares can never drift by a fraction of a cent.
 const toSen   = (x) => Math.round((Number(x) || 0) * 100);
@@ -88,50 +221,181 @@ const nextId = (prefix) => prefix + (++seq);
 
 /**
  * ====================================================================
- * BILL SPLIT SIMULATION
+ * BILL SPLIT
  * ====================================================================
- * The people and their items are the only part of the module with a shape the
- * user controls, so they live in `splitState`. Values are still read back out
- * of the inputs on every keystroke — rebuilding the rows mid-typing would
- * throw away the caret, so the DOM is only rebuilt when a row is added or
- * removed.
+ * This module used to be a calculator: type the table's order in, read the
+ * four numbers out, close the tab. It answered the easy half of the question.
+ * The half anyone is still thinking about on Thursday is *has Amy paid me
+ * back yet*, and no amount of arithmetic answers that.
+ *
+ * So a bill is a record now. It is saved, it keeps the people who were at the
+ * table, and each debt is marked settled on its own when the money actually
+ * moves. The sums are the same sums; they just no longer disappear when the
+ * page closes.
+ *
+ * One way to divide a bill, arrived at by deleting three.
+ *
+ * It began as four methods — equally, by amount, by percentage, by item — and
+ * the reader took them apart one at a time, each time on the same observation:
+ * the buttons were not four different questions, they were one question with
+ * the answer written four ways. What is left is a list of lines, each under
+ * the person who had it, plus a card of lines the table shared. From those
+ * come the weights, one per person:
+ *
+ *     weight = their own lines + an even cut of the shared ones
+ *
+ * Everything the deleted methods did survives inside that:
+ *
+ *   an even split      the same figure on every person's line
+ *   a lump per person   one unnamed line each — a label is optional
+ *   by percentage       type the ringgit it works out to
+ *
+ * Everything after the weights — dish discounts, the bill discount, service
+ * charge, SST, cash rounding, the sen that will not divide — is one pipeline.
+ *
+ * The two kinds of discount are the reason the last two methods could merge
+ * rather than one of them simply going: a discount off the bill is shared out
+ * with the charges, and a discount on a dish stays with the dish. Both live
+ * here now, so there is nothing left for a second method to be.
+ *
+ * `people[0]` is always the reader. It is what "your share" and "owed to you"
+ * are measured from, and it is the only share that may ever become an expense.
+ *
  */
-const newItem   = () => ({ id: nextId('i'), label: '', amount: '' });
+const SPLIT_KEY = 'moneyflow.split.v1';
+
+const CHARGE_PRESETS = {
+    none: { service: 0,  tax: 0 },
+    tax:  { service: 0,  tax: 6 },
+    svc:  { service: 10, tax: 0 },
+    both: { service: 10, tax: 6 },
+};
+
+const newItem   = () => ({ id: nextId('i'), label: '', amount: '', off: '' });
 const newPerson = () => ({ id: nextId('p'), name: '', items: [newItem()] });
 
-let splitState = { people: [newPerson(), newPerson()], shared: [] };
+/** A blank bill. Two people, because a bill split one way is not a split. */
+function newBill() {
+    return {
+        id: '', seq: 0,
+        title: '',
+        date: todayIso(),
+        people: [newPerson(), newPerson()],
+        shared: [],
+        paidBy: '',
+        service: '0', tax: '0', discount: '', discountUnit: 'pct', round: false,
+        itemDiscounts: false, offUnit: 'pct',
+        settled: {},
+        entryId: '',
+        created: '', updated: '',
+    };
+}
 
-const personName = (person, index) => person.name.trim() || 'Person ' + (index + 1);
+let splitSeq = 0;
+let splitState = { bills: [], draft: null, editing: null, filter: 'open' };
 
+/** The bill on screen. Built on first use rather than at load: a blank one
+ *  wants today's date, and the date helpers are declared further down. */
+const draft = () => splitState.draft || (splitState.draft = newBill());
+
+/** Person 1 is the reader, whether or not they bothered to type a name. */
+const personName = (person, index) =>
+    person.name.trim() || (index === 0 ? 'You' : 'Person ' + (index + 1));
+
+/** The payer, as an index. A bill whose payer has since been removed falls
+ *  back to the reader rather than to nobody. */
+function payerIndex(bill) {
+    const at = bill.people.findIndex((p) => p.id === bill.paidBy);
+    return at >= 0 ? at : 0;
+}
+
+/**
+ * --------------------------------------------------------------------
+ * Reading the form
+ * --------------------------------------------------------------------
+ * Values are read back out of the inputs on every keystroke — rebuilding the
+ * rows mid-typing would throw away the caret, so the DOM is only rebuilt when
+ * a row is added or removed, or the method changes shape underneath it.
+ */
 function readItemRow(line, item) {
     if (!item) return;
     item.label  = line.querySelector('.split-item-label').value;
     item.amount = line.querySelector('.split-item-amount').value;
+
+    // Absent from the row when the per-dish column is off, and the figure
+    // already typed into it is kept rather than wiped — turning the column
+    // back on should find the discounts where they were left.
+    const off = line.querySelector('.split-item-off');
+    if (off) item.off = off.value;
+}
+
+/** The portions strip under a shared dish, when it has one. */
+function readPortions(block, item) {
+    if (!item) return;
+    item.units = item.units || {};
+    block.querySelectorAll('.split-unit').forEach((input) => {
+        item.units[input.dataset.person] = input.value;
+    });
 }
 
 function readSplitState() {
+    const bill = draft();
+
+    bill.title  = ($('splitTitle') || {}).value || '';
+    bill.date   = ($('splitDate')  || {}).value || bill.date;
+    bill.service  = String(num('splitService'));
+    bill.tax      = String(num('splitTax'));
+    bill.discount = ($('splitDiscount') || {}).value || '';
+    bill.round    = !!($('splitRound') || {}).checked;
+    bill.itemDiscounts = !!($('splitItemOff') || {}).checked;
+    bill.discountUnit = (($('splitDiscountUnit') || {}).dataset || {}).value === 'rm' ? 'rm' : 'pct';
+    bill.offUnit      = (($('splitItemOffUnit')  || {}).dataset || {}).value === 'rm' ? 'rm' : 'pct';
+
+    const paidBy = ($('splitPaidBy') || {}).value;
+    if (bill.people.some((p) => p.id === paidBy)) bill.paidBy = paidBy;
+
     document.querySelectorAll('#splitPeople .split-person').forEach((card) => {
-        const person = splitState.people.find((p) => p.id === card.dataset.person);
+        const person = bill.people.find((p) => p.id === card.dataset.person);
         if (!person) return;
+
         person.name = card.querySelector('.split-name').value;
+
         card.querySelectorAll('.split-item').forEach((line) => {
             readItemRow(line, person.items.find((item) => item.id === line.dataset.item));
         });
     });
 
     document.querySelectorAll('#splitShared .split-item').forEach((line) => {
-        readItemRow(line, splitState.shared.find((item) => item.id === line.dataset.item));
+        readItemRow(line, bill.shared.find((item) => item.id === line.dataset.item));
+    });
+
+    document.querySelectorAll('#splitShared .split-portions').forEach((block) => {
+        readPortions(block, bill.shared.find((item) => item.id === block.dataset.item));
     });
 }
 
+/**
+ * --------------------------------------------------------------------
+ * Building the rows
+ * --------------------------------------------------------------------
+ */
 function splitItemRow(item, placeholder) {
+    const perItem = !!draft().itemDiscounts;
+
     const line = document.createElement('div');
-    line.className = 'split-item';
+    line.className = 'split-item' + (perItem ? ' has-off' : '');
     line.dataset.item = item.id;
     line.innerHTML =
         '<input type="text" class="split-item-label">' +
         '<div class="money-input money-input-sm"><span class="affix">RM</span>' +
         '<input type="number" class="split-item-amount" min="0" step="0.10" placeholder="0.00" inputmode="decimal"></div>' +
+        (perItem
+            ? '<div class="money-input money-input-sm is-off' +
+              (draft().offUnit === 'rm' ? '' : ' is-suffix') + '"><span class="affix">' +
+              (draft().offUnit === 'rm' ? '−RM' : '%') + '</span>' +
+              '<input type="number" class="split-item-off" min="0" step="0.10" placeholder="0.00" ' +
+              'inputmode="decimal" aria-label="Discount on this dish"></div>'
+            : '') +
         '<button type="button" class="split-x" data-remove-item aria-label="Remove item">' +
         '<i class="bi bi-x-lg"></i></button>';
 
@@ -140,47 +404,60 @@ function splitItemRow(item, placeholder) {
     label.value = item.label;
     label.placeholder = placeholder;
     line.querySelector('.split-item-amount').value = item.amount;
+
+    const off = line.querySelector('.split-item-off');
+    if (off) off.value = item.off;
     return line;
 }
 
 function buildSplitPeople() {
     const host = $('splitPeople');
     if (!host) return;
+
+    const bill = draft();
     host.innerHTML = '';
 
-    splitState.people.forEach((person, index) => {
+
+    bill.people.forEach((person, index) => {
         const card = document.createElement('div');
-        card.className = 'split-person';
+        card.className = 'split-person' + (index === 0 ? ' is-me' : '');
         card.dataset.person = person.id;
         card.innerHTML =
             '<div class="split-person-head">' +
             '<input type="text" class="split-name">' +
+            (index === 0 ? '<span class="split-you">you</span>' : '') +
             '<span class="split-person-sum" id="sum_' + person.id + '">RM 0.00</span>' +
-            (splitState.people.length > 1
+            // The reader is the one row that cannot leave: every figure the
+            // module reports about the bill is measured from it.
+            (index > 0
                 ? '<button type="button" class="split-x" data-remove-person aria-label="Remove person">' +
                   '<i class="bi bi-x-lg"></i></button>'
                 : '') +
             '</div>' +
             '<div class="split-items"></div>' +
-            '<button type="button" class="split-add" data-add-item><i class="bi bi-plus-lg"></i> Add item</button>';
+            '<button type="button" class="split-add" data-add-item>' +
+            '<i class="bi bi-plus-lg"></i> Add item</button>';
 
         const nameField = card.querySelector('.split-name');
         nameField.value = person.name;
-        nameField.placeholder = 'Person ' + (index + 1);
+        nameField.placeholder = index === 0 ? 'You' : 'Person ' + (index + 1);
 
         const items = card.querySelector('.split-items');
-        person.items.forEach((item) => items.appendChild(splitItemRow(item, 'What they ate')));
+        person.items.forEach((item) => items.appendChild(splitItemRow(item, 'What they had')));
 
         host.appendChild(card);
     });
+
+    buildPaidByOptions();
 }
 
 function buildSplitShared() {
     const host = $('splitShared');
     if (!host) return;
+    const bill = draft();
     host.innerHTML = '';
 
-    if (!splitState.shared.length) {
+    if (!bill.shared.length) {
         host.innerHTML = '<p class="split-empty">Nothing shared yet &mdash; rice, a plate of fries, ' +
             'drinks for the table: anything everyone chips in for.</p>';
         return;
@@ -188,40 +465,217 @@ function buildSplitShared() {
 
     const items = document.createElement('div');
     items.className = 'split-items';
-    splitState.shared.forEach((item) => items.appendChild(splitItemRow(item, 'Shared dish')));
+    bill.shared.forEach((item) => {
+        items.appendChild(splitItemRow(item, 'Shared dish'));
+        items.appendChild(splitPortionRow(item, bill));
+    });
     host.appendChild(items);
 }
 
-/** Runs the whole bill: what each person ordered, the charges, and who owes what. */
-function splitCompute() {
-    const serviceRate = Math.max(0, num('splitService'));
-    const taxRate     = Math.max(0, num('splitTax'));
-    const roundCash   = !!($('splitRound') || {}).checked;
+/**
+ * Who had a shared dish, and how much of it.
+ *
+ * Two questions, one strip, because they are the same axis. A table of four
+ * where only two shared the plate is the same arithmetic as a dish nobody
+ * divided equally — somebody's share is zero.
+ *
+ *   Shared by   a chip per person, tap to drop them out of this dish
+ *   Portions    how many each had, when "evenly" is not true either
+ *
+ * The case portions exist for: five pao at RM11, one person had three and the
+ * other two. Splitting that evenly charges the second person for half a pao
+ * they never ate. Portions are counts, not money — you say how many, and the
+ * dish divides in that ratio, so the same boxes handle two slices of cake,
+ * three of five beers, or anything else measured in helpings.
+ *
+ * Both default to "everyone, equally", which is what a shared dish always was
+ * — so a bill that never touches this strip behaves exactly as it did.
+ */
+function splitPortionRow(item, bill) {
+    const out   = item.out || [];
+    const units = item.units || {};
+    const isIn  = (person) => !out.includes(person.id);
 
-    const itemSen = (item) => Math.max(0, toSen(parseFloat(item.amount) || 0));
-    const ownSen  = splitState.people.map((p) => p.items.reduce((sum, item) => sum + itemSen(item), 0));
+    const block = document.createElement('div');
+    block.className = 'split-portions' + (item.byUnits ? ' is-on' : '') +
+        (out.length ? ' has-out' : '');
+    block.dataset.item = item.id;
 
-    const sharedSen   = splitState.shared.reduce((sum, item) => sum + itemSen(item), 0);
-    const sharedParts = allocateSen(sharedSen, splitState.people.map(() => 1));
-    const ateSen      = ownSen.map((own, i) => own + (sharedParts[i] || 0));
+    const chips = bill.people.map((person, index) =>
+        '<button type="button" class="split-chip' + (isIn(person) ? ' is-in' : '') + '" ' +
+        'data-share="' + person.id + '" aria-pressed="' + isIn(person) + '">' +
+        '<i class="bi ' + (isIn(person) ? 'bi-check-lg' : 'bi-plus-lg') + '"></i>' +
+        '<span data-person-label="' + person.id + '">' +
+        escapeHtml(personName(person, index)) + '</span></button>').join('');
 
+    const boxes = bill.people.filter(isIn).map((person, index) =>
+        '<label class="split-portion">' +
+            '<span data-person-label="' + person.id + '">' +
+                escapeHtml(personName(person, bill.people.indexOf(person))) + '</span>' +
+            '<input type="number" class="split-unit" data-person="' + person.id + '" ' +
+            'min="0" step="1" placeholder="0" inputmode="decimal" ' +
+            'aria-label="Portions for ' + escapeHtml(personName(person, bill.people.indexOf(person))) + '">' +
+        '</label>').join('');
+
+    block.innerHTML =
+        '<div class="split-share">' +
+            '<span class="split-share-label">Shared by</span>' +
+            '<div class="split-chips">' + chips + '</div>' +
+            '<button type="button" class="split-portion-toggle' + (item.byUnits ? ' is-on' : '') + '" ' +
+                'data-portions>' +
+                (item.byUnits
+                    ? '<i class="bi bi-arrow-left-right"></i> Back to an even split'
+                    : '<i class="bi bi-diagram-2"></i> Split by portions') +
+            '</button>' +
+        '</div>' +
+        (item.byUnits
+            ? '<div class="split-portion-head">' +
+                  '<span>Portions <b id="pn_' + item.id + '">&mdash;</b></span>' +
+              '</div>' +
+              '<div class="split-portion-row">' + boxes + '</div>'
+            : '') +
+        '<p class="split-portion-foot" id="pf_' + item.id + '">&mdash;</p>';
+
+    block.querySelectorAll('.split-unit').forEach((input) => {
+        input.value = units[input.dataset.person] || '';
+    });
+    return block;
+}
+
+/** Who paid. Rebuilt with the people, since it is a list of them. */
+function buildPaidByOptions() {
+    const select = $('splitPaidBy');
+    if (!select) return;
+
+    const bill = draft();
+    select.innerHTML = '';
+    bill.people.forEach((person, index) => {
+        const option = document.createElement('option');
+        option.value = person.id;
+        option.textContent = personName(person, index);
+        select.appendChild(option);
+    });
+
+    if (!bill.people.some((p) => p.id === bill.paidBy)) bill.paidBy = bill.people[0].id;
+    select.value = bill.paidBy;
+}
+
+/**
+ * --------------------------------------------------------------------
+ * The sums
+ * --------------------------------------------------------------------
+ * One pipeline, whatever the method: weights in, a bill total and a row of
+ * shares out. The weights are the only thing the four methods disagree about.
+ */
+function splitCompute(source) {
+    const bill = source || draft();
+    const grossSen = (item) => Math.max(0, toSen(parseFloat(item.amount) || 0));
+
+    // A discount on one dish is not the same animal as a discount on the bill.
+    // The bill's scales every share by the same factor and so changes nobody's
+    // position; a dish's belongs to whoever ate that dish, and moves what they
+    // owe against everyone else. So it comes off the item, before the weights
+    // are taken, and never off the total.
+    const offSen = (item) => {
+        if (!bill.itemDiscounts) return 0;
+        const typed = Math.max(0, parseFloat(item.off) || 0);
+        const raw = bill.offUnit === 'rm'
+            ? toSen(typed)
+            : Math.round(grossSen(item) * typed / 100);
+        return Math.min(raw, grossSen(item));
+    };
+    const itemSen = (item) => grossSen(item) - offSen(item);
+
+    const all = bill.people.reduce((list, p) => list.concat(p.items), []).concat(bill.shared);
+    const listedSen  = all.reduce((sum, item) => sum + grossSen(item), 0);
+    const itemOffSen = all.reduce((sum, item) => sum + offSen(item), 0);
+
+    const ownSen = bill.people.map((p) => p.items.reduce((sum, item) => sum + itemSen(item), 0));
+    const sharedSen = bill.shared.reduce((sum, item) => sum + itemSen(item), 0);
+
+    // How one shared dish divides. Evenly unless the dish says otherwise, in
+    // which case it divides by portions: five pao at RM11, three eaten by one
+    // person and two by another, is 6.60 and 4.40 — not 5.50 each.
+    //
+    // A dish set to portions with nothing typed in yet has no ratio to divide
+    // by; `allocateSen` splits a zero total weight equally, which is the only
+    // honest answer until a number appears.
+    // A dish somebody sat out weighs nothing for them, whichever way the rest
+    // of it divides. `out` is the exclusion list rather than the guest list so
+    // that a person added to the bill later joins every dish by default —
+    // which is what "shared by everyone" has to keep meaning.
+    const unitsOf = (item) => bill.people.map((p) => {
+        if ((item.out || []).includes(p.id)) return 0;
+        if (!item.byUnits) return 1;
+        return Math.max(0, parseFloat((item.units || {})[p.id]) || 0);
+    });
+
+    // Allocated dish by dish rather than over the pile: once two dishes divide
+    // different ways there is no single ratio to allocate the pile by, and the
+    // odd sen belongs to whoever was short on *that* dish.
+    const sharedParts = bill.people.map(() => 0);
+    const sharedSplits = bill.shared.map((item) => {
+        const units = unitsOf(item);
+        const parts = allocateSen(itemSen(item), units);
+        parts.forEach((sen, i) => { sharedParts[i] += sen; });
+        return { item, units, parts, total: units.reduce((sum, u) => sum + u, 0) };
+    });
+
+    const weights = ownSen.map((own, i) => own + (sharedParts[i] || 0));
     // Shared items count towards the bill even before anyone is listed to carry them.
-    const foodSen     = ownSen.reduce((sum, v) => sum + v, 0) + sharedSen;
-    const discountSen = Math.min(Math.max(0, toSen(num('splitDiscount'))), foodSen);
+    const foodSen = ownSen.reduce((sum, v) => sum + v, 0) + sharedSen;
+
+    const serviceRate = Math.max(0, parseFloat(bill.service) || 0);
+    const taxRate     = Math.max(0, parseFloat(bill.tax) || 0);
+
+    const discountTyped = Math.max(0, parseFloat(bill.discount) || 0);
+    const discountSen = Math.min(bill.discountUnit === 'rm'
+        ? toSen(discountTyped)
+        : Math.round(foodSen * discountTyped / 100), foodSen);
     const netSen      = foodSen - discountSen;
     const serviceSen  = Math.round(netSen * serviceRate / 100);
-    const taxSen      = Math.round((netSen + serviceSen) * taxRate / 100);
+    // SST is charged on the food, *not* on the service charge. Malaysian F&B
+    // receipts print the tax base and it is the subtotal every time: a bill of
+    // RM204.20 + 10% service shows "Taxable 204.20 / Tax 12.25", not 6% of
+    // 224.62. Taxing the sum overcharged the table by 6% of the service charge
+    // — RM1.23 on that bill — and every share with it.
+    const taxSen      = Math.round(netSen * taxRate / 100);
 
     let grandSen = netSen + serviceSen + taxSen;
-    if (roundCash) grandSen = Math.round(grandSen / 5) * 5;
+    if (bill.round) grandSen = Math.round(grandSen / 5) * 5;
+
+    const paysSen = allocateSen(grandSen, weights);
+    const payer   = payerIndex(bill);
+
+    // What is still outstanding, and to whom. The payer owes nobody.
+    const debts = bill.people.map((person, index) => ({
+        person, index,
+        amount: paysSen[index],
+        settled: index === payer || !!bill.settled[person.id],
+    })).filter((d) => d.index !== payer && d.amount > 0);
+
+    const openSen = debts.filter((d) => !d.settled).reduce((sum, d) => sum + d.amount, 0);
 
     return {
-        ownSen, sharedSen, ateSen, foodSen, discountSen, serviceSen, taxSen, grandSen,
-        serviceRate, taxRate,
-        // Each head pays in proportion to what they ate, charges and all.
-        paysSen: allocateSen(grandSen, ateSen),
+        bill, weights, ownSen, sharedSen, sharedSplits, sharedParts, foodSen, discountSen, serviceSen, taxSen, grandSen,
+        serviceRate, taxRate, payer,
+        // What the menu said, and what came off it dish by dish. Both zero
+        // for every method but item-based, which has no dishes to discount.
+        listedSen, itemOffSen,
+        discountTyped,
+        // Each person's slice of the bill before charges, and after.
+        shareSen: allocateSen(foodSen, weights),
+        paysSen,
+        debts,
+        openSen,
+        mySen: paysSen[0] || 0,
+        // A bill with nothing left to chase is done, but an empty one is not
+        // "settled" — it has simply not been filled in yet.
+        isSettled: grandSen > 0 && debts.every((d) => d.settled),
     };
 }
+
+const billIsSettled = (bill) => splitCompute(bill).isSettled;
 
 /** Keep the preset buttons in step with the two percentage fields. */
 function syncChargePreset() {
@@ -241,33 +695,64 @@ function applyChargePreset(key) {
     if ($('splitTax'))     $('splitTax').value     = String(preset.tax);
 }
 
+/** Which fields the chosen method actually needs on screen. */
+/** The few controls that appear and disappear with what is switched on. */
+function syncSplitForm() {
+    const bill = draft();
+
+    // No unit to choose until there are dish discounts to put one on.
+    if ($('splitItemOffUnit')) $('splitItemOffUnit').hidden = !bill.itemDiscounts;
+
+    const asPct = bill.discountUnit !== 'rm';
+    if ($('splitDiscountBox')) $('splitDiscountBox').classList.toggle('is-suffix', asPct);
+    set('splitDiscountAffix', asPct ? '%' : 'RM');
+}
+
+/**
+ * --------------------------------------------------------------------
+ * Painting
+ * --------------------------------------------------------------------
+ */
 function paintSplit(bill) {
-    const pax = splitState.people.length;
+    const b = bill.bill;
+    const pax = b.people.length;
 
     set('splitTotal', money(fromSen(bill.grandSen)));
     set('splitPaxFoot', pax
         ? pax + (pax === 1 ? ' person' : ' people') + ' · ' +
-          money(fromSen(Math.round(bill.grandSen / pax))) + ' each if split evenly'
+          'paid by ' +
+          personName(b.people[bill.payer], bill.payer)
         : 'Add someone to split with');
 
-    set('splitFood', money(fromSen(bill.foodSen)));
-    set('splitFoodFoot', bill.sharedSen > 0
-        ? money(fromSen(bill.sharedSen)) + ' of that is shared'
-        : 'Before any charges');
+    set('splitYourShare', money(fromSen(bill.mySen)));
+    set('splitYourShareFoot', bill.grandSen > 0
+        ? pct(bill.mySen / bill.grandSen * 100) + ' of ' + money(fromSen(bill.grandSen))
+        : 'Nothing to split yet');
 
-    const chargesSen = bill.serviceSen + bill.taxSen;
-    set('splitChargeAdded', chargesSen ? '+ ' + money(fromSen(chargesSen)) : money(0));
-    const rates = [
-        bill.serviceRate ? 'service ' + pct(bill.serviceRate, 0) : '',
-        bill.taxRate ? 'SST ' + pct(bill.taxRate, 0) : '',
-    ].filter(Boolean);
-    set('splitChargeFoot', rates.length
-        ? rates.join(' + ') + ' · ' + pct(bill.foodSen ? chargesSen / bill.foodSen * 100 : 0) + ' of the food'
-        : 'No service charge or SST');
+    // The direction of the debt is the whole point of the figure, so the
+    // label changes with it rather than making the reader work it out.
+    const iPaid = bill.payer === 0;
+    set('splitOwedLabel', iPaid ? 'Owed to you' : 'You owe');
+    if (iPaid) {
+        set('splitOwed', money(fromSen(bill.openSen)));
+        const done = bill.debts.filter((d) => d.settled).length;
+        set('splitOwedFoot', bill.debts.length
+            ? done + ' of ' + bill.debts.length + ' paid you back'
+            : 'Nobody owes you anything');
+    } else {
+        const mine = bill.debts.find((d) => d.index === 0);
+        set('splitOwed', money(fromSen(mine && !mine.settled ? mine.amount : 0)));
+        set('splitOwedFoot', !mine ? 'Nothing outstanding'
+            : mine.settled ? 'Paid back' : 'to ' + personName(b.people[bill.payer], bill.payer));
+    }
 
-    // --- side panel tally ---
-    set('splitTallyFood', money(fromSen(bill.foodSen)));
+    // --- the tally ---
+    set('splitTallyFood', money(fromSen(bill.itemOffSen > 0 ? bill.listedSen : bill.foodSen)));
+    set('splitTallyItemOff', '− ' + money(fromSen(bill.itemOffSen)));
     set('splitTallyDiscount', '− ' + money(fromSen(bill.discountSen)));
+    set('splitTallyDiscountLabel', b.discountUnit === 'pct' && bill.discountTyped
+        ? 'Discount ' + pct(bill.discountTyped, bill.discountTyped % 1 ? 1 : 0)
+        : 'Discount');
     set('splitTallyService', money(fromSen(bill.serviceSen)));
     set('splitTallyTax', money(fromSen(bill.taxSen)));
     set('splitTallyTotal', money(fromSen(bill.grandSen)));
@@ -275,43 +760,77 @@ function paintSplit(bill) {
     set('splitTallyTaxLabel', 'SST ' + pct(bill.taxRate, 0));
 
     const showRow = (id, show) => { const row = $(id); if (row) row.hidden = !show; };
+    showRow('splitRowItemOff', bill.itemOffSen > 0);
     showRow('splitRowDiscount', bill.discountSen > 0);
     showRow('splitRowService', bill.serviceRate > 0);
     showRow('splitRowTax', bill.taxRate > 0);
 
-    // --- per-person running totals ---
-    splitState.people.forEach((person, index) => {
-        set('sum_' + person.id, money(fromSen(bill.ateSen[index])));
+    const chargeBits = [
+        bill.serviceRate ? 'service ' + pct(bill.serviceRate, 0) : '',
+        bill.taxRate ? 'SST ' + pct(bill.taxRate, 0) : '',
+        bill.discountSen ? '− ' + (b.discountUnit === 'pct'
+            ? pct(bill.discountTyped, bill.discountTyped % 1 ? 1 : 0) : money(fromSen(bill.discountSen))) +
+            ' off the bill' : '',
+        bill.itemOffSen ? '− ' + money(fromSen(bill.itemOffSen)) + ' off dishes' : '',
+        b.itemDiscounts && !bill.itemOffSen ? 'per-dish discounts on' : '',
+        b.round ? 'rounded' : '',
+    ].filter(Boolean);
+    set('splitChargeSummary', chargeBits.length ? chargeBits.join(' · ') : 'None');
+
+    // --- per-person running totals, and whether the method adds up ---
+    b.people.forEach((person, index) => {
+        set('sum_' + person.id, money(fromSen(bill.paysSen[index])));
     });
-    set('splitOwnTotal', money(fromSen(bill.foodSen - bill.sharedSen)));
     set('splitSharedTotal', money(fromSen(bill.sharedSen)));
-    set('splitEvenNote', bill.foodSen > 0 && splitState.people.length > 1
-        ? 'Sorted by what each person owes'
-        : '');
+    paintPortions(bill);
+
+    set('splitPeopleNote', bill.foodSen > 0
+        ? 'Ordered ' + money(fromSen(bill.foodSen - bill.sharedSen))
+        : 'Nothing on the bill yet');
+
+    set('splitEvenNote', bill.grandSen > 0 ? 'Charges and discounts included' : '');
 
     // --- the answer table ---
     const body = $('splitBody');
     if (!body) return;
     body.innerHTML = '';
 
-    if (bill.foodSen <= 0) {
-        body.appendChild(emptyRow('Put in what everyone ate and the split works itself out.', 4));
+    if (bill.grandSen <= 0) {
+        body.appendChild(emptyRow(
+            'Put in what everyone had and the split works itself out.', 4));
         return;
     }
 
-    splitState.people.forEach((person, index) => {
-        const ate    = bill.ateSen[index];
+    b.people.forEach((person, index) => {
+        const share  = bill.shareSen[index];
         const pays   = bill.paysSen[index];
-        const charge = pays - ate;
-        const ordered = person.items.filter((item) => (parseFloat(item.amount) || 0) > 0).length;
+        const charge = pays - share;
+
+        const lines = person.items.filter((item) => (parseFloat(item.amount) || 0) > 0).length;
+
+        // "A share of the table" is only true of a dish that divided evenly.
+        // Once a dish went by portions, saying it of someone who ate three of
+        // five pao understates what they had and why they owe more.
+        const portions = (bill.sharedSplits || [])
+            .filter((split) => split.item.byUnits && split.total)
+            .reduce((sum, split) => sum + (split.units[index] || 0), 0);
+
+        // And somebody who sat out every shared dish had no share of the
+        // table at all — saying they did would be the plainest kind of wrong.
+        const sharedNote = portions > 0
+            ? ' + ' + fmt(portions, portions % 1 ? 1 : 0) +
+              (portions === 1 ? ' portion shared' : ' portions shared')
+            : (bill.sharedParts || [])[index] > 0 ? ' + a share of the table' : '';
+
+        const detail = (lines ? lines + (lines === 1 ? ' item' : ' items') : 'Nothing ordered') + sharedNote;
 
         const tr = document.createElement('tr');
         tr.appendChild(cell(
             '<strong>' + escapeHtml(personName(person, index)) + '</strong>' +
-            '<small>' + (ordered ? ordered + (ordered === 1 ? ' item' : ' items') : 'Nothing ordered') +
-            (bill.sharedSen > 0 ? ' + a share of the table' : '') + '</small>'
+            (index === bill.payer ? '<span class="tag is-paid">paid</span>' : '') +
+            '<small>' + detail + '</small>'
         ));
-        tr.appendChild(cell(fmt(fromSen(ate))));
+        tr.appendChild(cell(fmt(fromSen(share))));
         tr.appendChild(cell(
             (charge < 0 ? '− ' : charge > 0 ? '+ ' : '') + fmt(Math.abs(fromSen(charge))),
             charge < 0 ? 'is-minus' : 'is-muted'
@@ -329,22 +848,225 @@ function paintSplit(bill) {
     body.appendChild(totalRow);
 }
 
+/**
+ * Who still owes whom, and the one button that moves a debt from one state to
+ * the other. Marking a debt settled writes straight to disk: it is a fact
+ * about the world, not a figure being drafted, and losing it to a closed tab
+ * would be worse than losing a half-typed bill.
+ */
+function paintSettle(bill) {
+    const b = bill.bill;
+    const list = $('splitSettleList');
+    const saved = !!splitState.editing;
+    const payerName = personName(b.people[bill.payer], bill.payer);
+    const iPaid = bill.payer === 0;
+
+    set('splitSettleNote', !saved ? 'Not saved yet'
+        : bill.isSettled ? '✅ Settled'
+        : bill.debts.length ? money(fromSen(bill.openSen)) + ' outstanding'
+        : '—');
+
+    set('splitSettleLead', bill.grandSen <= 0
+        ? 'Nothing to settle yet.'
+        : (iPaid ? 'You paid ' : payerName + ' paid ') + money(fromSen(bill.grandSen)) +
+          '. ' + (iPaid ? 'Your own share is ' : 'Their own share is ') +
+          money(fromSen(bill.paysSen[bill.payer])) + '.');
+
+    if (list) {
+        list.innerHTML = '';
+
+        if (!saved) {
+            list.innerHTML = '<p class="split-empty">Save the bill and each debt gets its own ' +
+                'tick here, so a month later you can still see who paid you back.</p>';
+        } else if (!bill.debts.length) {
+            list.innerHTML = '<p class="split-empty">Nobody owes anything on this bill.</p>';
+        } else {
+            bill.debts.forEach((debt) => {
+                const row = document.createElement('div');
+                row.className = 'settle-row' + (debt.settled ? ' is-done' : '');
+                const who = personName(debt.person, debt.index);
+
+                // Said from the reader's side wherever they are in it.
+                const sentence = debt.index === 0
+                    ? '<strong>You</strong> owe ' + escapeHtml(payerName)
+                    : iPaid
+                        ? '<strong>' + escapeHtml(who) + '</strong> owes you'
+                        : '<strong>' + escapeHtml(who) + '</strong> owes ' + escapeHtml(payerName);
+
+                row.innerHTML =
+                    '<span class="settle-who">' + sentence + '</span>' +
+                    '<b>' + money(fromSen(debt.amount)) + '</b>' +
+                    (debt.settled
+                        ? '<span class="settle-done"><i class="bi bi-check-circle-fill"></i> Settled</span>' +
+                          '<button type="button" class="ghost-btn is-small" data-unsettle="' + debt.person.id + '">Undo</button>'
+                        : '<button type="button" class="ghost-btn is-small" data-settle="' + debt.person.id + '">' +
+                          '<i class="bi bi-check-lg"></i> Mark settled</button>');
+                list.appendChild(row);
+            });
+        }
+    }
+
+    paintExpenseLink(bill);
+}
+
+/**
+ * The link into the ledger. Only the reader's own share may cross — the rest
+ * of the bill was lent for the length of a dinner, and putting it in the
+ * ledger would tell every total in the app they spent four times what they did.
+ */
+function paintExpenseLink(bill) {
+    const body  = $('splitExpBody');
+    const state = $('splitExpState');
+    const hint  = $('splitExpHint');
+    const saved = !!splitState.editing;
+    const entry = bill.bill.entryId
+        && ledgerState.entries.find((e) => e.id === bill.bill.entryId);
+
+    set('splitExpAmount', money(fromSen(bill.mySen)));
+
+    if (!body || !state) return;
+
+    // A bill can lose its entry the ordinary way — deleted from the Expenses
+    // list — and the link has to notice rather than keep claiming it is there.
+    if (bill.bill.entryId && !entry) {
+        bill.bill.entryId = '';
+        commitBill();
+    }
+
+    const linked = !!entry;
+    body.hidden = linked || !saved || bill.mySen <= 0;
+    state.hidden = !linked;
+
+    if (linked) {
+        state.innerHTML = '<i class="bi bi-check-circle-fill"></i> ' +
+            escapeHtml(money(parseFloat(entry.amount) || 0)) + ' recorded on ' +
+            escapeHtml(dayShort(entry.date)) +
+            ' <button type="button" class="ghost-btn is-small" id="splitExpUndo">Remove</button>';
+    }
+
+    if (hint) {
+        hint.textContent = !saved
+            ? 'Save the bill first — the entry it creates is linked back to it, so it can be undone from here.'
+            : bill.mySen <= 0
+                ? 'Your share is nothing, so there is no expense to record.'
+                : linked
+                    ? 'Removing this deletes that entry from Expenses. There is only ever one copy — the bill points at it rather than keeping its own.'
+                    : 'Your share only. The rest of the bill was never your money, so recording all of it would tell every total in the app that you spent far more than you did.';
+    }
+}
+
+/** Saved bills, newest first. */
+function paintBills() {
+    const body = $('splitBills');
+    if (!body) return;
+
+    const filter = splitState.filter;
+    const rows = splitState.bills
+        .map((bill) => ({ bill, sums: splitCompute(bill) }))
+        .filter((row) => filter === 'all'
+            || (filter === 'settled' ? row.sums.isSettled : !row.sums.isSettled))
+        .sort((a, b) => (a.bill.date === b.bill.date
+            ? b.bill.seq - a.bill.seq
+            : (a.bill.date < b.bill.date ? 1 : -1)));
+
+    const open = splitState.bills.filter((bill) => !billIsSettled(bill));
+    const owed = open.reduce((sum, bill) => {
+        const sums = splitCompute(bill);
+        return sum + (sums.payer === 0 ? sums.openSen : 0);
+    }, 0);
+    set('splitBillsNote', splitState.bills.length
+        ? splitState.bills.length + (splitState.bills.length === 1 ? ' bill' : ' bills') +
+          (owed > 0 ? ' · ' + money(fromSen(owed)) + ' owed to you' : '')
+        : 'Nothing saved yet');
+
+    body.innerHTML = '';
+
+    if (!rows.length) {
+        body.appendChild(emptyRow(splitState.bills.length
+            ? 'No ' + filter + ' bills.'
+            : 'Saved bills land here, and stay until you delete them.', 6));
+        return;
+    }
+
+    rows.forEach(({ bill, sums }) => {
+        const tr = document.createElement('tr');
+        if (splitState.editing === bill.id) tr.className = 'is-current';
+
+        tr.appendChild(cell('<strong>' + escapeHtml(dayShort(bill.date)) + '</strong>' +
+            '<small>' + escapeHtml(String(bill.date).slice(0, 4)) + '</small>'));
+
+        tr.appendChild(cell('<strong>' + escapeHtml(bill.title.trim() || 'Untitled bill') + '</strong>' +
+            '<small>' + bill.people.length + ' people' +
+            (bill.entryId ? ' · recorded' : '') + '</small>'));
+
+        tr.appendChild(cell(fmt(fromSen(sums.grandSen))));
+        tr.appendChild(cell(fmt(fromSen(sums.mySen)), 'is-strong'));
+
+        tr.appendChild(cell(sums.isSettled
+            ? '<span class="tag is-done">Settled</span>'
+            : '<span class="tag is-open">' + money(fromSen(sums.openSen)) + '</span>'));
+
+        tr.appendChild(cell(
+            '<button type="button" class="split-x" data-open-bill="' + bill.id + '" aria-label="Open bill">' +
+            '<i class="bi bi-pencil"></i></button>' +
+            '<button type="button" class="split-x" data-copy-bill="' + bill.id + '" aria-label="Duplicate bill">' +
+            '<i class="bi bi-files"></i></button>' +
+            '<button type="button" class="split-x" data-drop-bill="' + bill.id + '" aria-label="Delete bill">' +
+            '<i class="bi bi-x-lg"></i></button>', 'row-actions'));
+
+        body.appendChild(tr);
+    });
+}
+
 function renderSplit() {
     readSplitState();
     syncChargePreset();
-    paintSplit(splitCompute());
+    syncSplitForm();
+
+    const bill = splitCompute();
+    paintSplit(bill);
+    paintSettle(bill);
+    paintBills();
+
+    set('splitFormTitle', splitState.editing ? 'Editing a saved bill' : 'New bill');
+    if ($('splitSave')) {
+        $('splitSave').innerHTML = splitState.editing
+            ? '<i class="bi bi-check-lg"></i> Update bill'
+            : '<i class="bi bi-check-lg"></i> Save bill';
+    }
+    if ($('splitCancel')) $('splitCancel').hidden = !splitState.editing;
+    if ($('splitDirtyNote')) $('splitDirtyNote').hidden = !!splitState.editing;
 }
 
 /** Plain-text recap, sized to paste straight into the group chat. */
 function splitSummaryText() {
     const bill = splitCompute();
-    const lines = ['Bill split — ' + money(fromSen(bill.grandSen)) + ' total'];
+    const b = bill.bill;
+    const payer = personName(b.people[bill.payer], bill.payer);
 
-    splitState.people.forEach((person, index) => {
-        lines.push(personName(person, index) + ': ' + money(fromSen(bill.paysSen[index])));
+    const lines = [(b.title.trim() || 'Bill split') + ' — ' +
+        money(fromSen(bill.grandSen)) + ', paid by ' + payer];
+
+    b.people.forEach((person, index) => {
+        lines.push(personName(person, index) + ': ' + money(fromSen(bill.paysSen[index])) +
+            (index === bill.payer ? ' (paid)'
+                : bill.bill.settled[person.id] ? ' — settled' : ''));
     });
 
-    const parts = ['food ' + money(fromSen(bill.foodSen))];
+    // A dish split by portions is the one thing a reader cannot reconstruct
+    // from the per-person totals, so the summary spells it out.
+    (bill.sharedSplits || []).filter((split) => split.item.byUnits && split.total).forEach((split) => {
+        lines.push('  ' + (split.item.label.trim() || 'Shared dish') + ' ' +
+            money(fromSen(Math.max(0, toSen(parseFloat(split.item.amount) || 0)))) + ' by portions: ' +
+            b.people
+                .map((person, index) => ({ person, index, units: split.units[index], sen: split.parts[index] }))
+                .filter((row) => row.units > 0)
+                .map((row) => personName(row.person, row.index) + ' ' + fmt(row.units, row.units % 1 ? 1 : 0) +
+                    ' → ' + money(fromSen(row.sen)))
+                .join(', '));
+    });
+
+    const parts = ['ordered ' + money(fromSen(bill.foodSen))];
     if (bill.discountSen) parts.push('less ' + money(fromSen(bill.discountSen)) + ' discount');
     if (bill.serviceSen)  parts.push('service ' + pct(bill.serviceRate, 0) + ' ' + money(fromSen(bill.serviceSen)));
     if (bill.taxSen)      parts.push('SST ' + pct(bill.taxRate, 0) + ' ' + money(fromSen(bill.taxSen)));
@@ -353,16 +1075,46 @@ function splitSummaryText() {
     return lines.join('\n');
 }
 
+/**
+ * --------------------------------------------------------------------
+ * Editing
+ * --------------------------------------------------------------------
+ */
 /** Structural edits: read what is on screen first so nothing typed is lost. */
 function onSplitEdit(event) {
     const btn = event.target.closest('button');
     if (!btn) return;
 
     readSplitState();
+    const bill = draft();
     const card = btn.closest('.split-person');
-    const person = card && splitState.people.find((p) => p.id === card.dataset.person);
+    const person = card && bill.people.find((p) => p.id === card.dataset.person);
 
-    if (btn.hasAttribute('data-add-item') && person) {
+    if (btn.hasAttribute('data-share')) {
+        const item = bill.shared.find((x) => x.id === btn.closest('.split-portions').dataset.item);
+        if (!item) return;
+        const who = btn.dataset.share;
+        const out = item.out || [];
+
+        if (out.includes(who)) {
+            item.out = out.filter((id) => id !== who);
+        } else {
+            // A dish nobody is on has no ratio to divide by and no owner to
+            // charge. The last person stays.
+            if (bill.people.length - out.length <= 1) {
+                splitHint('Someone has to be on the dish — drop it instead if nobody had it.');
+                return;
+            }
+            item.out = out.concat(who);
+        }
+    } else if (btn.hasAttribute('data-portions')) {
+        const item = bill.shared.find((x) => x.id === btn.closest('.split-portions').dataset.item);
+        if (!item) return;
+        item.byUnits = !item.byUnits;
+        // The numbers are kept when the dish goes back to an even split, so
+        // turning portions on again finds them where they were left.
+        item.units = item.units || {};
+    } else if (btn.hasAttribute('data-add-item') && person) {
         person.items.push(newItem());
     } else if (btn.hasAttribute('data-remove-item')) {
         const itemId = btn.closest('.split-item').dataset.item;
@@ -370,17 +1122,470 @@ function onSplitEdit(event) {
             person.items = person.items.filter((item) => item.id !== itemId);
             if (!person.items.length) person.items.push(newItem());
         } else {
-            splitState.shared = splitState.shared.filter((item) => item.id !== itemId);
+            bill.shared = bill.shared.filter((item) => item.id !== itemId);
         }
     } else if (btn.hasAttribute('data-remove-person') && person) {
-        splitState.people = splitState.people.filter((p) => p.id !== person.id);
+        bill.people = bill.people.filter((p) => p.id !== person.id);
+        delete bill.settled[person.id];
+        // Their portions go with them, or a dish would keep dividing by a
+        // share nobody at the table is carrying.
+        bill.shared.forEach((item) => {
+            if (item.units) delete item.units[person.id];
+            if (item.out) item.out = item.out.filter((id) => id !== person.id);
+        });
     } else {
         return;
     }
 
     buildSplitPeople();
     buildSplitShared();
+    commitBill();
     renderSplit();
+}
+
+/** Settling, and unsettling. Both are facts, so both go straight to disk. */
+function onSettleClick(event) {
+    const btn = event.target.closest('button[data-settle], button[data-unsettle]');
+    if (!btn) return;
+
+    readSplitState();
+    const bill = draft();
+    const id = btn.dataset.settle || btn.dataset.unsettle;
+
+    if (btn.dataset.settle) bill.settled[id] = true;
+    else delete bill.settled[id];
+
+    commitBill();
+    saveSplit();
+    renderSplit();
+}
+
+/**
+ * --------------------------------------------------------------------
+ * Saving
+ * --------------------------------------------------------------------
+ */
+/**
+ * Write the draft back into the saved list. A draft that has never been saved
+ * is left alone — an unsaved bill is a sketch, and half-typed sketches do not
+ * belong in a history the reader browses.
+ */
+function commitBill() {
+    if (!splitState.editing) return;
+    const bill = draft();
+    bill.updated = todayIso();
+
+    const at = splitState.bills.findIndex((x) => x.id === bill.id);
+    if (at >= 0) splitState.bills[at] = bill;
+    else splitState.bills.push(bill);
+
+    // Typing into a saved bill edits it in place, and a keystroke is not a
+    // moment worth writing to disk for. Facts — a debt settled, an expense
+    // recorded — call `saveSplit` themselves and do not wait.
+    saveSplitSoon();
+}
+
+let splitSaveTimer = null;
+function saveSplitSoon() {
+    clearTimeout(splitSaveTimer);
+    splitSaveTimer = setTimeout(saveSplit, 400);
+}
+
+/** Any ordinary edit: read it, keep it if this bill is a saved one, repaint. */
+function onSplitFormEdit() {
+    readSplitState();
+    commitBill();
+    renderSplit();
+}
+
+function splitSaveBill() {
+    readSplitState();
+    const bill = draft();
+    const sums = splitCompute(bill);
+
+    if (sums.grandSen <= 0) {
+        splitHint('Put an amount in first — a bill with nothing on it is not a bill.');
+        return;
+    }
+
+    if (!bill.id) {
+        bill.id = nextId('b');
+        bill.seq = ++splitSeq;
+        bill.created = todayIso();
+        splitState.editing = bill.id;
+    }
+
+    commitBill();
+    saveSplit();
+    splitHint('Saved. Each debt can be ticked off below as it is paid.');
+    renderSplit();
+}
+
+function splitHint(message) {
+    const hint = $('splitSaveHint');
+    if (!hint) return;
+    hint.innerHTML = '<i class="bi bi-info-circle"></i> ' + escapeHtml(message);
+    clearTimeout(splitHint.timer);
+    splitHint.timer = setTimeout(() => {
+        hint.innerHTML = '<i class="bi bi-hdd"></i> Saved on this device only ' +
+            '&mdash; nothing leaves your browser.';
+    }, 4000);
+}
+
+function splitOpenBill(id) {
+    const bill = splitState.bills.find((b) => b.id === id);
+    if (!bill) return;
+
+    splitState.editing = bill.id;
+    splitState.draft = bill;
+    paintSplitForm();
+    renderSplit();
+    const form = $('split-form');
+    if (form) form.scrollIntoView({ behavior: 'smooth', block: 'start' });
+}
+
+/** A copy of last month's dinner, with the debts wiped: same table, new night. */
+function splitCopyBill(id) {
+    const bill = splitState.bills.find((b) => b.id === id);
+    if (!bill) return;
+
+    const copy = JSON.parse(JSON.stringify(bill));
+    copy.id = '';
+    copy.seq = 0;
+    copy.date = todayIso();
+    copy.settled = {};
+    copy.entryId = '';
+    copy.created = '';
+    // New ids all the way down, or the copy and the original share rows.
+    const remap = {};
+    copy.people.forEach((p) => { remap[p.id] = nextId('p'); p.id = remap[p.id];
+        p.items.forEach((i) => { i.id = nextId('i'); }); });
+    copy.shared.forEach((i) => { i.id = nextId('i'); });
+    copy.paidBy = remap[bill.paidBy] || copy.people[0].id;
+
+    splitState.editing = null;
+    splitState.draft = copy;
+    paintSplitForm();
+    renderSplit();
+}
+
+function splitDropBill(id) {
+    const bill = splitState.bills.find((b) => b.id === id);
+    if (!bill) return;
+
+    if (bill.entryId && ledgerState.entries.some((e) => e.id === bill.entryId)) {
+        splitHint('This bill has an expense recorded against it. Remove that first, under Settle up.');
+        if (splitState.editing !== bill.id) splitOpenBill(bill.id);
+        return;
+    }
+
+    splitState.bills = splitState.bills.filter((b) => b.id !== id);
+    if (splitState.editing === id) splitNewBill();
+    saveSplit();
+    renderSplit();
+}
+
+function splitNewBill() {
+    splitState.editing = null;
+    splitState.draft = newBill();
+    paintSplitForm();
+    renderSplit();
+}
+
+/** Put the draft on screen. The inverse of `readSplitState`. */
+/**
+ * The portions strip: the count, who ends up paying what, and the names —
+ * repainted rather than rebuilt, because a name is typed one letter at a time
+ * and rebuilding would take the caret with it.
+ */
+function paintPortions(bill) {
+    const b = bill.bill;
+
+    b.people.forEach((person, index) => {
+        document.querySelectorAll('[data-person-label="' + person.id + '"]').forEach((el) => {
+            el.textContent = personName(person, index);
+        });
+    });
+
+    (bill.sharedSplits || []).forEach((split) => {
+        const out   = split.item.out || [];
+        const plain = !split.item.byUnits && !out.length;
+
+        if (split.item.byUnits) {
+            set('pn_' + split.item.id, split.total
+                ? fmt(split.total, split.total % 1 ? 1 : 0)
+                : '—');
+        }
+
+        const foot = $('pf_' + split.item.id);
+        if (!foot) return;
+
+        // A dish shared by everyone, equally, needs no explanation — that is
+        // what a shared dish is. Anything else does.
+        foot.hidden = plain;
+        if (plain) return;
+
+        if (split.item.byUnits && !split.total) {
+            foot.textContent = out.length
+                ? 'No portions typed yet, so this is splitting evenly between the ' +
+                  (b.people.length - out.length) + ' still on it.'
+                : 'Nobody has a portion yet, so this dish is still splitting evenly.';
+            return;
+        }
+
+        const named = b.people
+            .map((person, index) => ({ person, index, sen: split.parts[index] || 0 }))
+            .filter((row) => row.sen > 0);
+
+        foot.textContent = named.length
+            ? named.map((row) => personName(row.person, row.index) + ' ' + money(fromSen(row.sen))).join(' · ')
+            : 'Nobody is on this dish yet.';
+    });
+}
+
+function paintSplitForm() {
+    const bill = draft();
+
+    if ($('splitTitle'))    $('splitTitle').value = bill.title;
+    if ($('splitDate'))     $('splitDate').value = bill.date;
+    if ($('splitService'))  $('splitService').value = bill.service;
+    if ($('splitTax'))      $('splitTax').value = bill.tax;
+    if ($('splitDiscount')) $('splitDiscount').value = bill.discount;
+    if ($('splitRound'))    $('splitRound').checked = !!bill.round;
+    if ($('splitItemOff'))  $('splitItemOff').checked = !!bill.itemDiscounts;
+    if ($('splitDiscountUnit')) setSegment($('splitDiscountUnit'), bill.discountUnit);
+    if ($('splitItemOffUnit'))  setSegment($('splitItemOffUnit'), bill.offUnit);
+
+    const fold = $('splitChargeFold');
+    if (fold) fold.open = (parseFloat(bill.service) || 0) > 0 || (parseFloat(bill.tax) || 0) > 0
+        || (parseFloat(bill.discount) || 0) > 0 || !!bill.round || !!bill.itemDiscounts;
+
+    buildSplitPeople();
+    buildSplitShared();
+    syncSplitForm();
+}
+
+/**
+ * --------------------------------------------------------------------
+ * Into the ledger
+ * --------------------------------------------------------------------
+ */
+function splitRecordShare() {
+    readSplitState();
+    const bill = draft();
+    const sums = splitCompute(bill);
+
+    if (!splitState.editing) { splitHint('Save the bill first.'); return; }
+    if (sums.mySen <= 0)     { splitHint('Your share is nothing — there is no expense to record.'); return; }
+    if (bill.entryId)        { return; }
+
+    const category = ($('splitExpCategory') || {}).value || '';
+    const account  = ($('splitExpAccount') || {}).value || '';
+    if (!account) { splitHint('Add an account under Expenses first — an expense has to come from somewhere.'); return; }
+
+    const stamp = todayIso();
+    const entry = {
+        id: ledgerId('e'),
+        seq: ++ledgerSeq,
+        type: 'expense',
+        amount: String(fromSen(sums.mySen)),
+        currency: BASE_CURRENCY,
+        base: '', rate: '',
+        date: bill.date,
+        category, sub: '',
+        account, toAccount: '',
+        note: (bill.title.trim() || 'Bill split') + ' — my share',
+        created: stamp, updated: stamp,
+    };
+
+    ledgerState.entries.push(entry);
+    ledgerState.month = monthOf(entry.date);
+    saveLedger();
+
+    bill.entryId = entry.id;
+    commitBill();
+    saveSplit();
+
+    splitHint('Recorded ' + money(fromSen(sums.mySen)) + ' under Expenses — your share only.');
+    renderSplit();
+    renderLedger();
+    renderDash();
+}
+
+function splitRemoveShare() {
+    readSplitState();
+    const bill = draft();
+    if (!bill.entryId) return;
+
+    ledgerState.entries = ledgerState.entries.filter((e) => e.id !== bill.entryId);
+    saveLedger();
+
+    bill.entryId = '';
+    commitBill();
+    saveSplit();
+
+    splitHint('Entry removed from Expenses.');
+    renderSplit();
+    renderLedger();
+    renderDash();
+}
+
+/** The two pickers the expense needs. Rebuilt whenever either list changes. */
+function buildSplitExpenseOptions() {
+    const cats = $('splitExpCategory');
+    if (cats) {
+        const previous = cats.value;
+        cats.innerHTML = '';
+        categoryListFor('expense').forEach((category) => {
+            const option = document.createElement('option');
+            option.value = category.id;
+            option.textContent = category.label;
+            cats.appendChild(option);
+        });
+        if ([...cats.options].some((o) => o.value === previous)) cats.value = previous;
+    }
+
+    const accounts = $('splitExpAccount');
+    if (accounts) {
+        const previous = accounts.value;
+        accounts.innerHTML = '';
+        openAccounts().forEach((account, index) => {
+            const option = document.createElement('option');
+            option.value = account.id;
+            option.textContent = account.name.trim() || 'Account ' + (index + 1);
+            accounts.appendChild(option);
+        });
+        if ([...accounts.options].some((o) => o.value === previous)) accounts.value = previous;
+    }
+}
+
+/**
+ * --------------------------------------------------------------------
+ * Persistence
+ * --------------------------------------------------------------------
+ */
+function saveSplit() {
+    try {
+        storeWrite(SPLIT_KEY, JSON.stringify({
+            seq: splitSeq,
+            filter: splitState.filter,
+            bills: splitState.bills,
+        }));
+    } catch (err) { /* unreachable: storeWrite swallows it and reports it */ }
+}
+
+function loadSplit() {
+    let saved = null;
+    try { saved = JSON.parse(storedRaw(SPLIT_KEY) || 'null'); } catch (err) { saved = null; }
+    if (!saved || typeof saved !== 'object') saved = {};
+
+    splitSeq = Number(saved.seq) || 0;
+    splitState.filter = ['open', 'settled', 'all'].includes(saved.filter) ? saved.filter : 'open';
+
+    const readItem = (item) => ({
+        id: String((item && item.id) || nextId('i')),
+        label: String((item && item.label) || ''),
+        amount: String((item && item.amount) || ''),
+        off: String((item && item.off) || ''),
+    });
+
+    /** A shared dish may also carry portions. Absent means the bill predates
+     *  them, which is an even split — exactly what it always was. */
+    const readShared = (item, known) => {
+        const row = readItem(item);
+        const units = {};
+        Object.entries((item && item.units) || {}).forEach(([id, value]) => {
+            if (known.has(id)) units[id] = String(value || '');
+        });
+        row.units = units;
+        row.byUnits = !!(item && item.byUnits);
+
+        // Anyone excluded who is no longer at the table cannot stay excluded,
+        // and a dish that ended up with nobody on it goes back to everyone —
+        // an untrusted file must not be able to produce a dish that divides by
+        // nothing.
+        const out = (Array.isArray(item && item.out) ? item.out : [])
+            .map(String).filter((id) => known.has(id));
+        row.out = out.length >= known.size ? [] : out;
+        return row;
+    };
+
+    splitState.bills = (Array.isArray(saved.bills) ? saved.bills : [])
+        .filter((b) => b && b.id && Array.isArray(b.people) && b.people.length)
+        .map((b, index) => {
+            // Every method that ever existed here, read forward into the only
+            // one that still does.
+            //
+            //   equal    no figure per person at all — it divided the total by
+            //            the number of heads when it painted
+            //   custom   ringgit against each name
+            //   percent  a percentage of a separately typed bill total
+            //   share    either of those two, after they merged
+            //   items    already lines under people; nothing to do
+            //
+            // The first four kept a *number per person* and no lines, and this
+            // module now reads nothing but lines. Mapping them across without
+            // writing those numbers down as lines would read every one of
+            // those bills as zero and quietly wipe a record — so the figure is
+            // worked out once, here, and becomes an unlabelled line under its
+            // owner. Same total, same share each, spelled out instead of
+            // implied. `allocateSen` does the dividing so the sen that will
+            // not split three ways still lands somewhere.
+            const rmWas  = b.method === 'custom' || (b.method === 'share' && b.shareUnit === 'rm');
+            const pctWas = b.method === 'percent' || (b.method === 'share' && b.shareUnit !== 'rm');
+            const lump = b.method !== 'items';
+
+            const billSen = Math.max(0, toSen(parseFloat(b.amount) || 0));
+            const lumpSen = !lump ? null
+                : rmWas
+                    ? b.people.map((p) => Math.max(0, toSen(parseFloat(p.share || p.custom) || 0)))
+                    // Percentages, and the even split, are both a division of
+                    // the bill total — by the figures typed, or by the heads.
+                    : allocateSen(billSen, b.people.map((p) => (pctWas
+                        ? Math.max(0, Math.round((parseFloat(p.share || p.percent) || 0) * 100))
+                        : 1)));
+
+            const people = b.people.map((p, at) => {
+                const items = (Array.isArray(p.items) ? p.items : []).map(readItem);
+                if (lumpSen && lumpSen[at]) {
+                    items.unshift({ id: nextId('i'), label: '', amount: String(fromSen(lumpSen[at])), off: '' });
+                }
+                return { id: String(p.id), name: String(p.name || ''), items };
+            });
+            people.forEach((p) => { if (!p.items.length) p.items.push(newItem()); });
+
+            const known = new Set(people.map((p) => p.id));
+            const settled = {};
+            Object.keys(b.settled || {}).forEach((id) => { if (known.has(id)) settled[id] = true; });
+
+            return {
+                id: String(b.id),
+                seq: Number(b.seq) || index + 1,
+                title: String(b.title || ''),
+                date: /^\d{4}-\d{2}-\d{2}$/.test(b.date || '') ? String(b.date) : todayIso(),
+                people,
+                shared: (Array.isArray(b.shared) ? b.shared : []).map((item) => readShared(item, known)),
+                paidBy: known.has(b.paidBy) ? String(b.paidBy) : people[0].id,
+                service: String(b.service || '0'),
+                tax: String(b.tax || '0'),
+                discount: String(b.discount || ''),
+                round: !!b.round,
+                // Absent means the bill predates the unit switch, and what it
+                // recorded was ringgit. Reading it as a percentage would
+                // silently rewrite a figure the reader already checked.
+                discountUnit: b.discountUnit === 'pct' ? 'pct' : 'rm',
+                itemDiscounts: !!b.itemDiscounts,
+                offUnit: b.offUnit === 'rm' ? 'rm' : 'pct',
+                settled,
+                entryId: String(b.entryId || ''),
+                created: String(b.created || b.date || ''),
+                updated: String(b.updated || b.date || ''),
+            };
+        });
+
+    // Never hand out an id that is already in the book.
+    splitState.bills.forEach((b) => { splitSeq = Math.max(splitSeq, b.seq); });
+    if ($('splitFilter')) setSegment($('splitFilter'), splitState.filter);
 }
 
 /**
@@ -478,6 +1683,9 @@ const DEFAULT_CATEGORIES = [
     { id: 'debt',          label: 'Debt',           bucket: 'save',   icon: 'bi-credit-card',  tone: 'indigo',
       hint: 'Credit card, PTPTN, personal loan',
       subs: ['Credit card', 'PTPTN', 'Personal loan'] },
+    { id: 'instalment',    label: 'Instalment',     bucket: 'save',   icon: 'bi-calendar2-check', tone: 'indigo',
+      hint: 'Phone, car, BNPL, personal financing',
+      subs: ['Phone', 'Car', 'Electronics', 'Furniture', 'BNPL'] },
     { id: 'other',         label: 'Others',         bucket: 'wants',  icon: 'bi-three-dots',   tone: 'slate',
       hint: 'Anything that does not fit', subs: [] },
 
@@ -510,6 +1718,16 @@ const seedCategories = () => DEFAULT_CATEGORIES.map((cat) => ({
     enabled: true,
     subs: cat.subs.map((label, i) => ({ id: cat.id + '-s' + (i + 1), label, enabled: true })),
 }));
+
+/**
+ * Categories a module cannot work without. A default that arrives after
+ * someone has already been using the app would otherwise never reach them:
+ * `seedCategories` only runs on a first visit. So these are topped up on load
+ * — by id, so one that has been retired stays retired and one that has been
+ * renamed keeps its name.
+ */
+const INSTALMENT_CATEGORY = 'instalment';
+const REQUIRED_CATEGORIES = [INSTALMENT_CATEGORY];
 
 const categoryById = (id) => categoryState.list.find((c) => c.id === id) || null;
 
@@ -558,11 +1776,11 @@ function subLabelOf(categoryId, subId) {
 
 function saveCategories() {
     try {
-        localStorage.setItem(CATEGORY_KEY, JSON.stringify({
+        storeWrite(CATEGORY_KEY, JSON.stringify({
             seq: categorySeq,
             list: categoryState.list,
         }));
-    } catch (err) { /* storage unavailable — the session still works */ }
+    } catch (err) { /* unreachable: storeWrite swallows it and reports it */ }
 }
 
 function loadCategories() {
@@ -588,12 +1806,31 @@ function loadCategories() {
             enabled: s.enabled !== false,
         })),
     }));
+
+    // A category a module depends on, added to the app after this book was
+    // started, would otherwise never appear — `seedCategories` runs on the
+    // first visit only. Missing by id is the test, so a retired one stays
+    // retired and a renamed one keeps its name.
+    REQUIRED_CATEGORIES.forEach((id) => {
+        if (categoryState.list.some((c) => c.id === id)) return;
+        const seed = DEFAULT_CATEGORIES.find((c) => c.id === id);
+        if (!seed) return;
+        categoryState.list.push({
+            id: seed.id, label: seed.label, bucket: seed.bucket, icon: seed.icon,
+            tone: seed.tone, hint: seed.hint, enabled: true,
+            subs: seed.subs.map((label, i) => ({ id: seed.id + '-s' + (i + 1), label, enabled: true })),
+        });
+    });
 }
 
 /**
  * ====================================================================
- * BUDGET PLANNER
+ * FINANCIAL PLANNER
  * ====================================================================
+ * The module that runs before the money does. The Expense Recorder answers
+ * "where did it go"; this one answers "where should it go", and then holds
+ * the two side by side.
+ *
  * The rows are the reader's own categories, so this module owns none of them
  * — it owns the amounts. Those are still read straight off the DOM, which is
  * what keeps the caret where it was while a figure is being typed.
@@ -608,6 +1845,20 @@ function loadCategories() {
  * Debt sits in `save` rather than `needs` on purpose: paying down a card is
  * building net worth the same way a deposit does, and 50/30/20 treats it that
  * way too.
+ *
+ * --------------------------------------------------------------------
+ * A budget is a record, not a setting
+ * --------------------------------------------------------------------
+ * The first version of this module held one budget and saved it silently as
+ * you typed. That is a setting: there was no August to compare September
+ * against, and no moment where you decided the plan was finished. So a budget
+ * is now one record per period, the form is a draft until "Save plan" is
+ * pressed, and the draft is persisted separately so that closing the tab does
+ * not lose an afternoon's work — it simply is not history yet.
+ *
+ * `Used` is never stored. It is summed out of the ledger at paint time, for
+ * exactly the dates the period covers. A budget that carried its own copy of
+ * what was spent would be a second version of the truth.
  */
 /** The planner plans against the reader's own categories, so that a rename
  *  in the Expense Recorder is the same rename here. Only spending is planned:
@@ -630,104 +1881,141 @@ const BUDGET_RULES = {
 
 const BUDGET_KEY = 'moneyflow.budget.v1';
 
-let budgetState = { custom: [] };
+const BUDGET_PERIODS = { week: 1, month: 1, year: 1, custom: 1 };
 
-const newCategory = () => ({ id: nextId('c'), label: '', amount: '', bucket: 'wants' });
+/** Where a used-versus-budget figure crosses from calm into a warning, and
+ *  then into red. 100% is the line itself, so it belongs to amber. */
+const budgetTone = (pct) => (pct > 100 ? 'red' : pct >= 80 ? 'amber' : 'jade');
+
+let planState = { budgets: [], draft: null, seq: 0 };
+
+const blankPlan = () => ({
+    period: 'month',
+    anchor: todayIso(),
+    from: '', to: '',
+    income: '', extra: '', rule: '502030',
+    lines: {},
+});
+
+const planDraft = () => planState.draft || (planState.draft = blankPlan());
 
 const budgetRule = () => BUDGET_RULES[(($('budgetRule') || {}).dataset || {}).value] || null;
 
-/** Custom rows are user-shaped, so they are read back before any structural edit. */
-function readBudgetState() {
-    document.querySelectorAll('#budgetCustom .bgt-row').forEach((row) => {
-        const cat = budgetState.custom.find((c) => c.id === row.dataset.cat);
+/**
+ * --------------------------------------------------------------------
+ * The period
+ * --------------------------------------------------------------------
+ * Weeks start on Monday, the same as the Dashboard. A custom range with one
+ * end missing is the other end: a range needs two ends to be a range, and ends
+ * typed backwards are swapped rather than refused, because the intent is never
+ * in doubt.
+ */
+function planRange(plan) {
+    const anchor = plan.anchor || todayIso();
+
+    if (plan.period === 'week') {
+        const from = weekStart(anchor);
+        const to   = isoShift(from, 6);
+        return { from, to, label: 'Week of ' + dayShort(from), sub: dayShort(from) + ' – ' + dayLabel(to) };
+    }
+
+    if (plan.period === 'year') {
+        const [y] = isoNums(anchor);
+        return { from: isoOf(y, 1, 1), to: isoOf(y, 12, 31), label: String(y), sub: 'The whole of ' + y };
+    }
+
+    if (plan.period === 'custom') {
+        let from = plan.from || '';
+        let to   = plan.to   || '';
+        if (!from && !to) { from = anchor; to = anchor; }
+        if (!from) from = to;
+        if (!to)   to   = from;
+        if (from > to) { const held = from; from = to; to = held; }
+        return {
+            from, to,
+            label: 'Custom range',
+            sub: from === to ? dayLabel(from) : dayLabel(from) + ' – ' + dayLabel(to),
+        };
+    }
+
+    const [y, m] = isoNums(anchor);
+    return {
+        from: monthFirst(y, m), to: monthLast(y, m),
+        label: MONTH_NAMES[m - 1] + ' ' + y,
+        sub: 'The whole of ' + MONTH_NAMES[m - 1],
+    };
+}
+
+/** Two budgets are the same budget when they cover the same dates the same
+ *  way — which is what makes "save again" an update rather than a duplicate. */
+const planKey = (plan, range) => plan.period + ':' + range.from + ':' + range.to;
+
+/** One period forward or back. Custom ranges have no next, so they sit still. */
+function shiftPlan(plan, delta) {
+    if (plan.period === 'custom') return plan.anchor;
+    if (plan.period === 'week')   return isoShift(plan.anchor || todayIso(), delta * 7);
+
+    const [y, m, d] = isoNums(plan.anchor || todayIso());
+    if (plan.period === 'year')   return isoOf(y + delta, m, d);
+
+    // Month. Anchoring on the 1st keeps a 31st from skidding past February.
+    const moved = new Date(y, m - 1 + delta, 1);
+    return isoOfDate(moved);
+}
+
+/**
+ * --------------------------------------------------------------------
+ * The sums
+ * --------------------------------------------------------------------
+ */
+/** Every ringgit the ledger says was spent inside the period, by category. */
+function budgetUsedIn(from, to) {
+    const used = {};
+    ledgerState.entries.forEach((entry) => {
+        if (entry.type !== 'expense') return;
+        if (entry.date < from || entry.date > to) return;
+        const cat = categoryOf(entry);
         if (!cat) return;
-        cat.label  = row.querySelector('.bgt-label').value;
-        cat.amount = row.querySelector('.bgt-amount').value;
-        cat.bucket = row.querySelector('.bgt-bucket').value;
+        used[cat.id] = (used[cat.id] || 0) + entrySen(entry);
     });
+    return used;
 }
 
-function buildBudgetRows() {
-    const host = $('budgetRows');
-    if (!host) return;
-    host.innerHTML = '';
-
-    budgetCategories().forEach((cat) => {
-        const row = document.createElement('div');
-        row.className = 'bgt-row';
-        row.dataset.cat = cat.id;
-        row.dataset.bucket = cat.bucket;
-        row.innerHTML =
-            '<span class="bgt-icon"><i class="bi ' + cat.icon + '"></i></span>' +
-            '<div class="bgt-meta">' +
-                '<label for="bgt_' + cat.id + '">' + escapeHtml(cat.label) + '</label>' +
-                '<small>' + escapeHtml(cat.hint || CATEGORY_BUCKETS[cat.bucket]) + '</small>' +
-                '<div class="bgt-bar"><i id="bar_' + cat.id + '" style="width:0%"></i></div>' +
-            '</div>' +
-            '<div class="money-input money-input-sm"><span class="affix">RM</span>' +
-                '<input type="number" class="bgt-amount" id="bgt_' + cat.id + '" ' +
-                'min="0" step="10" placeholder="0" inputmode="decimal"></div>' +
-            '<span class="bgt-pct" id="pct_' + cat.id + '">—</span>';
-        host.appendChild(row);
-    });
-}
-
-function buildBudgetCustom() {
-    const host = $('budgetCustom');
-    if (!host) return;
-    host.innerHTML = '';
-
-    budgetState.custom.forEach((cat) => {
-        const row = document.createElement('div');
-        row.className = 'bgt-row is-custom';
-        row.dataset.cat = cat.id;
-        row.dataset.bucket = cat.bucket;
-        row.innerHTML =
-            '<span class="bgt-icon"><i class="bi bi-tag"></i></span>' +
-            '<div class="bgt-meta"><input type="text" class="bgt-label"></div>' +
-            '<select class="bgt-bucket" aria-label="Bucket">' +
-                Object.entries(BUDGET_BUCKETS).map(([key, b]) =>
-                    '<option value="' + key + '">' + b.label + '</option>').join('') +
-            '</select>' +
-            '<div class="money-input money-input-sm"><span class="affix">RM</span>' +
-                '<input type="number" class="bgt-amount" min="0" step="10" placeholder="0" inputmode="decimal"></div>' +
-            '<button type="button" class="split-x" data-remove-cat aria-label="Remove category">' +
-                '<i class="bi bi-x-lg"></i></button>';
-
-        // Assigned rather than interpolated — these are user-typed strings.
-        const label = row.querySelector('.bgt-label');
-        label.value = cat.label;
-        label.placeholder = 'Your own category';
-        row.querySelector('.bgt-amount').value = cat.amount;
-        row.querySelector('.bgt-bucket').value = cat.bucket;
-
-        host.appendChild(row);
-    });
-}
-
-/** The eight fixed categories plus whatever the user added, in one flat list. */
-function budgetRowValues() {
+/** The categories in play, in one flat list, each carrying what was planned
+ *  for it and what actually happened. A retired category with spending on it
+ *  still appears — the money went somewhere and hiding it would not help. */
+function budgetRowValues(used) {
     const rows = budgetCategories().map((cat) => ({
         id: cat.id,
         label: cat.label,
         bucket: cat.bucket,
+        icon: cat.icon,
+        hint: cat.hint,
         sen: Math.max(0, toSen(num('bgt_' + cat.id))),
+        usedSen: used[cat.id] || 0,
     }));
 
-    budgetState.custom.forEach((cat) => rows.push({
-        id: cat.id,
-        label: cat.label.trim() || 'Other',
-        bucket: BUDGET_BUCKETS[cat.bucket] ? cat.bucket : 'wants',
-        sen: Math.max(0, toSen(parseFloat(cat.amount) || 0)),
-        custom: true,
-    }));
+    const known = new Set(rows.map((r) => r.id));
+    Object.keys(used).forEach((id) => {
+        if (known.has(id)) return;
+        const cat = categoryById(id);
+        if (!cat || cat.bucket === 'income') return;
+        rows.push({
+            id, label: categoryLabel(cat, 0), bucket: cat.bucket, icon: cat.icon,
+            hint: cat.hint, sen: 0, usedSen: used[id], retired: true,
+        });
+    });
 
     return rows;
 }
 
 function budgetCompute() {
+    const plan  = planDraft();
+    const range = planRange(plan);
+    const used  = budgetUsedIn(range.from, range.to);
+
     const incomeSen = Math.max(0, toSen(num('budgetIncome'))) + Math.max(0, toSen(num('budgetExtra')));
-    const rows = budgetRowValues();
+    const rows = budgetRowValues(used);
 
     const bucketSen = { needs: 0, wants: 0, save: 0 };
     rows.forEach((row) => { bucketSen[row.bucket] += row.sen; });
@@ -735,19 +2023,395 @@ function budgetCompute() {
     const plannedSen = bucketSen.needs + bucketSen.wants + bucketSen.save;
     const spendSen   = bucketSen.needs + bucketSen.wants;   // money that is gone once spent
     const leftSen    = incomeSen - plannedSen;
+    const usedSen    = rows.reduce((sum, row) => sum + row.usedSen, 0);
 
     const share = (sen) => (incomeSen > 0 ? sen / incomeSen * 100 : 0);
 
     return {
-        incomeSen, rows, bucketSen, plannedSen, spendSen, leftSen,
+        plan, range, used, incomeSen, rows, bucketSen, plannedSen, spendSen, leftSen, usedSen,
         rule: budgetRule(),
         spendPct: share(spendSen),
         saveRate: share(bucketSen.save),
         leftPct:  share(leftSen),
+        usedPct:  plannedSen > 0 ? usedSen / plannedSen * 100 : 0,
         share,
+        key: planKey(plan, range),
+        saved: planState.budgets.find((b) => b.key === planKey(plan, range)) || null,
     };
 }
 
+/**
+ * --------------------------------------------------------------------
+ * Draft in, draft out
+ * --------------------------------------------------------------------
+ * The form is the truth while it is being typed in — reading it back rather
+ * than rebuilding it is the only way the caret survives a keystroke.
+ */
+function readBudgetState() {
+    const plan = planDraft();
+
+    plan.period = (($('budgetPeriod') || {}).dataset || {}).value || 'month';
+    if (!BUDGET_PERIODS[plan.period]) plan.period = 'month';
+    plan.from   = ($('budgetFrom')   || {}).value || '';
+    plan.to     = ($('budgetTo')     || {}).value || '';
+    plan.income = ($('budgetIncome') || {}).value || '';
+    plan.extra  = ($('budgetExtra')  || {}).value || '';
+    plan.rule   = (($('budgetRule')  || {}).dataset || {}).value || '502030';
+
+    plan.lines = {};
+    budgetCategories().forEach((cat) => {
+        const value = ($('bgt_' + cat.id) || {}).value || '';
+        if (value !== '') plan.lines[cat.id] = value;
+    });
+}
+
+/** The other direction: a saved plan, or a period switch, poured into the form. */
+function fillBudgetForm() {
+    const plan = planDraft();
+
+    if ($('budgetPeriod')) setSegment($('budgetPeriod'), plan.period);
+    if ($('budgetRule'))   setSegment($('budgetRule'), plan.rule);
+    if ($('budgetFrom'))   $('budgetFrom').value   = plan.from;
+    if ($('budgetTo'))     $('budgetTo').value     = plan.to;
+    if ($('budgetIncome')) $('budgetIncome').value = plan.income;
+    if ($('budgetExtra'))  $('budgetExtra').value  = plan.extra;
+
+    budgetCategories().forEach((cat) => {
+        const el = $('bgt_' + cat.id);
+        if (el) el.value = plan.lines[cat.id] || '';
+    });
+}
+
+/** What makes two plans the same plan, for the purpose of "unsaved changes".
+ *  Empty and "0" are the same nothing, or every blank row would read dirty. */
+function planSignature(plan) {
+    const lines = {};
+    Object.entries(plan.lines || {}).forEach(([id, value]) => {
+        const sen = Math.max(0, toSen(parseFloat(value) || 0));
+        if (sen > 0) lines[id] = sen;
+    });
+    return JSON.stringify({
+        income: Math.max(0, toSen(parseFloat(plan.income) || 0)),
+        extra:  Math.max(0, toSen(parseFloat(plan.extra)  || 0)),
+        rule:   plan.rule,
+        lines,
+    });
+}
+
+const planIsEmpty = (plan) => planSignature(plan) === planSignature(blankPlan());
+
+/**
+ * --------------------------------------------------------------------
+ * Saving, stepping, copying
+ * --------------------------------------------------------------------
+ */
+function saveBudgetPlan() {
+    readBudgetState();
+    const plan  = planDraft();
+    const range = planRange(plan);
+    const key   = planKey(plan, range);
+
+    if (planIsEmpty(plan)) {
+        planHint('There is nothing in this plan yet — put in an income or a category first.');
+        return;
+    }
+
+    const body = {
+        key,
+        period: plan.period,
+        anchor: plan.anchor,
+        from: range.from, to: range.to,
+        income: plan.income, extra: plan.extra, rule: plan.rule,
+        lines: Object.assign({}, plan.lines),
+    };
+
+    const existing = planState.budgets.find((b) => b.key === key);
+    if (existing) {
+        Object.assign(existing, body, { updated: todayIso() });
+    } else {
+        planState.budgets.push(Object.assign({
+            id: 'b' + (++planState.seq),
+            seq: planState.seq,
+            created: todayIso(),
+            updated: todayIso(),
+        }, body));
+    }
+
+    persistPlan();
+    renderBudget();
+    flashButton($('budgetSave'), '<i class="bi bi-check-lg"></i> Saved');
+}
+
+/** Back to the saved version of this period, throwing the edits away. */
+function revertBudgetPlan() {
+    const compute = budgetCompute();
+    if (!compute.saved) return;
+    planState.draft = planFromRecord(compute.saved);
+    fillBudgetForm();
+    persistPlan();
+    renderBudget();
+}
+
+const planFromRecord = (rec) => ({
+    period: rec.period,
+    anchor: rec.anchor,
+    from: rec.period === 'custom' ? rec.from : '',
+    to:   rec.period === 'custom' ? rec.to   : '',
+    income: rec.income, extra: rec.extra, rule: rec.rule,
+    lines: Object.assign({}, rec.lines),
+});
+
+/** Move to another period. A period with a saved budget opens it; one without
+ *  opens blank, and the foot offers last month's as a starting point. */
+function stepBudgetPeriod(delta) {
+    readBudgetState();
+    const plan = planDraft();
+    plan.anchor = shiftPlan(plan, delta);
+    loadPeriodIntoForm();
+}
+
+function loadPeriodIntoForm() {
+    const plan  = planDraft();
+    const range = planRange(plan);
+    const saved = planState.budgets.find((b) => b.key === planKey(plan, range));
+
+    if (saved) {
+        planState.draft = planFromRecord(saved);
+    } else {
+        planState.draft = Object.assign(blankPlan(), {
+            period: plan.period, anchor: plan.anchor, from: plan.from, to: plan.to, rule: plan.rule,
+        });
+    }
+
+    fillBudgetForm();
+    persistPlan();
+    renderBudget();
+}
+
+/** The most recent saved plan of the same shape, so "copy" copies like for
+ *  like — a weekly budget is not a starting point for a yearly one. */
+function previousPlanFor(plan) {
+    const range = planRange(plan);
+    return planState.budgets
+        .filter((b) => b.period === plan.period && b.to < range.from)
+        .sort((a, b) => (a.to < b.to ? 1 : -1))[0] || null;
+}
+
+function copyPreviousPlan() {
+    readBudgetState();
+    const plan = planDraft();
+    const last = previousPlanFor(plan);
+    if (!last) return;
+
+    plan.income = last.income;
+    plan.extra  = last.extra;
+    plan.rule   = last.rule;
+    plan.lines  = Object.assign({}, last.lines);
+
+    fillBudgetForm();
+    persistPlan();
+    renderBudget();
+    planHint('Copied the plan from ' + planRangeLabelOf(last) + '. Nothing is saved until you press Save plan.');
+}
+
+const planRangeLabelOf = (rec) => planRange({
+    period: rec.period, anchor: rec.anchor, from: rec.from, to: rec.to,
+}).label;
+
+function openSavedPlan(id) {
+    const rec = planState.budgets.find((b) => b.id === id);
+    if (!rec) return;
+    planState.draft = planFromRecord(rec);
+    fillBudgetForm();
+    persistPlan();
+    renderBudget();
+    const form = $('budget-form');
+    if (form) form.scrollIntoView({ block: 'start', behavior: 'smooth' });
+}
+
+function dropSavedPlan(id) {
+    const rec = planState.budgets.find((b) => b.id === id);
+    if (!rec) return;
+
+    askConfirm(
+        'Delete this budget?',
+        'The plan for ' + planRangeLabelOf(rec) + ' will be removed. Nothing in your Expenses is touched — ' +
+        'only the plan goes.',
+        'Delete budget',
+        () => {
+            planState.budgets = planState.budgets.filter((b) => b.id !== id);
+            persistPlan();
+            renderBudget();
+        });
+}
+
+/**
+ * --------------------------------------------------------------------
+ * The rows
+ * --------------------------------------------------------------------
+ * Built once per structural change, never on a keystroke: the name is an
+ * input now, and rebuilding it mid-word would take the caret with it. Paint
+ * only ever writes the derived parts — the bar, the sub-line and the badge.
+ */
+function buildBudgetRows() {
+    const host = $('budgetRows');
+    if (!host) return;
+    host.innerHTML = '';
+
+    budgetCategories().forEach((cat) => {
+        const row = document.createElement('div');
+        row.className = 'bgt-row is-plan';
+        row.dataset.cat = cat.id;
+        row.dataset.bucket = cat.bucket;
+        row.innerHTML =
+            '<span class="bgt-icon"><i class="bi ' + cat.icon + '"></i></span>' +
+            '<div class="bgt-meta">' +
+                '<input type="text" class="bgt-name" aria-label="Category name">' +
+                '<small id="sub_' + cat.id + '">&mdash;</small>' +
+                '<div class="bgt-bar"><i id="bar_' + cat.id + '" style="width:0%"></i></div>' +
+            '</div>' +
+            '<select class="bgt-bucket" aria-label="Bucket">' +
+                Object.entries(BUDGET_BUCKETS).map(([key, b]) =>
+                    '<option value="' + key + '">' + b.label + '</option>').join('') +
+            '</select>' +
+            '<div class="money-input money-input-sm"><span class="affix">RM</span>' +
+                '<input type="number" class="bgt-amount" id="bgt_' + cat.id + '" ' +
+                'min="0" step="10" placeholder="0" inputmode="decimal"></div>' +
+            '<span class="bgt-pct" id="pct_' + cat.id + '">&mdash;</span>' +
+            '<button type="button" class="split-x" data-drop-budget-cat aria-label="Delete category">' +
+                '<i class="bi bi-x-lg"></i></button>';
+
+        // Assigned rather than interpolated — a category name is user-typed.
+        const name = row.querySelector('.bgt-name');
+        name.value = cat.label;
+        name.placeholder = 'Category name';
+        row.querySelector('.bgt-bucket').value = cat.bucket;
+
+        host.appendChild(row);
+    });
+
+    fillBudgetForm();
+}
+
+/** The planner's own feedback line. `ledgerHint` writes into the Expenses
+ *  form, which nobody can see from this tab. */
+let planHintIdle = '';
+function planHint(text) {
+    const hint = $('budgetRowsHint');
+    if (!hint) return;
+    if (!planHintIdle) planHintIdle = hint.innerHTML;
+    hint.textContent = text;
+    clearTimeout(planHint.timer);
+    planHint.timer = setTimeout(() => { hint.innerHTML = planHintIdle; }, 6000);
+}
+
+/**
+ * Renaming and re-bucketing act on the one shared category list, so a rename
+ * here is the same rename in the Expense Recorder — the entries point at the
+ * id, never at the name.
+ *
+ * The category manager holds the *other* copy of these two fields, and
+ * `renderLedger` reads it back on every paint. Writing the new value into that
+ * row first is what stops the manager's stale input from undoing the edit a
+ * keystroke later. Both are inputs on purpose; neither is rebuilt while it is
+ * being typed in, which is what keeps the caret.
+ */
+function mirrorToCategoryManager(cat) {
+    const row = document.querySelector('#categoryList .cat-row[data-cat="' + cat.id + '"]');
+    if (!row) return;
+    const name = row.querySelector('.cat-name');
+    const bucket = row.querySelector('.cat-bucket');
+    if (name) name.value = cat.label;
+    if (bucket) bucket.value = cat.bucket;
+}
+
+function onBudgetRowInput(event) {
+    const field = event.target.closest('.bgt-name');
+    if (!field) return;
+    const cat = categoryById(field.closest('.bgt-row').dataset.cat);
+    if (!cat) return;
+    cat.label = field.value;
+    mirrorToCategoryManager(cat);
+    saveCategories();
+    renderLedger();
+}
+
+function onBudgetRowChange(event) {
+    const select = event.target.closest('.bgt-bucket');
+    if (!select) return;
+    const row = select.closest('.bgt-row');
+    const cat = categoryById(row.dataset.cat);
+    if (!cat) return;
+    cat.bucket = select.value;
+    row.dataset.bucket = select.value;
+    mirrorToCategoryManager(cat);
+    saveCategories();
+    renderLedger();
+}
+
+/** Delete, with the same bargain the category manager strikes: anything with
+ *  entries behind it is retired instead, or a year of records would silently
+ *  be renamed to "Other". */
+function onBudgetRowClick(event) {
+    const btn = event.target.closest('button[data-drop-budget-cat]');
+    if (!btn) return;
+    readBudgetState();
+
+    const row = btn.closest('.bgt-row');
+    const cat = categoryById(row.dataset.cat);
+    if (!cat) return;
+
+    const held = ledgerState.entries.filter((e) => e.category === cat.id).length;
+    if (held) {
+        askConfirm(
+            'Retire ' + categoryLabel(cat, 0) + '?',
+            held + (held === 1 ? ' entry is' : ' entries are') + ' filed under this category, so deleting it ' +
+            'would rewrite that history. Retiring it instead takes it out of the plan and out of the pickers, ' +
+            'and every entry behind it stays exactly as it is.',
+            'Retire it',
+            () => {
+                cat.enabled = false;
+                afterCategoryChange(true);
+                planHint(categoryLabel(cat, 0) + ' is retired — bring it back from the category list under Expenses.');
+            });
+        return;
+    }
+
+    if (categoryState.list.filter((c) => c.bucket !== 'income').length <= 1) {
+        planHint('Keep at least one spending category — an expense has to be called something.');
+        return;
+    }
+
+    categoryState.list = categoryState.list.filter((c) => c.id !== cat.id);
+    afterCategoryChange(true);
+}
+
+/** A budget category is a real category. It has to be, or nothing could ever
+ *  be spent on it and Used would read RM 0.00 for the rest of time. */
+function addBudgetCategory() {
+    readBudgetState();
+    categoryState.list.push({
+        id: newCategoryId('c'),
+        label: '',
+        bucket: 'wants',
+        icon: 'bi-tag',
+        tone: 'jade',
+        hint: '',
+        enabled: true,
+        subs: [],
+    });
+    afterCategoryChange(true);
+
+    const fresh = document.querySelector('#budgetRows .bgt-row:last-child .bgt-name');
+    if (fresh) { fresh.focus({ preventScroll: true }); fresh.scrollIntoView({ block: 'center', behavior: 'smooth' }); }
+    planHint('New categories show up in the Expenses picker straight away — that is what lets spending count against them.');
+}
+
+/**
+ * --------------------------------------------------------------------
+ * Painting
+ * --------------------------------------------------------------------
+ */
 /** The stacked bar. Over-budget months are drawn against what was planned,
  *  not against income, so the overspend is visible instead of clipped. */
 function paintBudgetDist(plan) {
@@ -774,7 +2438,7 @@ function paintBudgetDist(plan) {
 
     if (!baseSen) {
         dist.innerHTML = '<span class="dist-left" style="width:100%"></span>';
-        legend.innerHTML = '<span class="legend-empty">Put in your income and what the month costs — ' +
+        legend.innerHTML = '<span class="legend-empty">Put in your income and what the period costs — ' +
             'the bar fills itself in.</span>';
         return;
     }
@@ -794,18 +2458,8 @@ function paintBudgetDist(plan) {
             '<small>' + pct(plan.share(s.sen)) + '</small></span>';
         legend.appendChild(item);
     });
-
-    if (plan.leftSen < 0) {
-        const item = document.createElement('span');
-        item.className = 'legend-item';
-        item.innerHTML = '<i class="dot dot-red"></i><span>Over by ' +
-            '<b class="is-minus">' + money(fromSen(-plan.leftSen)) + '</b></span>';
-        legend.appendChild(item);
-    }
 }
 
-/** Target vs planned, one row per bucket. Overshooting savings is a good miss,
- *  so only needs and wants are marked red when they run over. */
 function paintBudgetGuide(plan) {
     const block = $('budgetGuideBlock');
     const body  = $('budgetGuideBody');
@@ -849,28 +2503,43 @@ function paintBudgetTable(plan) {
     if (!body) return;
     body.innerHTML = '';
 
-    const used = plan.rows.filter((row) => row.sen > 0).sort((a, b) => b.sen - a.sen);
+    const rows = plan.rows
+        .filter((row) => row.sen > 0 || row.usedSen > 0)
+        .sort((a, b) => (b.sen - a.sen) || (b.usedSen - a.usedSen));
 
-    set('budgetTableNote', used.length
-        ? used.length + (used.length === 1 ? ' category in play' : ' categories in play') +
-          ' · biggest is ' + used[0].label
+    const over = rows.filter((row) => row.sen > 0 && row.usedSen > row.sen).length;
+
+    set('budgetTableNote', rows.length
+        ? rows.length + (rows.length === 1 ? ' category in play' : ' categories in play') +
+          (over ? ' · ' + over + ' over budget' : '')
         : '');
 
-    if (!used.length) {
-        body.appendChild(emptyRow('Fill in a category or two — the breakdown builds as you go.', 4));
+    if (!rows.length) {
+        body.appendChild(emptyRow('Fill in a category or two — the breakdown builds as you go.', 6));
         return;
     }
 
-    used.forEach((row) => {
+    rows.forEach((row) => {
         const bucket = BUDGET_BUCKETS[row.bucket];
+        const leftSen = row.sen - row.usedSen;
+        const usedPct = row.sen > 0 ? row.usedSen / row.sen * 100 : 0;
+
         const tr = document.createElement('tr');
         tr.appendChild(cell(
-            '<strong>' + escapeHtml(row.label) + '</strong>' +
-            '<small>' + pct(row.sen / plan.plannedSen * 100) + ' of everything planned</small>'
+            '<strong>' + escapeHtml(row.label) + (row.retired ? ' <span class="tag">retired</span>' : '') + '</strong>' +
+            '<small>' + (plan.incomeSen ? pct(plan.share(row.sen)) + ' of income' : 'No income yet') + '</small>'
         ));
         tr.appendChild(cell('<i class="dot dot-' + bucket.tone + '"></i>' + bucket.label, 'is-muted'));
-        tr.appendChild(cell(fmt(fromSen(row.sen)), 'is-strong'));
-        tr.appendChild(cell(plan.incomeSen ? pct(plan.share(row.sen)) : '—', 'is-muted'));
+        tr.appendChild(cell(row.sen ? fmt(fromSen(row.sen)) : '—', row.sen ? 'is-strong' : 'is-muted'));
+        tr.appendChild(cell(row.usedSen ? fmt(fromSen(row.usedSen)) : '—', row.usedSen ? '' : 'is-muted'));
+        tr.appendChild(cell(
+            row.sen ? (leftSen < 0 ? '− ' : '') + fmt(Math.abs(fromSen(leftSen))) : '—',
+            !row.sen ? 'is-muted' : leftSen < 0 ? 'is-minus' : 'is-plus'
+        ));
+        tr.appendChild(cell(
+            row.sen ? pct(usedPct, 0) : (row.usedSen ? 'unbudgeted' : '—'),
+            row.sen ? 'is-' + budgetTone(usedPct) : 'is-muted'
+        ));
         body.appendChild(tr);
     });
 
@@ -879,19 +2548,83 @@ function paintBudgetTable(plan) {
     totalRow.appendChild(cell('Planned'));
     totalRow.appendChild(cell(''));
     totalRow.appendChild(cell(fmt(fromSen(plan.plannedSen))));
-    totalRow.appendChild(cell(plan.incomeSen ? pct(plan.share(plan.plannedSen)) : '—'));
+    totalRow.appendChild(cell(fmt(fromSen(plan.usedSen))));
+    totalRow.appendChild(cell(
+        ((plan.plannedSen - plan.usedSen) < 0 ? '− ' : '') + fmt(Math.abs(fromSen(plan.plannedSen - plan.usedSen))),
+        (plan.plannedSen - plan.usedSen) < 0 ? 'is-minus' : 'is-plus'
+    ));
+    totalRow.appendChild(cell(plan.plannedSen ? pct(plan.usedPct, 0) : '—'));
     body.appendChild(totalRow);
 
     const leftRow = document.createElement('tr');
     leftRow.className = 'total-row is-quiet';
-    leftRow.appendChild(cell(plan.leftSen < 0 ? 'Over budget' : 'Left over'));
+    leftRow.appendChild(cell(plan.leftSen < 0 ? 'Over budget' : 'Unassigned income'));
     leftRow.appendChild(cell(''));
     leftRow.appendChild(cell(fmt(Math.abs(fromSen(plan.leftSen))), plan.leftSen < 0 ? 'is-minus' : 'is-plus'));
+    leftRow.appendChild(cell(''));
+    leftRow.appendChild(cell(''));
     leftRow.appendChild(cell(plan.incomeSen ? pct(Math.abs(plan.leftPct)) : '—'));
     body.appendChild(leftRow);
 }
 
+/** Every budget ever saved, newest period first. */
+function paintBudgetPlans(plan) {
+    const body = $('budgetPlans');
+    if (!body) return;
+    body.innerHTML = '';
+
+    const rows = planState.budgets.slice().sort((a, b) => (a.to < b.to ? 1 : a.to > b.to ? -1 : b.seq - a.seq));
+
+    set('budgetPlansNote', rows.length
+        ? rows.length + (rows.length === 1 ? ' plan saved' : ' plans saved')
+        : 'Nothing saved yet');
+
+    if (!rows.length) {
+        body.appendChild(emptyRow('Press Save plan and this period joins the list — that is what makes it a record ' +
+            'rather than a sketch.', 6));
+        return;
+    }
+
+    rows.forEach((rec) => {
+        const plannedSen = Object.values(rec.lines || {})
+            .reduce((sum, v) => sum + Math.max(0, toSen(parseFloat(v) || 0)), 0);
+        const incomeSen  = Math.max(0, toSen(parseFloat(rec.income) || 0)) +
+                           Math.max(0, toSen(parseFloat(rec.extra)  || 0));
+        const usedSen = Object.values(budgetUsedIn(rec.from, rec.to)).reduce((sum, v) => sum + v, 0);
+        const usedPct = plannedSen > 0 ? usedSen / plannedSen * 100 : 0;
+
+        const tr = document.createElement('tr');
+        if (rec.key === plan.key) tr.className = 'is-you';
+
+        tr.appendChild(cell(
+            '<strong>' + escapeHtml(planRangeLabelOf(rec)) + (rec.key === plan.key ? ' <span class="tag">open</span>' : '') + '</strong>' +
+            '<small>' + (BUDGET_RULES[rec.rule] ? BUDGET_RULES[rec.rule].name : 'No guide') + '</small>'
+        ));
+        tr.appendChild(cell(dayShort(rec.from) + ' – ' + dayLabel(rec.to), 'is-muted'));
+        tr.appendChild(cell(incomeSen ? fmt(fromSen(incomeSen)) : '—', incomeSen ? '' : 'is-muted'));
+        tr.appendChild(cell(fmt(fromSen(plannedSen)), 'is-strong'));
+        tr.appendChild(cell(
+            fmt(fromSen(usedSen)) + (plannedSen ? ' · ' + pct(usedPct, 0) : ''),
+            plannedSen ? 'is-' + budgetTone(usedPct) : 'is-muted'
+        ));
+        tr.appendChild(cell(
+            '<button type="button" class="split-x" data-open-plan="' + rec.id + '" aria-label="Open plan">' +
+            '<i class="bi bi-pencil"></i></button>' +
+            '<button type="button" class="split-x" data-drop-plan="' + rec.id + '" aria-label="Delete plan">' +
+            '<i class="bi bi-x-lg"></i></button>', 'row-actions'));
+
+        body.appendChild(tr);
+    });
+}
+
 function paintBudget(plan) {
+    // --- the period stepper ---
+    set('budgetPeriodLabel', plan.range.label);
+    const nav = $('budgetNav');
+    if (nav) nav.classList.toggle('is-off', plan.plan.period === 'custom');
+    const dates = $('budgetCustomDates');
+    if (dates) dates.hidden = plan.plan.period !== 'custom';
+
     // --- stat tiles ---
     set('budgetLeft', (plan.leftSen < 0 ? '− ' : '') + money(Math.abs(fromSen(plan.leftSen))));
     set('budgetLeftFoot', budgetVerdict(plan));
@@ -903,8 +2636,7 @@ function paintBudget(plan) {
 
     set('budgetRate', plan.incomeSen ? pct(plan.saveRate) : '—');
     set('budgetRateFoot', plan.incomeSen
-        ? money(fromSen(plan.bucketSen.save)) + ' a month · ' +
-          money(fromSen(plan.bucketSen.save * 12)) + ' a year'
+        ? money(fromSen(plan.bucketSen.save)) + ' set aside · ' + plan.range.sub
         : 'Savings + debt cleared, over income');
 
     // --- side panel tally ---
@@ -915,49 +2647,102 @@ function paintBudget(plan) {
     const leftTally = $('budgetTallyLeft');
     if (leftTally) leftTally.classList.toggle('is-minus', plan.leftSen < 0);
 
-    set('budgetPlanned', money(fromSen(plan.plannedSen)));
+    set('budgetRowsNote', plan.plannedSen
+        ? 'Planned ' + money(fromSen(plan.plannedSen)) + ' · used ' + money(fromSen(plan.usedSen))
+        : 'Nothing planned yet');
     set('budgetDistNote', plan.incomeSen
         ? pct(plan.share(plan.plannedSen)) + ' of income assigned'
         : 'Nothing assigned yet');
 
-    // --- per-row share bars ---
-    const barBase = plan.incomeSen || plan.plannedSen;
+    // --- per-row bars, sub-lines and badges ---
     plan.rows.forEach((row) => {
+        const leftSen = row.sen - row.usedSen;
+        const usedPct = row.sen > 0 ? row.usedSen / row.sen * 100 : 0;
+
         const bar = $('bar_' + row.id);
-        if (bar) bar.style.width = (barBase ? row.sen / barBase * 100 : 0) + '%';
-        set('pct_' + row.id, row.sen && barBase ? pct(row.sen / barBase * 100, 0) : '—');
+        if (bar) {
+            bar.style.width = (row.sen > 0 ? Math.min(100, usedPct) : 0) + '%';
+            bar.className = 'is-' + budgetTone(usedPct);
+        }
+
+        const badge = $('pct_' + row.id);
+        if (badge) {
+            badge.textContent = row.sen > 0 ? pct(usedPct, 0) : '—';
+            badge.className = 'bgt-pct' + (row.sen > 0 ? ' is-' + budgetTone(usedPct) : '');
+        }
+
+        set('sub_' + row.id, row.sen > 0
+            ? 'Used ' + money(fromSen(row.usedSen)) +
+              ' · ' + (leftSen < 0 ? money(fromSen(-leftSen)) + ' over' : money(fromSen(leftSen)) + ' left')
+            : row.usedSen > 0
+                ? money(fromSen(row.usedSen)) + ' spent with nothing budgeted'
+                : (row.hint || BUDGET_BUCKETS[row.bucket].label));
     });
 
+    paintBudgetState(plan);
     paintBudgetDist(plan);
     paintBudgetGuide(plan);
     paintBudgetTable(plan);
+    paintBudgetPlans(plan);
 }
 
-/** The one line that says whether the month works. */
+/** Draft · Saved · Unsaved changes — and the buttons that go with each. */
+function paintBudgetState(plan) {
+    const pill   = $('budgetPlanState');
+    const save   = $('budgetSave');
+    const revert = $('budgetRevert');
+    const copy   = $('budgetCopyPrev');
+
+    const dirty = !plan.saved || planSignature(plan.plan) !== planSignature(planFromRecord(plan.saved));
+    const state = !plan.saved ? 'draft' : dirty ? 'dirty' : 'saved';
+
+    if (pill) {
+        pill.dataset.state = state;
+        pill.textContent = state === 'saved' ? 'Saved'
+            : state === 'dirty' ? 'Unsaved changes'
+            : 'Draft';
+    }
+    if (save) {
+        save.innerHTML = '<i class="bi bi-check-lg"></i> ' + (plan.saved ? 'Update plan' : 'Save plan');
+        // Nothing to save covers two cases: this period matches what is already
+        // filed, or nothing has been typed at all. An empty plan that *is*
+        // saved stays saveable — clearing a budget is a decision too.
+        save.disabled = state === 'saved' || (!plan.saved && planIsEmpty(plan.plan));
+    }
+    if (revert) revert.hidden = state !== 'dirty';
+    if (copy) {
+        const last = !plan.saved && planIsEmpty(plan.plan) ? previousPlanFor(plan.plan) : null;
+        copy.hidden = !last;
+        if (last) copy.innerHTML = '<i class="bi bi-files"></i> Copy ' + escapeHtml(planRangeLabelOf(last));
+    }
+}
+
+/** The one line that says whether the period works. */
 function budgetVerdict(plan) {
     if (!plan.incomeSen && !plan.plannedSen) return 'Start with your take-home pay';
     if (!plan.incomeSen) return 'Add your income to see if this fits';
     if (plan.leftSen < 0) return 'Overspent by ' + pct(Math.abs(plan.leftPct)) + ' — trim or earn more';
     if (plan.leftSen === 0) return 'Every ringgit has a job';
 
-    const dailySen = Math.round(plan.leftSen / 30);
-    return pct(plan.leftPct) + ' unassigned · about ' + money(fromSen(dailySen)) + ' a day';
+    const days = Math.max(1, rangeDays(plan.range.from, plan.range.to));
+    return pct(plan.leftPct) + ' unassigned · about ' +
+        money(fromSen(Math.round(plan.leftSen / days))) + ' a day';
 }
 
 function budgetSummaryText() {
     const plan = budgetCompute();
-    const lines = ['Monthly budget — income ' + money(fromSen(plan.incomeSen))];
+    const lines = [plan.range.label + ' budget — income ' + money(fromSen(plan.incomeSen))];
 
     plan.rows
-        .filter((row) => row.sen > 0)
+        .filter((row) => row.sen > 0 || row.usedSen > 0)
         .sort((a, b) => b.sen - a.sen)
         .forEach((row) => {
             lines.push(row.label + ': ' + money(fromSen(row.sen)) +
-                (plan.incomeSen ? ' (' + pct(plan.share(row.sen), 0) + ')' : ''));
+                ' · used ' + money(fromSen(row.usedSen)) +
+                (row.sen ? ' (' + pct(row.usedSen / row.sen * 100, 0) + ')' : ' (unbudgeted)'));
         });
 
-    lines.push('Spending ' + money(fromSen(plan.spendSen)) +
-        ', savings & debt ' + money(fromSen(plan.bucketSen.save)));
+    lines.push('Planned ' + money(fromSen(plan.plannedSen)) + ', used ' + money(fromSen(plan.usedSen)));
     lines.push(plan.leftSen < 0
         ? 'Over budget by ' + money(fromSen(-plan.leftSen))
         : 'Left over ' + money(fromSen(plan.leftSen)));
@@ -968,71 +2753,1536 @@ function budgetSummaryText() {
 function renderBudget() {
     readBudgetState();
     paintBudget(budgetCompute());
-    saveBudget();
-}
-
-/** Add / remove a user category. Read first so nothing typed is lost. */
-function onBudgetEdit(event) {
-    const btn = event.target.closest('button[data-remove-cat]');
-    if (!btn) return;
-
-    readBudgetState();
-    const id = btn.closest('.bgt-row').dataset.cat;
-    budgetState.custom = budgetState.custom.filter((cat) => cat.id !== id);
-    buildBudgetCustom();
-    renderBudget();
-}
-
-/** Keep the icon tint in step with the bucket a custom row is set to. */
-function onBudgetBucketChange(event) {
-    const select = event.target.closest('.bgt-bucket');
-    if (!select) return;
-    select.closest('.bgt-row').dataset.bucket = select.value;
+    paintGoals();
+    persistPlan();
 }
 
 /**
  * --------------------------------------------------------------------
- * A budget you have to retype every visit is not a budget, so it is kept
- * in localStorage. Private mode and file:// in some browsers throw on
- * access — the app has to work either way, so every call is guarded.
+ * Persistence
  * --------------------------------------------------------------------
+ * A budget you have to retype every visit is not a budget. Private mode and
+ * file:// in some browsers throw on access — the app has to work either way,
+ * so every call is guarded.
  */
-function saveBudget() {
-    const amounts = {};
-    budgetCategories().forEach((cat) => { amounts[cat.id] = ($('bgt_' + cat.id) || {}).value || ''; });
-
+function persistPlan() {
     try {
-        localStorage.setItem(BUDGET_KEY, JSON.stringify({
-            income: ($('budgetIncome') || {}).value || '',
-            extra:  ($('budgetExtra')  || {}).value || '',
-            rule:   (($('budgetRule')  || {}).dataset || {}).value || '502030',
-            amounts,
-            custom: budgetState.custom.map((c) => ({ label: c.label, amount: c.amount, bucket: c.bucket })),
+        storeWrite(BUDGET_KEY, JSON.stringify({
+            version: 2,
+            seq: planState.seq,
+            budgets: planState.budgets,
+            draft: planState.draft,
         }));
-    } catch (err) { /* storage unavailable — the session still works */ }
+    } catch (err) { /* unreachable: storeWrite swallows it and reports it */ }
 }
+
+/** Kept for the reset button and anything that still calls it by its old name. */
+const saveBudget = persistPlan;
 
 function loadBudget() {
     let saved = null;
     try { saved = JSON.parse(storedRaw(BUDGET_KEY) || 'null'); } catch (err) { saved = null; }
-    if (!saved || typeof saved !== 'object') return;
+    if (!saved || typeof saved !== 'object') { planState.draft = blankPlan(); return; }
 
-    if ($('budgetIncome')) $('budgetIncome').value = saved.income || '';
-    if ($('budgetExtra'))  $('budgetExtra').value  = saved.extra  || '';
-    if ($('budgetRule') && BUDGET_RULES[saved.rule]) setSegment($('budgetRule'), saved.rule);
-    else if ($('budgetRule') && saved.rule === 'off') setSegment($('budgetRule'), 'off');
+    if (saved.version === 2) {
+        planState.seq = Number(saved.seq) || 0;
+        planState.budgets = (Array.isArray(saved.budgets) ? saved.budgets : [])
+            .filter((b) => b && b.key && BUDGET_PERIODS[b.period])
+            .map((b) => ({
+                id: String(b.id || ('b' + (++planState.seq))),
+                seq: Number(b.seq) || 0,
+                key: String(b.key),
+                period: b.period,
+                anchor: String(b.anchor || b.from || todayIso()),
+                from: String(b.from || ''), to: String(b.to || ''),
+                income: String(b.income || ''), extra: String(b.extra || ''),
+                rule: BUDGET_RULES[b.rule] ? b.rule : 'off',
+                lines: (b.lines && typeof b.lines === 'object') ? b.lines : {},
+                created: String(b.created || ''), updated: String(b.updated || ''),
+            }));
+        planState.budgets.forEach((b) => { planState.seq = Math.max(planState.seq, b.seq); });
 
+        const draft = saved.draft;
+        planState.draft = (draft && BUDGET_PERIODS[draft.period]) ? {
+            period: draft.period,
+            anchor: String(draft.anchor || todayIso()),
+            from: String(draft.from || ''), to: String(draft.to || ''),
+            income: String(draft.income || ''), extra: String(draft.extra || ''),
+            rule: BUDGET_RULES[draft.rule] ? draft.rule : (draft.rule === 'off' ? 'off' : '502030'),
+            lines: (draft.lines && typeof draft.lines === 'object') ? draft.lines : {},
+        } : blankPlan();
+        return;
+    }
+
+    migrateBudgetV1(saved);
+}
+
+/**
+ * The shape before budgets were records: one plan, `amounts` keyed by category
+ * id, plus `custom` rows that existed only here. Those custom rows are the
+ * problem — nothing in the ledger could ever point at one, so `Used` against
+ * them would read RM 0.00 forever. Each becomes a real category, and its
+ * amount carries into the plan under that category's new id.
+ *
+ * The same rule applies to any future removal: dropping a shape is a data
+ * migration, every time.
+ */
+function migrateBudgetV1(saved) {
+    const lines = {};
     Object.entries(saved.amounts || {}).forEach(([id, value]) => {
-        const el = $('bgt_' + id);
-        if (el) el.value = value;
+        if (value !== '' && value != null) lines[id] = String(value);
     });
 
-    budgetState.custom = (Array.isArray(saved.custom) ? saved.custom : []).map((c) => ({
-        id: nextId('c'),
-        label: String(c.label || ''),
-        amount: String(c.amount || ''),
-        bucket: BUDGET_BUCKETS[c.bucket] ? c.bucket : 'wants',
-    }));
+    (Array.isArray(saved.custom) ? saved.custom : []).forEach((row) => {
+        const label  = String((row && row.label) || '').trim();
+        const amount = String((row && row.amount) || '');
+        if (!label && !amount) return;
+
+        const bucket = BUDGET_BUCKETS[row.bucket] ? row.bucket : 'wants';
+        const id = newCategoryId('c');
+        categoryState.list.push({
+            id, label: label || 'Untitled', bucket,
+            icon: 'bi-tag', tone: 'jade',
+            hint: 'Carried over from your old budget',
+            enabled: true, subs: [],
+        });
+        if (amount) lines[id] = amount;
+    });
+    saveCategories();
+
+    const rule = BUDGET_RULES[saved.rule] ? saved.rule : (saved.rule === 'off' ? 'off' : '502030');
+    const draft = Object.assign(blankPlan(), {
+        income: String(saved.income || ''),
+        extra:  String(saved.extra  || ''),
+        rule, lines,
+    });
+    planState.draft = draft;
+
+    // The old plan was always a monthly one, and it was in force now — so it
+    // becomes this month's saved budget rather than an unsaved draft. Anything
+    // else would read as "you never had a budget".
+    if (!planIsEmpty(draft)) {
+        const range = planRange(draft);
+        planState.seq = 1;
+        planState.budgets = [{
+            id: 'b1', seq: 1, key: planKey(draft, range),
+            period: 'month', anchor: draft.anchor,
+            from: range.from, to: range.to,
+            income: draft.income, extra: draft.extra, rule,
+            lines: Object.assign({}, lines),
+            created: todayIso(), updated: todayIso(),
+        }];
+    }
+    persistPlan();
+}
+
+/**
+ * --------------------------------------------------------------------
+ * What the other modules ask
+ * --------------------------------------------------------------------
+ * The Dashboard and the Expense Recorder each have their own period, which is
+ * rarely the one the Planner happens to be showing. So they ask by dates, and
+ * the answer is the saved budget for exactly those dates — falling back to the
+ * draft on screen only when it covers the same stretch. Answering with another
+ * period's plan would put a figure on the Dashboard that no budget ever said.
+ */
+function budgetLinesFor(from, to) {
+    const rec = planState.budgets.find((b) => b.from === from && b.to === to);
+    if (rec) return rec.lines || {};
+    const plan  = planDraft();
+    const range = planRange(plan);
+    return (range.from === from && range.to === to) ? (plan.lines || {}) : null;
+}
+
+const budgetLineSen = (lines, id) =>
+    (lines && lines[id] != null) ? Math.max(0, toSen(parseFloat(lines[id]) || 0)) : 0;
+
+function budgetPlannedSenIn(from, to) {
+    const lines = budgetLinesFor(from, to);
+    if (!lines) return 0;
+    return Object.values(lines).reduce((sum, v) => sum + Math.max(0, toSen(parseFloat(v) || 0)), 0);
+}
+
+/**
+ * ====================================================================
+ * SAVINGS GOALS
+ * ====================================================================
+ * A target, what is in it, and the arithmetic that says whether you will get
+ * there.
+ *
+ * `Current` is the sum of the contributions and never a typed figure. A goal
+ * that only holds a total cannot answer "am I actually putting in RM500 a
+ * month?" — a dated log can, and it is the same principle the ledger runs on.
+ *
+ * The two figures that matter sit side by side: **needed** monthly, which the
+ * target date demands, and **planned** monthly, which is what you said you
+ * would do. When the second is smaller than the first the goal says so, in
+ * red, rather than quietly reporting a finish date that will not happen.
+ */
+const GOALS_KEY = 'moneyflow.goals.v1';
+
+const GOAL_KINDS = [
+    { id: 'emergency', label: 'Emergency fund', icon: 'bi-life-preserver' },
+    { id: 'travel',    label: 'Travel',         icon: 'bi-airplane' },
+    { id: 'house',     label: 'House',          icon: 'bi-house-door' },
+    { id: 'car',       label: 'Car',            icon: 'bi-car-front' },
+    { id: 'gadget',    label: 'Gadget',         icon: 'bi-phone' },
+    { id: 'education', label: 'Education',      icon: 'bi-mortarboard' },
+    { id: 'wedding',   label: 'Wedding',        icon: 'bi-gem' },
+    { id: 'other',     label: 'Something else', icon: 'bi-bullseye' },
+];
+
+const goalKind = (id) => GOAL_KINDS.find((k) => k.id === id) || GOAL_KINDS[GOAL_KINDS.length - 1];
+
+let goalState = { list: [], seq: 0 };
+const goalOpen = new Set();
+
+const goalId = (prefix) => prefix + (++goalState.seq);
+
+const newGoal = () => ({
+    id: goalId('g'), name: '', kind: 'emergency',
+    target: '', targetDate: '', monthly: '',
+    contributions: [],
+    created: todayIso(),
+});
+
+const goalById = (id) => goalState.list.find((g) => g.id === id) || null;
+const goalName = (goal, index) => (goal.name || '').trim() || 'Goal ' + (index + 1);
+
+/** Whole months from one date to another, floored at one: a target inside this
+ *  month still needs a month's saving to reach. */
+function monthsUntil(fromIso, toIso) {
+    const [ay, am, ad] = isoNums(fromIso);
+    const [by, bm, bd] = isoNums(toIso);
+    if (!ay || !by) return 0;
+    let months = (by * 12 + bm) - (ay * 12 + am);
+    if (bd < ad) months -= 1;
+    return months;
+}
+
+function addMonthsIso(iso, months) {
+    const [y, m, d] = isoNums(iso);
+    const moved = new Date(y, m - 1 + months, d);
+    return isoOfDate(moved);
+}
+
+function goalCompute(goal) {
+    const targetSen  = Math.max(0, toSen(parseFloat(goal.target) || 0));
+    const currentSen = goal.contributions
+        .reduce((sum, c) => sum + Math.max(0, toSen(parseFloat(c.amount) || 0)), 0);
+
+    const remainingSen = Math.max(0, targetSen - currentSen);
+    const progress = targetSen > 0 ? Math.min(100, currentSen / targetSen * 100) : 0;
+    const done = targetSen > 0 && currentSen >= targetSen;
+
+    const monthlySen = Math.max(0, toSen(parseFloat(goal.monthly) || 0));
+
+    // What the target date demands, if there is one.
+    const months = goal.targetDate ? monthsUntil(todayIso(), goal.targetDate) : null;
+    const neededSen = (months !== null && remainingSen > 0)
+        ? (months > 0 ? Math.ceil(remainingSen / months) : remainingSen)
+        : 0;
+
+    // What the planned monthly actually reaches, if there is one. A plan that
+    // never moves is not a plan, so zero is "never" rather than infinity.
+    const monthsNeeded = (monthlySen > 0 && remainingSen > 0)
+        ? Math.ceil(remainingSen / monthlySen)
+        : (remainingSen > 0 ? null : 0);
+    const finishIso = monthsNeeded !== null ? addMonthsIso(todayIso(), monthsNeeded) : '';
+
+    return {
+        targetSen, currentSen, remainingSen, progress, done,
+        monthlySen, months, neededSen, monthsNeeded, finishIso,
+        // The plan falls short when a date is set and the monthly will not meet it.
+        short: neededSen > 0 && monthlySen > 0 && monthlySen < neededSen,
+        late: !!(goal.targetDate && finishIso && finishIso > goal.targetDate),
+    };
+}
+
+/** Reached goals sink to the bottom; the rest keep the order they were made. */
+const goalOrder = () => goalState.list
+    .map((goal, index) => ({ goal, index, done: goalCompute(goal).done }))
+    .sort((a, b) => (a.done === b.done ? a.index - b.index : (a.done ? 1 : -1)));
+
+function buildGoals() {
+    const host = $('goalList');
+    if (!host) return;
+    host.innerHTML = '';
+
+    if (!goalState.list.length) {
+        host.innerHTML = '<p class="split-empty">No goals yet — an emergency fund, a trip, a house deposit: ' +
+            'anything you are putting money aside for. Add one and the arithmetic follows.</p>';
+        return;
+    }
+
+    goalOrder().forEach(({ goal, index }) => {
+        const kind = goalKind(goal.kind);
+        const open = goalOpen.has(goal.id);
+
+        const card = document.createElement('article');
+        card.className = 'goal';
+        card.dataset.goal = goal.id;
+        card.innerHTML =
+            '<div class="goal-head">' +
+                '<span class="goal-icon"><i class="bi ' + kind.icon + '"></i></span>' +
+                '<div class="goal-id">' +
+                    '<input type="text" class="goal-name" aria-label="Goal name">' +
+                    '<small id="gsub_' + goal.id + '">&mdash;</small>' +
+                '</div>' +
+                '<span class="goal-pct" id="gpct_' + goal.id + '">&mdash;</span>' +
+                '<button type="button" class="split-x" data-drop-goal aria-label="Delete goal">' +
+                    '<i class="bi bi-x-lg"></i></button>' +
+            '</div>' +
+
+            '<div class="goal-bar"><i id="gbar_' + goal.id + '" style="width:0%"></i></div>' +
+
+            '<div class="goal-fields">' +
+                '<label class="goal-field"><span>Kind</span>' +
+                    '<select class="goal-kind">' +
+                        GOAL_KINDS.map((k) => '<option value="' + k.id + '">' + k.label + '</option>').join('') +
+                    '</select></label>' +
+                '<label class="goal-field"><span>Target</span>' +
+                    '<div class="money-input money-input-sm"><span class="affix">RM</span>' +
+                    '<input type="number" class="goal-target" min="0" step="100" placeholder="0" inputmode="decimal">' +
+                    '</div></label>' +
+                '<label class="goal-field"><span>Save monthly</span>' +
+                    '<div class="money-input money-input-sm"><span class="affix">RM</span>' +
+                    '<input type="number" class="goal-monthly" min="0" step="50" placeholder="0" inputmode="decimal">' +
+                    '</div></label>' +
+                '<label class="goal-field"><span>By</span>' +
+                    '<input type="date" class="goal-date"></label>' +
+            '</div>' +
+
+            '<div class="goal-facts" id="gfacts_' + goal.id + '"></div>' +
+
+            '<details class="fold goal-log"' + (open ? ' open' : '') + '>' +
+                '<summary><span>Contributions</span><b id="glog_' + goal.id + '">&mdash;</b></summary>' +
+                '<div class="goal-log-body">' +
+                    '<div class="goal-log-list" id="glist_' + goal.id + '"></div>' +
+                    '<div class="goal-add">' +
+                        '<input type="date" class="goal-c-date" aria-label="Date">' +
+                        '<div class="money-input money-input-sm"><span class="affix">RM</span>' +
+                            '<input type="number" class="goal-c-amount" min="0" step="50" placeholder="0" ' +
+                            'inputmode="decimal" aria-label="Amount"></div>' +
+                        '<input type="text" class="goal-c-note" placeholder="Note (optional)" aria-label="Note">' +
+                        '<button type="button" class="ghost-btn" data-add-contribution>' +
+                            '<i class="bi bi-plus-lg"></i> Add</button>' +
+                    '</div>' +
+                '</div>' +
+            '</details>';
+
+        const name = card.querySelector('.goal-name');
+        name.value = goal.name;
+        name.placeholder = goalName(goal, index);
+        card.querySelector('.goal-kind').value = goal.kind;
+        card.querySelector('.goal-target').value = goal.target;
+        card.querySelector('.goal-monthly').value = goal.monthly;
+        card.querySelector('.goal-date').value = goal.targetDate;
+        card.querySelector('.goal-c-date').value = todayIso();
+
+        host.appendChild(card);
+        buildGoalLog(goal);
+    });
+}
+
+function buildGoalLog(goal) {
+    const host = $('glist_' + goal.id);
+    if (!host) return;
+    host.innerHTML = '';
+
+    if (!goal.contributions.length) {
+        host.innerHTML = '<p class="goal-log-empty">Nothing put in yet. Every top-up you log here is what ' +
+            '&ldquo;current&rdquo; is made of.</p>';
+        return;
+    }
+
+    goal.contributions
+        .slice()
+        .sort((a, b) => (a.date === b.date ? b.seq - a.seq : (a.date < b.date ? 1 : -1)))
+        .forEach((c) => {
+            const row = document.createElement('div');
+            row.className = 'goal-c';
+            row.dataset.contribution = c.id;
+            row.innerHTML =
+                '<span class="goal-c-when">' + dayLabel(c.date) + '</span>' +
+                '<span class="goal-c-what">' + (c.note ? escapeHtml(c.note) : '<i>No note</i>') + '</span>' +
+                '<b>' + money(fromSen(Math.max(0, toSen(parseFloat(c.amount) || 0)))) + '</b>' +
+                '<button type="button" class="split-x" data-drop-contribution aria-label="Remove contribution">' +
+                    '<i class="bi bi-x-lg"></i></button>';
+            host.appendChild(row);
+        });
+}
+
+/** Only the derived parts, so typing a target does not rebuild the card. */
+function paintGoals() {
+    const reached = goalState.list.filter((g) => goalCompute(g).done).length;
+    const totalTarget = goalState.list.reduce((sum, g) => sum + goalCompute(g).targetSen, 0);
+    const totalNow    = goalState.list.reduce((sum, g) => sum + goalCompute(g).currentSen, 0);
+
+    set('goalNote', goalState.list.length
+        ? money(fromSen(totalNow)) + ' of ' + money(fromSen(totalTarget)) +
+          (reached ? ' · ' + reached + ' reached' : '')
+        : 'Nothing set aside yet');
+
+    goalState.list.forEach((goal, index) => {
+        const g = goalCompute(goal);
+
+        const bar = $('gbar_' + goal.id);
+        if (bar) {
+            bar.style.width = g.progress + '%';
+            bar.className = g.done ? 'is-done' : g.short || g.late ? 'is-short' : '';
+        }
+
+        const badge = $('gpct_' + goal.id);
+        if (badge) {
+            badge.textContent = g.targetSen ? pct(g.progress, 0) : '—';
+            badge.className = 'goal-pct' + (g.done ? ' is-done' : g.short || g.late ? ' is-short' : '');
+        }
+
+        set('gsub_' + goal.id, g.targetSen
+            ? money(fromSen(g.currentSen)) + ' of ' + money(fromSen(g.targetSen)) +
+              (g.done ? ' · reached' : ' · ' + money(fromSen(g.remainingSen)) + ' to go')
+            : 'Put in a target and this fills itself in');
+
+        set('glog_' + goal.id, goal.contributions.length
+            ? goal.contributions.length + (goal.contributions.length === 1 ? ' top-up · ' : ' top-ups · ') +
+              money(fromSen(g.currentSen))
+            : 'None yet');
+
+        paintGoalFacts(goal, g, index);
+    });
+}
+
+function paintGoalFacts(goal, g, index) {
+    const host = $('gfacts_' + goal.id);
+    if (!host) return;
+
+    const facts = [];
+    const add = (label, value, tone) => facts.push(
+        '<span class="goal-fact' + (tone ? ' is-' + tone : '') + '">' +
+        '<small>' + label + '</small><b>' + value + '</b></span>');
+
+    add('Current', money(fromSen(g.currentSen)));
+    add('Remaining', g.targetSen ? money(fromSen(g.remainingSen)) : '—');
+
+    if (g.done) {
+        add('Status', 'Reached', 'done');
+    } else if (goal.targetDate) {
+        add('Needed monthly',
+            g.neededSen ? money(fromSen(g.neededSen)) : '—',
+            g.short ? 'short' : '');
+        add(g.months !== null && g.months < 0 ? 'Was due' : 'Target date',
+            dayLabel(goal.targetDate) +
+            (g.months !== null ? ' · ' + Math.abs(g.months) + (Math.abs(g.months) === 1 ? ' month' : ' months') +
+                (g.months < 0 ? ' ago' : '') : ''),
+            g.months !== null && g.months < 0 ? 'short' : '');
+    } else {
+        add('Needed monthly', 'Set a date', '');
+    }
+
+    if (!g.done) {
+        add('Finishes',
+            g.monthsNeeded === null ? 'Not while nothing goes in'
+                : g.monthsNeeded === 0 ? 'Already there'
+                : dayLabel(g.finishIso) + ' · ' + g.monthsNeeded +
+                  (g.monthsNeeded === 1 ? ' month' : ' months'),
+            g.late ? 'short' : '');
+    }
+
+    host.innerHTML = facts.join('');
+
+    if (g.short) {
+        host.innerHTML += '<p class="goal-warn"><i class="bi bi-exclamation-triangle"></i> ' +
+            money(fromSen(g.monthlySen)) + ' a month will not reach ' + escapeHtml(goalName(goal, index)) +
+            ' by ' + dayLabel(goal.targetDate) + ' — it needs ' + money(fromSen(g.neededSen)) + '.</p>';
+    }
+}
+
+/**
+ * --------------------------------------------------------------------
+ * Goal editing
+ * --------------------------------------------------------------------
+ */
+function readGoalCards() {
+    document.querySelectorAll('#goalList .goal').forEach((card) => {
+        const goal = goalById(card.dataset.goal);
+        if (!goal) return;
+        goal.name       = card.querySelector('.goal-name').value;
+        goal.kind       = card.querySelector('.goal-kind').value;
+        goal.target     = card.querySelector('.goal-target').value;
+        goal.monthly    = card.querySelector('.goal-monthly').value;
+        goal.targetDate = card.querySelector('.goal-date').value;
+    });
+}
+
+function renderGoals(rebuild) {
+    if (rebuild) buildGoals();
+    paintGoals();
+    saveGoals();
+}
+
+function addGoal() {
+    readGoalCards();
+    const goal = newGoal();
+    goalState.list.push(goal);
+    goalOpen.add(goal.id);
+    renderGoals(true);
+
+    const fresh = document.querySelector('#goalList .goal[data-goal="' + goal.id + '"] .goal-name');
+    if (fresh) { fresh.focus({ preventScroll: true }); fresh.scrollIntoView({ block: 'center', behavior: 'smooth' }); }
+}
+
+function onGoalInput(event) {
+    if (!event.target.closest('#goalList')) return;
+    readGoalCards();
+    paintGoals();
+    saveGoals();
+}
+
+function onGoalClick(event) {
+    const card = event.target.closest('.goal');
+    if (!card) return;
+    const goal = goalById(card.dataset.goal);
+    if (!goal) return;
+
+    const details = event.target.closest('summary');
+    if (details) {
+        // `open` flips after this handler, so record the state it is heading for.
+        if (goalOpen.has(goal.id)) goalOpen.delete(goal.id); else goalOpen.add(goal.id);
+        return;
+    }
+
+    if (event.target.closest('[data-add-contribution]')) {
+        readGoalCards();
+        const amount = card.querySelector('.goal-c-amount').value;
+        const sen = Math.max(0, toSen(parseFloat(amount) || 0));
+        if (!sen) {
+            card.querySelector('.goal-c-amount').focus();
+            return;
+        }
+        goal.contributions.push({
+            id: goalId('gc'),
+            seq: goalState.seq,
+            date: card.querySelector('.goal-c-date').value || todayIso(),
+            amount: String(amount),
+            note: card.querySelector('.goal-c-note').value.trim(),
+        });
+        goalOpen.add(goal.id);
+        renderGoals(true);
+        return;
+    }
+
+    const dropC = event.target.closest('[data-drop-contribution]');
+    if (dropC) {
+        readGoalCards();
+        const id = dropC.closest('.goal-c').dataset.contribution;
+        goal.contributions = goal.contributions.filter((c) => c.id !== id);
+        renderGoals(true);
+        return;
+    }
+
+    if (event.target.closest('[data-drop-goal]')) {
+        readGoalCards();
+        const index = goalState.list.indexOf(goal);
+        askConfirm(
+            'Delete ' + goalName(goal, index) + '?',
+            goal.contributions.length
+                ? 'This goal and its ' + goal.contributions.length +
+                  (goal.contributions.length === 1 ? ' logged top-up' : ' logged top-ups') + ' will be removed. ' +
+                  'Nothing in your Expenses is touched.'
+                : 'This goal will be removed. Nothing in your Expenses is touched.',
+            'Delete goal',
+            () => {
+                goalState.list = goalState.list.filter((g) => g.id !== goal.id);
+                goalOpen.delete(goal.id);
+                renderGoals(true);
+            });
+    }
+}
+
+function saveGoals() {
+    try {
+        storeWrite(GOALS_KEY, JSON.stringify({ seq: goalState.seq, list: goalState.list }));
+    } catch (err) { /* unreachable: storeWrite swallows it and reports it */ }
+}
+
+/** The stored copy is untrusted: a goal whose contributions went missing, or
+ *  whose dates are malformed, would put a wrong figure on screen. */
+function loadGoals() {
+    let saved = null;
+    try { saved = JSON.parse(storedRaw(GOALS_KEY) || 'null'); } catch (err) { saved = null; }
+    if (!saved || !Array.isArray(saved.list)) return;
+
+    goalState.seq = Number(saved.seq) || 0;
+    goalState.list = saved.list
+        .filter((g) => g && g.id)
+        .map((g) => ({
+            id: String(g.id),
+            name: String(g.name || ''),
+            kind: goalKind(g.kind).id,
+            target: String(g.target || ''),
+            targetDate: /^\d{4}-\d{2}-\d{2}$/.test(g.targetDate || '') ? g.targetDate : '',
+            monthly: String(g.monthly || ''),
+            created: String(g.created || ''),
+            contributions: (Array.isArray(g.contributions) ? g.contributions : [])
+                .filter((c) => c && c.id && /^\d{4}-\d{2}-\d{2}$/.test(c.date || ''))
+                .map((c) => ({
+                    id: String(c.id), seq: Number(c.seq) || 0,
+                    date: c.date, amount: String(c.amount || ''), note: String(c.note || ''),
+                })),
+        }));
+
+    // Ids never collide, however the file was edited.
+    goalState.list.forEach((g) => {
+        const n = parseInt(String(g.id).replace(/\D/g, ''), 10);
+        if (n > goalState.seq) goalState.seq = n;
+        g.contributions.forEach((c) => {
+            const cn = parseInt(String(c.id).replace(/\D/g, ''), 10);
+            if (cn > goalState.seq) goalState.seq = cn;
+        });
+    });
+}
+
+/**
+ * ====================================================================
+ * INSTALMENT TRACKER
+ * ====================================================================
+ * Money already promised. A phone on 24 months, a car, SPayLater — and the
+ * other direction, the RM3,000 lent to a friend who is paying it back RM500 a
+ * month. Those are the same arithmetic pointed opposite ways, which is why
+ * they are one module and not two: `direction` is the only thing that differs,
+ * and every figure on the page reads off it.
+ *
+ * Three decisions worth keeping:
+ *
+ *   Two figures, and the third follows. Nobody has both the total and the
+ *   monthly to hand — `basis` says which you typed and the other is derived.
+ *
+ *   The schedule always sums to the total, exactly. Months go through
+ *   `allocateSen`, so RM1,000 over three months is 333.34 / 333.33 / 333.33
+ *   rather than three figures that quietly lose two sen.
+ *
+ *   Payments are keyed by their number, not their date. Changing a 24-month
+ *   term to 30 leaves the eight already paid exactly where they were.
+ *
+ * Late fees are flagged, never calculated. An overdue payment turns red and
+ * says how many days late; what the bank charges for it is the bank's to say,
+ * and a figure this app invented would sit on screen looking like a fact.
+ */
+const COMMIT_KEY = 'moneyflow.commit.v1';
+
+/** 50 years of monthly payments. Past that it is a typo, not a plan. */
+const COMMIT_MAX_MONTHS = 600;
+
+const COMMIT_STATUS = {
+    upcoming:  { label: 'Upcoming',  tone: 'slate' },
+    active:    { label: 'Active',    tone: 'jade'  },
+    overdue:   { label: 'Overdue',   tone: 'red'   },
+    completed: { label: 'Completed', tone: 'done'  },
+    cancelled: { label: 'Cancelled', tone: 'slate' },
+};
+
+const PAYMENT_STATUS = {
+    paid:     { label: 'Paid',     icon: 'bi-check-circle-fill', tone: 'jade'  },
+    due:      { label: 'Due today', icon: 'bi-exclamation-circle-fill', tone: 'amber' },
+    overdue:  { label: 'Overdue',  icon: 'bi-exclamation-triangle-fill', tone: 'red' },
+    upcoming: { label: 'Upcoming', icon: 'bi-hourglass', tone: 'slate' },
+};
+
+let commitState = { plans: [], draft: null, editing: null, seq: 0, filter: 'live' };
+
+const newPlan = () => ({
+    id: '', seq: 0,
+    name: '',
+    direction: 'out',
+    who: '',
+    basis: 'total',
+    total: '', monthly: '', months: '',
+    paidAhead: '',
+    firstDue: todayIso(),
+    autoRecord: true,
+    account: '', category: '',
+    cancelled: false,
+    payments: {},
+    created: '', updated: '',
+});
+
+const commitDraft = () => commitState.draft || (commitState.draft = newPlan());
+const planById = (id) => commitState.plans.find((p) => p.id === id) || null;
+const planName = (plan) => (plan.name || '').trim() || 'Untitled plan';
+
+/**
+ * --------------------------------------------------------------------
+ * Dates
+ * --------------------------------------------------------------------
+ */
+/** The same day of the month, `n` months on. The 31st clamps to the last day
+ *  of a shorter month rather than skidding into the next one — a due date of
+ *  31 January must not become 3 March. */
+function addMonthsClamped(iso, n) {
+    const [y, m, d] = isoNums(iso);
+    if (!y) return iso;
+    const target = new Date(y, m - 1 + n, 1);
+    const lastDay = new Date(target.getFullYear(), target.getMonth() + 1, 0).getDate();
+    return isoOf(target.getFullYear(), target.getMonth() + 1, Math.min(d, lastDay));
+}
+
+/** Whole days between two dates, signed. Built from the parts rather than from
+ *  `new Date(iso)`, which parses as UTC and lands on the wrong day east of
+ *  Greenwich — the difference between "due today" and "one day late". */
+function daysBetween(fromIso, toIso) {
+    const [ay, am, ad] = isoNums(fromIso);
+    const [by, bm, bd] = isoNums(toIso);
+    if (!ay || !by) return 0;
+    return Math.round((new Date(by, bm - 1, bd) - new Date(ay, am - 1, ad)) / 86400000);
+}
+
+/**
+ * --------------------------------------------------------------------
+ * The sums
+ * --------------------------------------------------------------------
+ */
+function planCompute(plan) {
+    const months = Math.min(COMMIT_MAX_MONTHS, Math.max(0, Math.floor(parseFloat(plan.months) || 0)));
+
+    // Two figures in, the third out. Whichever was typed is the one that holds.
+    const typedTotal   = Math.max(0, toSen(parseFloat(plan.total) || 0));
+    const typedMonthly = Math.max(0, toSen(parseFloat(plan.monthly) || 0));
+    const totalSen = plan.basis === 'monthly' ? typedMonthly * months : typedTotal;
+    const monthlySen = months > 0 ? Math.round(totalSen / months) : 0;
+
+    // The schedule adds up to the total exactly; the odd sen lands on the
+    // earliest payments, which is the way a bank rounds it too.
+    const scheduled = months > 0 ? allocateSen(totalSen, Array(months).fill(1)) : [];
+    const today = todayIso();
+
+    // "How many months paid" is not a button that ticks things — it is part of the
+    // answer to "is this month paid". Marking the schedule when the plan was
+    // saved meant a plan you had not saved yet sat there in red saying every
+    // month was overdue, which is exactly what it is not.
+    const ahead = Math.max(0, Math.min(months, Math.floor(parseFloat(plan.paidAhead) || 0)));
+
+    let paidSen = 0, paidCount = 0, overdueCount = 0, dueTodayCount = 0;
+    const rows = [];
+
+    for (let i = 0; i < months; i++) {
+        const n = i + 1;
+        const rec = plan.payments[n] || {};
+        const due = addMonthsClamped(plan.firstDue || today, i);
+
+        // A payment the bank charged differently is typed over; everything
+        // else takes its slice of the schedule.
+        const amountSen = (rec.amount !== undefined && rec.amount !== '')
+            ? Math.max(0, toSen(parseFloat(rec.amount) || 0))
+            : (scheduled[i] || 0);
+
+        // Ticked by hand wins either way — `true` and `false` are both
+        // decisions, and only an absent one falls back to the count.
+        const caughtUp = rec.paid !== true && rec.paid !== false && n <= ahead;
+        const paid = rec.paid === true || caughtUp;
+        const late = daysBetween(due, today);
+        const status = paid ? 'paid' : late > 0 ? 'overdue' : late === 0 ? 'due' : 'upcoming';
+
+        if (paid) { paidSen += amountSen; paidCount++; }
+        else if (status === 'overdue') overdueCount++;
+        else if (status === 'due') dueTodayCount++;
+
+        rows.push({
+            n, due, amountSen, paid, status, late, caughtUp,
+            // A caught-up month was paid before any of this was being tracked,
+            // so its own due date is the only date anyone can honestly claim.
+            paidOn: caughtUp ? due : (rec.date || ''),
+            entryId: rec.entryId || '',
+            override: rec.amount !== undefined && rec.amount !== '',
+        });
+    }
+
+    const scheduledSen = rows.reduce((sum, r) => sum + r.amountSen, 0);
+    const leftSen = Math.max(0, scheduledSen - paidSen);
+    const next = rows.find((r) => !r.paid) || null;
+    const last = rows.length ? rows[rows.length - 1] : null;
+
+    const status = plan.cancelled ? 'cancelled'
+        : !months || !scheduledSen ? 'upcoming'
+        : paidCount >= months ? 'completed'
+        : overdueCount ? 'overdue'
+        : (next && daysBetween(today, next.due) > 0 && paidCount === 0) ? 'upcoming'
+        : 'active';
+
+    // Cancelled and completed plans are history: they stop counting towards
+    // what is still owed, or the hero would keep chasing a settled debt.
+    const live = status !== 'cancelled' && status !== 'completed';
+
+    return {
+        plan, months, ahead, totalSen: scheduledSen, monthlySen, rows,
+        paidSen, paidCount, leftSen,
+        leftCount: Math.max(0, months - paidCount),
+        overdueCount, dueTodayCount,
+        next, last, status, live,
+        progress: scheduledSen > 0 ? Math.min(100, paidSen / scheduledSen * 100) : 0,
+        daysToNext: next ? daysBetween(today, next.due) : null,
+        finishIso: last ? last.due : '',
+    };
+}
+
+/** Every plan, costed. One pass, because five things on this page want it. */
+const commitAll = () => commitState.plans.map(planCompute);
+
+function commitBook() {
+    const all = commitAll();
+    const live = all.filter((p) => p.live);
+
+    const owingSen = live.filter((p) => p.plan.direction === 'out').reduce((s, p) => s + p.leftSen, 0);
+    const owedSen  = live.filter((p) => p.plan.direction === 'in').reduce((s, p) => s + p.leftSen, 0);
+
+    // Everything unpaid across every live plan, soonest first — the answer to
+    // "what is coming", and the source of the Dashboard's upcoming figure.
+    const due = [];
+    live.forEach((p) => p.rows.filter((r) => !r.paid).forEach((r) => due.push({ plan: p, row: r })));
+    due.sort((a, b) => (a.row.due < b.row.due ? -1 : a.row.due > b.row.due ? 1 : 0));
+
+    return {
+        all, live, owingSen, owedSen, due,
+        overdue: due.filter((d) => d.row.status === 'overdue'),
+        next: due.find((d) => d.plan.plan.direction === 'out') || due[0] || null,
+        monthlyOutSen: live.filter((p) => p.plan.direction === 'out')
+            .reduce((s, p) => s + p.monthlySen, 0),
+    };
+}
+
+/** What falls due between two dates and has not been paid. The Dashboard asks
+ *  by its own period, the same way it asks the Planner. */
+function commitDueBetween(from, to) {
+    let sen = 0, count = 0, soonest = '';
+    commitAll().filter((p) => p.live && p.plan.direction === 'out').forEach((p) => {
+        p.rows.forEach((r) => {
+            if (r.paid || r.due < from || r.due > to) return;
+            sen += r.amountSen;
+            count++;
+            if (!soonest || r.due < soonest) soonest = r.due;
+        });
+    });
+    return { sen, count, soonest };
+}
+
+/** What is still owed on live outgoing plans, whatever the period. */
+const commitOutstandingSen = () => commitAll()
+    .filter((p) => p.live && p.plan.direction === 'out')
+    .reduce((sum, p) => sum + p.leftSen, 0);
+
+/**
+ * --------------------------------------------------------------------
+ * Form in, form out
+ * --------------------------------------------------------------------
+ */
+function readCommitForm() {
+    const plan = commitDraft();
+    plan.direction = (($('commitDirection') || {}).dataset || {}).value === 'in' ? 'in' : 'out';
+    plan.basis     = (($('commitBasis') || {}).dataset || {}).value === 'monthly' ? 'monthly' : 'total';
+    plan.name      = ($('commitName')     || {}).value || '';
+    plan.who       = ($('commitWho')      || {}).value || '';
+    plan.total     = ($('commitTotal')    || {}).value || '';
+    plan.monthly   = ($('commitMonthly')  || {}).value || '';
+    plan.months    = ($('commitMonths')   || {}).value || '';
+    plan.paidAhead = ($('commitPaidCount') || {}).value || '';
+    plan.firstDue  = ($('commitFirstDue') || {}).value || plan.firstDue;
+    plan.autoRecord = !!($('commitAuto') || {}).checked;
+    plan.account   = ($('commitAccount')  || {}).value || '';
+    plan.category  = ($('commitCategory') || {}).value || '';
+}
+
+function fillCommitForm() {
+    const plan = commitDraft();
+    if ($('commitDirection')) setSegment($('commitDirection'), plan.direction);
+    if ($('commitBasis'))     setSegment($('commitBasis'), plan.basis);
+    if ($('commitName'))      $('commitName').value     = plan.name;
+    if ($('commitWho'))       $('commitWho').value      = plan.who;
+    if ($('commitTotal'))     $('commitTotal').value    = plan.total;
+    if ($('commitMonthly'))   $('commitMonthly').value  = plan.monthly;
+    if ($('commitMonths'))    $('commitMonths').value   = plan.months;
+    if ($('commitPaidCount')) $('commitPaidCount').value = plan.paidAhead;
+    if ($('commitFirstDue'))  $('commitFirstDue').value = plan.firstDue;
+    if ($('commitAuto'))      $('commitAuto').checked   = plan.autoRecord;
+    buildCommitOptions();
+    // Same rule as the cards: never write a stored blank over a chosen default.
+    if ($('commitAccount')  && plan.account)  $('commitAccount').value  = plan.account;
+    if ($('commitCategory') && plan.category) $('commitCategory').value = plan.category;
+}
+
+/** The account and category pickers, rebuilt whenever either list changes.
+ *  An `in` plan is money arriving, so it offers the income categories. */
+function buildCommitOptions() {
+    const plan = commitDraft();
+
+    const accounts = $('commitAccount');
+    if (accounts) {
+        const held = accounts.value || plan.account;
+        accounts.innerHTML = '';
+        ledgerState.accounts.filter((a) => a.status !== 'closed').forEach((account) => {
+            const option = document.createElement('option');
+            option.value = account.id;
+            option.textContent = account.name.trim() || 'Unnamed account';
+            accounts.appendChild(option);
+        });
+        if (held && Array.from(accounts.options).some((o) => o.value === held)) accounts.value = held;
+    }
+
+    const cats = $('commitCategory');
+    if (cats) {
+        const held = cats.value || plan.category;
+        cats.innerHTML = '';
+        categoryListFor(plan.direction === 'in' ? 'income' : 'expense').forEach((cat) => {
+            const option = document.createElement('option');
+            option.value = cat.id;
+            option.textContent = cat.label;
+            cats.appendChild(option);
+        });
+        if (held && Array.from(cats.options).some((o) => o.value === held)) cats.value = held;
+        else if (plan.direction === 'out' && categoryById(INSTALMENT_CATEGORY)) cats.value = INSTALMENT_CATEGORY;
+    }
+}
+
+/**
+ * --------------------------------------------------------------------
+ * Catching up
+ * --------------------------------------------------------------------
+ * Most plans are picked up part-way through — a phone paid since January,
+ * entered in August. Ticking eight months one at a time is work the app should
+ * be doing, so the form takes the count instead.
+ *
+ * It is **derived, not applied**: `planCompute` treats the first N months as
+ * settled, live, whether or not the plan has been saved. The first cut ticked
+ * them on save, which meant a plan you were still filling in sat there in red
+ * insisting every past month was overdue — the opposite of what you had just
+ * told it. Nothing is written down, so nothing has to be undone.
+ *
+ * Ticking by hand wins over the count in both directions: `paid: true` on a
+ * month past N, `paid: false` on one inside it. Only an absent decision falls
+ * back to the count.
+ *
+ * Caught-up months are deliberately **not** written to Expenses. They were paid
+ * months ago; eight entries all dated today would put RM1,600 of spending into
+ * this month that never happened, and every report reading the ledger would
+ * inherit it.
+ */
+/**
+ * --------------------------------------------------------------------
+ * Saving
+ * --------------------------------------------------------------------
+ * The form is a draft until it is saved, and a draft has no schedule to tick:
+ * history is for records, not sketches. Same bargain as the Bill Splitter.
+ */
+function commitSavePlan() {
+    readCommitForm();
+    const plan = commitDraft();
+    const sums = planCompute(plan);
+
+    if (!plan.name.trim())  { commitHint('Give it a name first — "iPhone", "Ali", something you will recognise.'); return; }
+    if (!sums.months)       { commitHint('How many months does it run for?'); return; }
+    if (!sums.totalSen)     { commitHint('Put in an amount — a plan for nothing is not a plan.'); return; }
+
+    const stamp = todayIso();
+    if (!plan.id) {
+        plan.id = 'ip' + (++commitState.seq);
+        plan.seq = commitState.seq;
+        plan.created = stamp;
+        commitState.plans.push(plan);
+        commitState.editing = plan.id;
+    } else {
+        const at = commitState.plans.findIndex((p) => p.id === plan.id);
+        if (at >= 0) commitState.plans[at] = plan;
+    }
+    plan.updated = stamp;
+
+    saveCommit();
+    renderCommit();
+    flashButton($('commitSave'), '<i class="bi bi-check-lg"></i> Saved');
+}
+
+function commitOpenPlan(id) {
+    const plan = planById(id);
+    if (!plan) return;
+    commitState.draft = plan;          // edited in place; Save writes it back
+    commitState.editing = plan.id;
+    fillCommitForm();
+    renderCommit();
+    const form = $('commit-form');
+    if (form) form.scrollIntoView({ block: 'start', behavior: 'smooth' });
+}
+
+function commitNewPlan() {
+    commitState.draft = newPlan();
+    commitState.editing = null;
+    fillCommitForm();
+    renderCommit();
+}
+
+function commitCancelPlan() {
+    const plan = commitDraft();
+    if (!plan.id) return;
+
+    if (plan.cancelled) {
+        plan.cancelled = false;
+        saveCommit();
+        renderCommit();
+        return;
+    }
+
+    askConfirm(
+        'Cancel ' + planName(plan) + '?',
+        'It stops counting towards what you owe and drops out of what is coming up. Every payment ' +
+        'already ticked stays exactly as it is, and you can un-cancel it later.',
+        'Cancel the plan',
+        () => { plan.cancelled = true; saveCommit(); renderCommit(); });
+}
+
+function commitDropPlan(id) {
+    const plan = planById(id);
+    if (!plan) return;
+    const sums = planCompute(plan);
+    const linked = sums.rows.filter((r) => r.entryId).length;
+
+    askConfirm(
+        'Delete ' + planName(plan) + '?',
+        'The plan and its ' + sums.paidCount + ' ticked ' +
+        (sums.paidCount === 1 ? 'payment go' : 'payments go') + ' for good.' +
+        (linked ? ' The ' + linked + (linked === 1 ? ' entry it wrote' : ' entries it wrote') +
+            ' into Expenses stay where they are — delete those there if you want them gone.' : '') +
+        ' To stop it counting without losing it, cancel it instead.',
+        'Delete plan',
+        () => {
+            commitState.plans = commitState.plans.filter((p) => p.id !== id);
+            if (commitState.editing === id) commitNewPlan();
+            saveCommit();
+            renderCommit();
+        });
+}
+
+/**
+ * --------------------------------------------------------------------
+ * Ticking a payment
+ * --------------------------------------------------------------------
+ * The one place in this module that touches the ledger. Ticking writes one
+ * entry; un-ticking takes the same entry back out. The id is held on the
+ * payment, so nothing is ever written twice and nothing else is ever removed.
+ */
+function commitTogglePayment(n) {
+    const plan = commitDraft();
+    if (!plan.id) { commitHint('Save the plan first — a sketch has nothing to tick.'); return; }
+
+    const sums = planCompute(plan);
+    const row = sums.rows.find((r) => r.n === n);
+    if (!row) return;
+
+    const rec = plan.payments[n] || (plan.payments[n] = {});
+
+    // `row.paid`, not `rec.paid`: a month settled by the count has no record
+    // of its own, and clicking it has to un-settle it rather than pay it twice.
+    if (row.paid) {
+        if (rec.entryId) {
+            ledgerState.entries = ledgerState.entries.filter((e) => e.id !== rec.entryId);
+            saveLedger();
+        }
+        rec.paid = false;
+        rec.date = '';
+        rec.entryId = '';
+        commitHint('Payment ' + n + ' un-ticked' + (row.entryId ? ' and taken back out of Expenses.' : '.'));
+    } else if (n <= sums.ahead) {
+        // Inside the "already paid" count, so ticking it back on means "yes,
+        // that one was settled before I started tracking" — not "I paid it
+        // today". Writing an expense here would date a March payment to now.
+        delete rec.paid;
+        rec.date = '';
+        rec.entryId = '';
+        if (rec.amount === undefined) delete plan.payments[n];
+        commitHint('Payment ' + n + ' is back under the ' + sums.ahead +
+            ' you had already paid — nothing was written to Expenses.');
+    } else {
+        rec.paid = true;
+        rec.date = todayIso();
+        rec.entryId = plan.autoRecord ? commitWriteEntry(plan, row) : '';
+        commitHint('Payment ' + n + ' ticked' +
+            (rec.entryId ? ' and recorded under Expenses.' : '.'));
+    }
+
+    plan.updated = todayIso();
+    saveCommit();
+    renderCommit();
+    renderLedger();
+    renderDash();
+}
+
+function commitWriteEntry(plan, row) {
+    if (!plan.account) {
+        commitHint('Ticked — but there is no account set, so nothing was written to Expenses.');
+        return '';
+    }
+
+    const stamp = todayIso();
+    const entry = {
+        id: ledgerId('e'),
+        seq: ++ledgerSeq,
+        type: plan.direction === 'in' ? 'income' : 'expense',
+        amount: String(fromSen(row.amountSen)),
+        currency: BASE_CURRENCY,
+        base: '', rate: '',
+        date: stamp,
+        category: plan.category, sub: '',
+        account: plan.account, toAccount: '',
+        note: planName(plan) + ' — payment ' + row.n + ' of ' + plan.months,
+        created: stamp, updated: stamp,
+    };
+
+    ledgerState.entries.push(entry);
+    ledgerState.month = monthOf(entry.date);
+    saveLedger();
+    return entry.id;
+}
+
+/** Type over one payment when the bank charged something else. Blank puts it
+ *  back on the schedule rather than setting it to zero. */
+function commitSetAmount(n, value) {
+    const plan = commitDraft();
+    if (!plan.id) return;
+    const rec = plan.payments[n] || (plan.payments[n] = {});
+    if (String(value).trim() === '') delete rec.amount;
+    else rec.amount = String(value);
+    if (!rec.paid && !rec.amount) delete plan.payments[n];
+    saveCommit();
+}
+
+/**
+ * --------------------------------------------------------------------
+ * Painting
+ * --------------------------------------------------------------------
+ */
+const commitHint = (text) => {
+    const hint = $('commitSaveHint');
+    if (!hint) return;
+    hint.innerHTML = '<i class="bi bi-info-circle"></i> ' + escapeHtml(text);
+    clearTimeout(commitHint.timer);
+    commitHint.timer = setTimeout(() => {
+        hint.innerHTML = '<i class="bi bi-hdd"></i> Saved on this device only — nothing leaves your browser.';
+    }, 6000);
+};
+
+/** "in 12 days", "today", "9 days late" — the countdown in words. */
+function daysWord(days) {
+    if (days === 0) return 'due today';
+    if (days > 0) return 'in ' + days + (days === 1 ? ' day' : ' days');
+    return Math.abs(days) + (days === -1 ? ' day late' : ' days late');
+}
+
+function paintCommit() {
+    const book = commitBook();
+    const sums = planCompute(commitDraft());
+
+    // --- hero ---
+    set('commitOwing', money(fromSen(book.owingSen)));
+    const outPlans = book.live.filter((p) => p.plan.direction === 'out').length;
+    set('commitOwingFoot', outPlans
+        ? outPlans + (outPlans === 1 ? ' plan running · ' : ' plans running · ') +
+          money(fromSen(book.monthlyOutSen)) + ' a month'
+        : 'Nothing on instalment yet');
+
+    if (book.next) {
+        set('commitNext', dayShort(book.next.row.due));
+        set('commitNextFoot', planName(book.next.plan.plan) + ' · ' +
+            money(fromSen(book.next.row.amountSen)) + ' · ' +
+            daysWord(daysBetween(todayIso(), book.next.row.due)));
+    } else {
+        set('commitNext', '—');
+        set('commitNextFoot', 'Nothing due');
+    }
+
+    set('commitOwed', money(fromSen(book.owedSen)));
+    const inPlans = book.live.filter((p) => p.plan.direction === 'in').length;
+    set('commitOwedFoot', inPlans
+        ? inPlans + (inPlans === 1 ? ' person owes you' : ' people owe you')
+        : 'Nobody owes you on instalment');
+
+    paintCommitForm(sums);
+    paintCommitSchedule(sums);
+    paintCommitUpcoming(book);
+    paintCommitPlans(book);
+}
+
+function paintCommitForm(sums) {
+    const plan = sums.plan;
+    const incoming = plan.direction === 'in';
+
+    set('commitFormTitle', plan.id ? 'Editing ' + planName(plan) : 'New plan');
+    set('commitDirectionHint', incoming
+        ? 'Money you lent that is coming back to you in instalments.'
+        : 'A phone, a car, SPayLater — anything you are paying off over months.');
+
+    const whoLabel = $('commitWhoLabel');
+    if (whoLabel) {
+        whoLabel.innerHTML = (incoming ? 'Who owes you' : 'Who to') +
+            ' <span class="per">optional</span>';
+    }
+    const who = $('commitWho');
+    if (who) who.placeholder = incoming ? 'Ali' : 'SPayLater';
+
+    set('commitPaidCountHint', incoming
+        ? 'Already had some of it back? Put the number of months here and they settle straight away — ' +
+          'nothing goes into your Expenses for them, since they came in before you started tracking.'
+        : 'Picking this up part-way through? Put the number of months here and they settle straight away — ' +
+          'nothing goes into your Expenses for them, since you paid them before you started tracking. ' +
+          'Tick the months after that as you pay them.');
+
+    const totalField   = $('commitTotalField');
+    const monthlyField = $('commitMonthlyField');
+    if (totalField)   totalField.hidden   = plan.basis !== 'total';
+    if (monthlyField) monthlyField.hidden = plan.basis !== 'monthly';
+
+    set('commitTallyTotal', money(fromSen(sums.totalSen)));
+    set('commitTallyMonthly', money(fromSen(sums.monthlySen)));
+    set('commitTallyPaid', money(fromSen(sums.paidSen)));
+    set('commitTallyLeftLabel', incoming ? 'Still owed to you' : 'Still to pay');
+    set('commitTallyLeft', money(fromSen(sums.leftSen)));
+
+    // --- the expense link ---
+    const auto = $('commitAuto');
+    set('commitAutoLabel', incoming
+        ? 'Write an income entry every time I tick a payment'
+        : 'Write an expense every time I tick a payment');
+    set('commitLinkHint', incoming
+        ? 'Off by default: money coming back from a loan is your own capital returning, not income, ' +
+          'and counting it as income would inflate a year of earnings. Turn it on and pick the ' +
+          'category yourself if you want it in the book anyway.'
+        : 'Ticking a payment files it under Expenses; un-ticking takes it back out. Nothing is written twice.');
+    set('commitLinkSummary', !auto || !auto.checked ? 'Off'
+        : !plan.account ? 'No account set'
+        : (accountById(plan.account) || {}).name || 'On');
+
+    // --- the buttons ---
+    const save = $('commitSave');
+    if (save) save.innerHTML = '<i class="bi bi-check-lg"></i> ' + (plan.id ? 'Update plan' : 'Save plan');
+
+    const pill = $('commitState');
+    if (pill) {
+        const state = !plan.id ? 'draft' : plan.cancelled ? 'dirty' : 'saved';
+        pill.dataset.state = state;
+        pill.textContent = !plan.id ? 'Draft' : COMMIT_STATUS[sums.status].label;
+    }
+
+    const fresh = $('commitNew');
+    if (fresh) fresh.hidden = !plan.id;
+
+    const cancel = $('commitCancelPlan');
+    if (cancel) {
+        cancel.hidden = !plan.id;
+        cancel.innerHTML = plan.cancelled
+            ? '<i class="bi bi-arrow-counterclockwise"></i> Un-cancel this plan'
+            : '<i class="bi bi-slash-circle"></i> Cancel this plan';
+    }
+}
+
+/**
+ * The month-by-month list. Rebuilt on every paint, which is safe because the
+ * only field in it is the amount override — and that is committed on `change`,
+ * when the caret has already left.
+ */
+function paintCommitSchedule(sums) {
+    const host = $('commitMonthsList');
+    const plan = sums.plan;
+    if (!host) return;
+
+    set('commitScheduleNote', sums.months
+        ? sums.paidCount + ' of ' + sums.months + ' paid · ' + money(fromSen(sums.paidSen)) +
+          ' of ' + money(fromSen(sums.totalSen)) + (plan.id ? '' : ' · not saved yet')
+        : 'Nothing to schedule yet');
+
+    const bar = $('commitProgressBar');
+    if (bar) {
+        bar.style.width = sums.progress + '%';
+        bar.className = 'is-' + (sums.status === 'overdue' ? 'red'
+            : sums.status === 'completed' ? 'done' : 'jade');
+    }
+
+    set('commitCountdown', commitCountdownText(sums));
+
+    host.innerHTML = '';
+    if (!sums.months) {
+        host.innerHTML = '<p class="split-empty">Put in an amount and a number of months — ' +
+            'the schedule builds itself.</p>';
+        return;
+    }
+
+    sums.rows.forEach((row) => {
+        const look = PAYMENT_STATUS[row.status];
+        const line = document.createElement('div');
+        line.className = 'commit-month is-' + look.tone + (row.paid ? ' is-paid' : '');
+        line.dataset.n = String(row.n);
+        line.innerHTML =
+            '<button type="button" class="commit-tick" data-tick="' + row.n + '" ' +
+                'aria-pressed="' + row.paid + '" ' +
+                'aria-label="' + (row.paid ? 'Un-tick' : 'Tick') + ' payment ' + row.n + '">' +
+                '<i class="bi ' + look.icon + '"></i></button>' +
+            '<div class="commit-month-id">' +
+                '<b>' + monthKeyLabel(monthOf(row.due)) + '</b>' +
+                '<small>#' + row.n + ' · due ' + dayLabel(row.due) +
+                    (row.paid && row.paidOn ? ' · paid ' + dayShort(row.paidOn) : '') +
+                    (row.entryId ? ' · in Expenses' : row.caughtUp ? ' · caught up' : '') + '</small>' +
+            '</div>' +
+            '<div class="money-input money-input-sm' + (row.override ? ' is-set' : '') + '">' +
+                '<span class="affix">RM</span>' +
+                '<input type="number" class="commit-amount" data-n="' + row.n + '" min="0" step="0.01" ' +
+                'inputmode="decimal" aria-label="Amount for payment ' + row.n + '"></div>' +
+            '<span class="commit-flag is-' + look.tone + '">' +
+                (row.paid ? 'Paid' : row.status === 'upcoming' ? daysWord(-row.late) : look.label) +
+            '</span>';
+
+        line.querySelector('.commit-amount').value = fmt(fromSen(row.amountSen));
+        host.appendChild(line);
+    });
+}
+
+function commitCountdownText(sums) {
+    const plan = sums.plan;
+    if (!plan.id) {
+        return 'A preview — the months above follow what you type. Save the plan to keep it, ' +
+            'and to start ticking them off as you pay.';
+    }
+    if (plan.cancelled) return 'Cancelled — it counts towards nothing, and everything already ticked is kept.';
+    if (!sums.months) return '—';
+    if (sums.status === 'completed') {
+        return 'All ' + sums.months + ' paid — ' + money(fromSen(sums.paidSen)) +
+            ', finished ' + dayLabel(sums.finishIso) + '.';
+    }
+
+    const verb = plan.direction === 'in' ? 'still owed to you' : 'still to pay';
+    const parts = [];
+
+    if (sums.next) {
+        parts.push('Next: ' + money(fromSen(sums.next.amountSen)) + ' on ' + dayLabel(sums.next.due) +
+            ' — ' + daysWord(sums.daysToNext) + '.');
+    }
+    parts.push(sums.leftCount + (sums.leftCount === 1 ? ' payment left, ' : ' payments left, ') +
+        money(fromSen(sums.leftSen)) + ' ' + verb + '.');
+    if (sums.finishIso) parts.push('Finishes ' + monthKeyLabel(monthOf(sums.finishIso)) + '.');
+    if (sums.overdueCount) {
+        parts.push(sums.overdueCount + (sums.overdueCount === 1 ? ' payment is' : ' payments are') +
+            ' past its date.');
+    }
+
+    return parts.join(' ');
+}
+
+function paintCommitUpcoming(book) {
+    const body = $('commitUpcoming');
+    if (!body) return;
+    body.innerHTML = '';
+
+    const rows = book.due.slice(0, 12);
+    set('commitUpcomingNote', book.due.length
+        ? book.due.length + ' unpaid · ' +
+          (book.overdue.length ? book.overdue.length + ' overdue' : 'none overdue')
+        : 'Nothing outstanding');
+
+    if (!rows.length) {
+        body.appendChild(emptyRow('Nothing due. Save a plan and its months line up here, soonest first.', 5));
+        return;
+    }
+
+    rows.forEach(({ plan, row }) => {
+        const look = PAYMENT_STATUS[row.status];
+        const incoming = plan.plan.direction === 'in';
+
+        const tr = document.createElement('tr');
+        tr.appendChild(cell(
+            '<strong>' + dayShort(row.due) + '</strong>' +
+            '<small>' + daysWord(daysBetween(todayIso(), row.due)) + '</small>'
+        ));
+        tr.appendChild(cell(
+            '<strong>' + escapeHtml(planName(plan.plan)) + '</strong>' +
+            '<small>' + (incoming ? 'owed to you' : 'you pay') +
+            (plan.plan.who.trim() ? ' · ' + escapeHtml(plan.plan.who.trim()) : '') + '</small>'
+        ));
+        tr.appendChild(cell('#' + row.n + ' of ' + plan.months, 'is-muted'));
+        tr.appendChild(cell(fmt(fromSen(row.amountSen)), 'is-strong'));
+        tr.appendChild(cell('<span class="tag is-' + look.tone + '">' + look.label + '</span>'));
+        body.appendChild(tr);
+    });
+
+    if (book.due.length > rows.length) {
+        const more = book.due.length - rows.length;
+        body.appendChild(emptyRow('and ' + more + ' further ' + (more === 1 ? 'payment' : 'payments') +
+            ' after these — open a plan to see its whole schedule.', 5));
+    }
+}
+
+function paintCommitPlans(book) {
+    const body = $('commitPlans');
+    if (!body) return;
+    body.innerHTML = '';
+
+    const rows = (commitState.filter === 'all' ? book.all : book.all.filter((p) => p.live))
+        .slice()
+        .sort((a, b) => {
+            const an = a.next ? a.next.due : '9999';
+            const bn = b.next ? b.next.due : '9999';
+            return an < bn ? -1 : an > bn ? 1 : b.plan.seq - a.plan.seq;
+        });
+
+    set('commitPlansNote', book.all.length
+        ? book.all.length + (book.all.length === 1 ? ' plan' : ' plans') +
+          (book.overdue.length ? ' · ' + book.overdue.length + ' payment overdue' : '')
+        : 'Nothing saved yet');
+
+    if (!rows.length) {
+        body.appendChild(emptyRow(commitState.filter === 'all'
+            ? 'Nothing saved yet. Fill in the form above and press Save plan.'
+            : 'Nothing running. Switch to All to see finished and cancelled plans.', 6));
+        return;
+    }
+
+    rows.forEach((sums) => {
+        const plan = sums.plan;
+        const look = COMMIT_STATUS[sums.status];
+        const incoming = plan.direction === 'in';
+
+        const tr = document.createElement('tr');
+        if (commitState.editing === plan.id) tr.className = 'is-you';
+
+        tr.appendChild(cell(
+            '<strong>' + escapeHtml(planName(plan)) +
+            (incoming ? ' <span class="tag">owed to you</span>' : '') + '</strong>' +
+            '<small>' + (plan.who.trim() ? escapeHtml(plan.who.trim()) + ' · ' : '') +
+            sums.months + ' months from ' + dayShort(plan.firstDue) + '</small>'
+        ));
+        tr.appendChild(cell('<span class="tag is-' + look.tone + '">' + look.label + '</span>'));
+        tr.appendChild(cell(
+            '<strong>' + sums.paidCount + ' / ' + sums.months + '</strong>' +
+            '<small>' + money(fromSen(sums.paidSen)) + ' paid</small>'
+        ));
+        tr.appendChild(cell(fmt(fromSen(sums.monthlySen)), 'is-muted'));
+        tr.appendChild(cell(fmt(fromSen(sums.leftSen)), sums.leftSen ? 'is-strong' : 'is-plus'));
+        tr.appendChild(cell(
+            '<button type="button" class="split-x" data-open-plan="' + plan.id + '" aria-label="Open plan">' +
+            '<i class="bi bi-pencil"></i></button>' +
+            '<button type="button" class="split-x" data-drop-plan="' + plan.id + '" aria-label="Delete plan">' +
+            '<i class="bi bi-x-lg"></i></button>', 'row-actions'));
+
+        body.appendChild(tr);
+    });
+}
+
+function commitSummaryText() {
+    const sums = planCompute(commitDraft());
+    const plan = sums.plan;
+    if (!sums.months) return 'Nothing to copy yet.';
+
+    const lines = [planName(plan) + ' — ' + money(fromSen(sums.totalSen)) +
+        ' over ' + sums.months + ' months, ' + money(fromSen(sums.monthlySen)) + ' each' +
+        (plan.who.trim() ? (plan.direction === 'in' ? ' — owed by ' : ' — to ') + plan.who.trim() : '')];
+
+    lines.push(sums.paidCount + ' paid (' + money(fromSen(sums.paidSen)) + '), ' +
+        sums.leftCount + ' left (' + money(fromSen(sums.leftSen)) + ')');
+
+    if (sums.next) {
+        lines.push('Next ' + money(fromSen(sums.next.amountSen)) + ' on ' + dayLabel(sums.next.due) +
+            ' — ' + daysWord(sums.daysToNext));
+    }
+    if (sums.finishIso) lines.push('Finishes ' + monthKeyLabel(monthOf(sums.finishIso)));
+
+    sums.rows.forEach((row) => {
+        lines.push('  #' + row.n + ' ' + dayLabel(row.due) + '  ' +
+            money(fromSen(row.amountSen)) + '  ' +
+            (row.paid ? 'paid' : row.status === 'overdue' ? 'OVERDUE' : 'upcoming'));
+    });
+
+    return lines.join('\n');
+}
+
+function renderCommit() {
+    readCommitForm();
+    paintCommit();
+}
+
+/**
+ * --------------------------------------------------------------------
+ * Persistence
+ * --------------------------------------------------------------------
+ */
+function saveCommit() {
+    try {
+        storeWrite(COMMIT_KEY, JSON.stringify({
+            seq: commitState.seq,
+            filter: commitState.filter,
+            editing: commitState.editing,
+            plans: commitState.plans,
+        }));
+    } catch (err) { /* unreachable: storeWrite swallows it and reports it */ }
+}
+
+/** The stored copy is untrusted. A payment numbered past the end of the term,
+ *  a term of "banana", a due date that is not a date: each of those puts a
+ *  wrong figure on screen, so each is dropped on the way in. */
+function loadCommit() {
+    let saved = null;
+    try { saved = JSON.parse(storedRaw(COMMIT_KEY) || 'null'); } catch (err) { saved = null; }
+    if (!saved || !Array.isArray(saved.plans)) { commitState.draft = newPlan(); return; }
+
+    commitState.seq = Number(saved.seq) || 0;
+    commitState.filter = saved.filter === 'all' ? 'all' : 'live';
+
+    commitState.plans = saved.plans.filter((p) => p && p.id).map((p) => {
+        const months = Math.min(COMMIT_MAX_MONTHS, Math.max(0, Math.floor(parseFloat(p.months) || 0)));
+        const payments = {};
+        Object.entries((p.payments && typeof p.payments === 'object') ? p.payments : {}).forEach(([key, rec]) => {
+            const n = parseInt(key, 10);
+            if (!(n >= 1 && n <= months) || !rec) return;
+            // Three-valued on purpose: ticked, un-ticked, or never decided —
+            // and only the third falls back to the "already paid" count.
+            const out = {
+                date: /^\d{4}-\d{2}-\d{2}$/.test(rec.date || '') ? rec.date : '',
+                entryId: String(rec.entryId || ''),
+            };
+            if (rec.paid === true || rec.paid === false) out.paid = rec.paid;
+            if (rec.amount !== undefined && rec.amount !== '') out.amount = String(rec.amount);
+            // A record holding no decision, no figure and no link says nothing.
+            if (out.paid === undefined && out.amount === undefined && !out.entryId) return;
+            payments[n] = out;
+        });
+
+        return {
+            id: String(p.id),
+            seq: Number(p.seq) || 0,
+            name: String(p.name || ''),
+            direction: p.direction === 'in' ? 'in' : 'out',
+            who: String(p.who || ''),
+            basis: p.basis === 'monthly' ? 'monthly' : 'total',
+            total: String(p.total || ''),
+            monthly: String(p.monthly || ''),
+            months: String(months || ''),
+            paidAhead: String(Math.max(0, Math.floor(parseFloat(p.paidAhead) || 0)) || ''),
+            firstDue: /^\d{4}-\d{2}-\d{2}$/.test(p.firstDue || '') ? p.firstDue : todayIso(),
+            autoRecord: p.autoRecord !== false,
+            account: String(p.account || ''),
+            category: String(p.category || ''),
+            cancelled: !!p.cancelled,
+            payments,
+            created: String(p.created || ''),
+            updated: String(p.updated || ''),
+        };
+    });
+
+    // An entry the ledger no longer holds is not a link, and leaving the id
+    // would make un-ticking try to delete something that is not there.
+    const entryIds = new Set(ledgerState.entries.map((e) => e.id));
+    commitState.plans.forEach((p) => {
+        Object.values(p.payments).forEach((rec) => {
+            if (rec.entryId && !entryIds.has(rec.entryId)) rec.entryId = '';
+        });
+    });
+
+    commitState.plans.forEach((p) => { commitState.seq = Math.max(commitState.seq, p.seq); });
+
+    const open = commitState.plans.find((p) => p.id === saved.editing);
+    commitState.draft = open || newPlan();
+    commitState.editing = open ? open.id : null;
 }
 
 /**
@@ -1110,10 +4360,6 @@ function cardRun(balanceSen, monthlyRate, payFn) {
     return { rows, months: rows.length, interestSen, paidSen, stalls: false };
 }
 
-/** The minimum due: a percentage of the statement, never below the floor. */
-const cardMinimumFn = (minPct, floorSen) => (bal, interest, statement) =>
-    Math.max(Math.round(statement * minPct / 100), floorSen);
-
 /**
  * The smallest monthly payment that clears the balance within `months`.
  *
@@ -1158,294 +4404,309 @@ function cardYearRows(rows) {
     return years;
 }
 
-function cardCompute() {
-    const balanceSen  = Math.max(0, toSen(num('cardBalance')));
-    const annualRate  = Math.max(0, num('cardRate'));
+/**
+ * --------------------------------------------------------------------
+ * A book of cards
+ * --------------------------------------------------------------------
+ * The module began as one card and a calculator. Nobody has one card. So the
+ * cards are records now — name, limit, outstanding, rate, minimum, due day —
+ * and the plan is worked out across all of them from a single monthly budget.
+ *
+ * `opening` is what was owed when the card was first written down, and it is
+ * the only thing progress can honestly be measured against. Interest and new
+ * spending push the outstanding back up, and this app can see neither, so the
+ * outstanding stays the reader's to correct from the statement. Logging a
+ * payment is the one thing that moves it down by itself.
+ */
+let cardState = { cards: [], draft: null, editing: null, seq: 0, filter: 'open' };
+
+const newCard = () => ({
+    id: '', seq: 0,
+    name: '',
+    limit: '', opening: '', balance: '',
+    rate: '18', minPct: '5', minFloor: '25',
+    dueDay: '15',
+    autoRecord: true, account: '', category: '',
+    closed: false,
+    payments: [],
+    created: '', updated: '',
+});
+
+const cardDraft = () => cardState.draft || (cardState.draft = newCard());
+const cardById = (id) => cardState.cards.find((c) => c.id === id) || null;
+const cardName = (card) => (card.name || '').trim() || 'Untitled card';
+
+/** One card, costed. Every figure here is derived; none of it is stored. */
+function cardFigures(card) {
+    const limitSen   = Math.max(0, toSen(parseFloat(card.limit) || 0));
+    const balanceSen = Math.max(0, toSen(parseFloat(card.balance) || 0));
+    const openingSen = Math.max(0, toSen(parseFloat(card.opening) || 0)) || balanceSen;
+
+    const annualRate  = Math.max(0, parseFloat(card.rate) || 0);
     const monthlyRate = annualRate / 100 / 12;
-    const minPct      = Math.max(0, num('cardMinPct'));
-    const minFloorSen = Math.max(0, toSen(num('cardMinFloor')));
-    const paymentSen  = Math.max(0, toSen(num('cardPayment')));
+    const minPct      = Math.max(0, parseFloat(card.minPct) || 0);
+    const minFloorSen = Math.max(0, toSen(parseFloat(card.minFloor) || 0));
 
-    const minimumFn      = cardMinimumFn(minPct, minFloorSen);
-    const firstInterest  = Math.round(balanceSen * monthlyRate);
-    const firstMinimum   = balanceSen > 0 ? minimumFn(balanceSen, firstInterest, balanceSen + firstInterest) : 0;
+    const paidSen = card.payments.reduce((sum, p) => sum + Math.max(0, toSen(parseFloat(p.amount) || 0)), 0);
 
-    // An empty payment field means "I only pay the minimum" — the default
-    // behaviour the module exists to argue against.
-    const onMinimum = paymentSen <= 0;
-    const payFn     = onMinimum ? minimumFn : () => paymentSen;
-
-    const plan    = cardRun(balanceSen, monthlyRate, payFn);
-    const minPlan = onMinimum ? plan : cardRun(balanceSen, monthlyRate, minimumFn);
+    const interestSen = Math.round(balanceSen * monthlyRate);
+    const statementSen = balanceSen + interestSen;
+    const minimumSen = balanceSen > 0
+        ? Math.min(statementSen, Math.max(Math.round(statementSen * minPct / 100), minFloorSen))
+        : 0;
 
     return {
-        balanceSen, annualRate, monthlyRate, minPct, minFloorSen, paymentSen,
-        firstInterest, firstMinimum, onMinimum, plan, minPlan,
-        payingSen: onMinimum ? firstMinimum : paymentSen,
-        view: (($('cardView') || {}).dataset || {}).value || 'year',
+        card, limitSen, balanceSen, openingSen, annualRate, monthlyRate, minPct, minFloorSen,
+        paidSen, interestSen, statementSen, minimumSen,
+        availableSen: Math.max(0, limitSen - balanceSen),
+        usedPct: limitSen > 0 ? balanceSen / limitSen * 100 : 0,
+        // Progress can pass 100% on a card that keeps being used. The bar caps;
+        // the figure beside it does not, because that is the honest one.
+        progress: openingSen > 0 ? Math.min(100, paidSen / openingSen * 100) : 0,
+        progressRaw: openingSen > 0 ? paidSen / openingSen * 100 : 0,
+        live: !card.closed && balanceSen > 0,
+        nextDue: cardNextDue(card),
     };
 }
 
-/** The plans shown side by side. Duplicates and pointless rows are dropped. */
-function cardScenarios(card) {
-    const { balanceSen, monthlyRate, paymentSen, onMinimum } = card;
-    const list = [{ label: 'Minimum only', note: card.minPct + '% of the balance, falling every month', paySen: null, plan: card.minPlan }];
-
-    const add = (label, note, paySen) => {
-        if (paySen <= 0) return;
-        if (list.some((s) => s.paySen === paySen)) return;
-        list.push({ label, note, paySen, plan: cardRun(balanceSen, monthlyRate, () => paySen) });
-    };
-
-    if (!onMinimum) add('Your payment', 'What you typed in', paymentSen);
-
-    // Step up from whatever the user is actually paying today.
-    const base = onMinimum ? card.firstMinimum : paymentSen;
-    add('+ RM100 a month', 'RM100 more than you pay now', base + toSen(100));
-    add('+ RM300 a month', 'RM300 more than you pay now', base + toSen(300));
-    add('Clear it in a year', 'Whatever 12 payments takes', cardPaymentFor(balanceSen, monthlyRate, 12));
-
-    return list;
+/** The next date this card falls due, from its day of the month. */
+function cardNextDue(card) {
+    const day = Math.min(31, Math.max(1, Math.floor(parseFloat(card.dueDay) || 0)));
+    if (!day) return '';
+    const today = todayIso();
+    const [y, m] = isoNums(today);
+    const clamp = (yy, mm) => isoOf(yy, mm, Math.min(day, new Date(yy, mm, 0).getDate()));
+    const thisMonth = clamp(y, m);
+    if (thisMonth >= today) return thisMonth;
+    const next = new Date(y, m, 1);
+    return clamp(next.getFullYear(), next.getMonth() + 1);
 }
 
-function paintCardDist(card) {
-    const dist = $('cardDist');
-    const legend = $('cardLegend');
-    if (!dist || !legend) return;
+const cardsLive = () => cardState.cards.map(cardFigures).filter((c) => c.live);
+const cardTotalDebtSen = () => cardsLive().reduce((sum, c) => sum + c.balanceSen, 0);
+const cardTotalMinimumSen = () => cardsLive().reduce((sum, c) => sum + c.minimumSen, 0);
 
-    dist.innerHTML = '';
-    legend.innerHTML = '';
+/**
+ * --------------------------------------------------------------------
+ * Paying more than one card
+ * --------------------------------------------------------------------
+ * One budget, every month: charge each card its interest, pay every card its
+ * minimum, then throw whatever is left at exactly one of them. Which one is
+ * the strategy — and as each card clears, its minimum joins the pile going at
+ * the next. That rolling-up is the whole reason a plan beats paying each card
+ * on its own, and it is why this cannot be a per-card sum.
+ *
+ * `minimum` spends nothing extra: it is the baseline the other two are
+ * measured against, and the behaviour this module exists to argue with.
+ */
+const CARD_STRATEGIES = {
+    avalanche: { label: 'Avalanche', note: 'Highest interest rate first' },
+    snowball:  { label: 'Snowball',  note: 'Smallest balance first' },
+    minimum:   { label: 'Minimum only', note: 'What the bank asks for, and nothing more' },
+};
 
-    const { plan, balanceSen } = card;
-
-    if (!balanceSen || plan.stalls) {
-        dist.innerHTML = '<span class="dist-left" style="width:100%"></span>';
-        legend.innerHTML = '<span class="legend-empty">' + (balanceSen
-            ? 'At this payment the balance never comes down, so there is no total to split.'
-            : 'Put in what is on the card and the cost works itself out.') + '</span>';
-        return;
+function payoffOrder(live, strategy) {
+    const rows = live.slice();
+    if (strategy === 'snowball') {
+        rows.sort((a, b) => (a.bal - b.bal) || (b.monthlyRate - a.monthlyRate));
+    } else if (strategy === 'avalanche') {
+        rows.sort((a, b) => (b.monthlyRate - a.monthlyRate) || (a.bal - b.bal));
     }
-
-    const parts = [
-        { label: 'The balance itself', tone: 'jade', sen: balanceSen },
-        { label: 'Interest on top',    tone: 'red',  sen: plan.interestSen },
-    ];
-
-    parts.forEach((part) => {
-        const bar = document.createElement('span');
-        bar.className = 'dist-' + part.tone;
-        bar.style.width = (part.sen / plan.paidSen * 100) + '%';
-        bar.title = part.label + ' · ' + money(fromSen(part.sen));
-        dist.appendChild(bar);
-
-        const item = document.createElement('span');
-        item.className = 'legend-item';
-        item.innerHTML =
-            '<i class="dot dot-' + part.tone + '"></i>' +
-            '<span>' + part.label + ' <b>' + money(fromSen(part.sen)) + '</b> ' +
-            '<small>' + pct(part.sen / plan.paidSen * 100) + '</small></span>';
-        legend.appendChild(item);
-    });
+    return rows;
 }
 
-function paintCardCompare(card) {
-    const body = $('cardCompareBody');
-    if (!body) return;
-    body.innerHTML = '';
-
-    if (!card.balanceSen) {
-        set('cardCompareNote', '');
-        body.appendChild(emptyRow('Add a balance to see what paying a bit more would do.', 5));
-        return;
-    }
-
-    const scenarios = cardScenarios(card);
-    const baseline  = card.minPlan;
-
-    set('cardCompareNote', baseline.stalls
-        ? 'The minimum never clears this card, so there is nothing to compare against'
-        : 'Measured against paying only the minimum');
-
-    scenarios.forEach((scenario) => {
-        const plan = scenario.plan;
-        const isNow = scenario.paySen === null ? card.onMinimum : scenario.paySen === card.paymentSen;
-        const savedSen = (!plan.stalls && !baseline.stalls) ? baseline.interestSen - plan.interestSen : null;
-
-        const tr = document.createElement('tr');
-        if (isNow) tr.className = 'is-you';
-
-        tr.appendChild(cell(
-            '<strong>' + scenario.label + (isNow ? ' <em class="tag">you now</em>' : '') + '</strong>' +
-            '<small>' + scenario.note + '</small>'
-        ));
-        tr.appendChild(cell(scenario.paySen === null
-            ? money(fromSen(card.firstMinimum)) + ' falling'
-            : money(fromSen(scenario.paySen))));
-        tr.appendChild(cell(monthsText(plan.months), plan.stalls ? 'is-minus' : 'is-strong'));
-        tr.appendChild(cell(plan.stalls ? '—' : fmt(fromSen(plan.interestSen)), plan.stalls ? 'is-muted' : ''));
-
-        // A flat payment can cost *more* than the minimum: the minimum starts
-        // high and only falls below a fixed amount years later. Say so rather
-        // than leaving the column blank.
-        tr.appendChild(cell(
-            savedSen === null || savedSen === 0 ? '—'
-                : (savedSen > 0 ? '+ ' : '− ') + fmt(Math.abs(fromSen(savedSen))),
-            !savedSen ? 'is-muted' : savedSen > 0 ? 'is-plus' : 'is-minus'
-        ));
-        body.appendChild(tr);
-    });
-}
-
-function paintCardPlan(card) {
-    const body = $('cardPlanBody');
-    if (!body) return;
-    body.innerHTML = '';
-
-    const byMonth = card.view === 'month';
-    set('cardPlanHead', byMonth ? 'Month' : 'Year');
-
-    if (!card.balanceSen) {
-        set('cardPlanNote', '');
-        body.appendChild(emptyRow('Nothing on the card — nothing to pay down.', 5));
-        return;
-    }
-
-    if (card.plan.stalls) {
-        set('cardPlanNote', '');
-        body.appendChild(emptyRow(
-            'At ' + money(fromSen(card.payingSen)) + ' a month the interest eats the payment, so the balance never falls.', 5));
-        return;
-    }
-
-    set('cardPlanNote', card.plan.rows.length + ' payments · last one ' + monthLabel(card.plan.rows.length - 1));
-
-    const rows = byMonth
-        ? card.plan.rows.map((row) => ({
-            label: monthLabel(row.month - 1),
-            sub: 'Payment ' + row.month,
-            paySen: row.paySen, interestSen: row.interestSen,
-            principalSen: row.principalSen, balanceSen: row.balanceSen,
-        }))
-        : cardYearRows(card.plan.rows).map((row) => ({
-            label: 'Year ' + row.year,
-            sub: row.months + (row.months === 1 ? ' payment' : ' payments'),
-            paySen: row.paySen, interestSen: row.interestSen,
-            principalSen: row.principalSen, balanceSen: row.balanceSen,
+function payoffRun(figures, budgetSen, strategy) {
+    const cards = figures
+        .filter((f) => f.balanceSen > 0)
+        .map((f) => ({
+            id: f.card.id, name: cardName(f.card),
+            bal: f.balanceSen, startSen: f.balanceSen,
+            monthlyRate: f.monthlyRate, annualRate: f.annualRate,
+            minPct: f.minPct, minFloorSen: f.minFloorSen,
+            paid: 0, interest: 0, clearedMonth: 0,
         }));
 
-    rows.forEach((row) => {
-        const tr = document.createElement('tr');
-        tr.appendChild(cell('<strong>' + row.label + '</strong><small>' + row.sub + '</small>'));
-        tr.appendChild(cell(fmt(fromSen(row.paySen))));
-        tr.appendChild(cell(fmt(fromSen(row.interestSen)), 'is-minus'));
-        tr.appendChild(cell(fmt(fromSen(row.principalSen))));
-        tr.appendChild(cell(row.balanceSen > 0 ? fmt(fromSen(row.balanceSen)) : 'Clear',
-            row.balanceSen > 0 ? 'is-strong' : 'is-plus'));
-        body.appendChild(tr);
-    });
+    const empty = {
+        rows: [], cards, months: 0, interestSen: 0, paidSen: 0,
+        stalls: false, short: false, shortSen: 0, startSen: 0,
+    };
+    if (!cards.length) return empty;
 
-    const totalRow = document.createElement('tr');
-    totalRow.className = 'total-row';
-    totalRow.appendChild(cell('Altogether'));
-    totalRow.appendChild(cell(fmt(fromSen(card.plan.paidSen))));
-    totalRow.appendChild(cell(fmt(fromSen(card.plan.interestSen))));
-    totalRow.appendChild(cell(fmt(fromSen(card.balanceSen))));
-    totalRow.appendChild(cell('Clear'));
-    body.appendChild(totalRow);
-}
+    const startSen = cards.reduce((sum, c) => sum + c.bal, 0);
+    const rows = [];
+    let interestSen = 0, paidSen = 0;
 
-function paintCard(card) {
-    const { plan, balanceSen } = card;
+    for (let m = 1; m <= CARD_MAX_MONTHS; m++) {
+        const live = cards.filter((c) => c.bal > 0);
+        if (!live.length) break;
 
-    // --- hero ---
-    set('cardMonths', balanceSen ? monthsText(plan.months) : '—');
-    set('cardMonthsFoot', cardVerdict(card));
+        live.forEach((c) => {
+            c.monthInterest = Math.round(c.bal * c.monthlyRate);
+            c.statement = c.bal + c.monthInterest;
+            c.min = Math.min(c.statement,
+                Math.max(Math.round(c.statement * c.minPct / 100), c.minFloorSen));
+        });
 
-    set('cardInterest', plan.stalls ? '—' : money(fromSen(plan.interestSen)));
-    set('cardInterestFoot', !balanceSen ? 'Nothing owing yet'
-        : plan.stalls ? 'The balance never comes down'
-        : pct(plan.interestSen / balanceSen * 100) + ' on top of what you owe');
+        const minsSen = live.reduce((sum, c) => sum + c.min, 0);
+        const budget = strategy === 'minimum' ? minsSen : Math.max(budgetSen, 0);
 
-    set('cardPaid', plan.stalls ? '—' : money(fromSen(plan.paidSen)));
-    set('cardPaidFoot', !balanceSen ? '—'
-        : plan.stalls ? 'Paying forever'
-        : money(fromSen(balanceSen)) + ' of balance + ' + money(fromSen(plan.interestSen)) + ' of interest');
+        // A budget that will not cover the minimums is not a slow plan, it is
+        // no plan. Saying how far short beats simulating a fiction.
+        if (budget < minsSen) {
+            return Object.assign({}, empty, {
+                cards, startSen, stalls: true, short: true,
+                shortSen: minsSen - budget, needSen: minsSen,
+                months: Infinity, interestSen: Infinity, paidSen: Infinity,
+            });
+        }
 
-    // --- tally ---
-    set('cardTallyBalance', money(fromSen(balanceSen)));
-    set('cardTallyInterest', '+ ' + money(fromSen(card.firstInterest)));
-    set('cardTallyMin', money(fromSen(card.firstMinimum)));
-    set('cardTallyPay', money(fromSen(card.payingSen)));
+        live.forEach((c) => { c.thisPay = c.min; });
+        let spare = budget - minsSen;
 
-    const payHint = $('cardPaymentHint');
-    if (payHint) {
-        payHint.textContent = card.onMinimum
-            ? 'Empty — so this is the minimum, ' + money(fromSen(card.firstMinimum)) + ' to start, falling every month.'
-            : 'Leave it empty to see what paying only the minimum does.';
+        payoffOrder(live, strategy).forEach((c) => {
+            if (spare <= 0) return;
+            const room = c.statement - c.thisPay;
+            const extra = Math.min(room, spare);
+            c.thisPay += extra;
+            spare -= extra;
+        });
+
+        let monthPay = 0, monthInterest = 0;
+        live.forEach((c) => {
+            c.bal = c.statement - c.thisPay;
+            c.interest += c.monthInterest;
+            c.paid += c.thisPay;
+            monthPay += c.thisPay;
+            monthInterest += c.monthInterest;
+            if (c.bal <= 0 && !c.clearedMonth) c.clearedMonth = m;
+        });
+
+        interestSen += monthInterest;
+        paidSen += monthPay;
+        const owed = cards.reduce((sum, c) => sum + Math.max(0, c.bal), 0);
+        rows.push({
+            month: m, paySen: monthPay, interestSen: monthInterest,
+            principalSen: monthPay - monthInterest, balanceSen: owed,
+        });
+
+        // Nothing moved and nothing will: every card's minimum is being eaten
+        // by its own interest.
+        if (monthPay <= monthInterest && owed > 0) {
+            return Object.assign({}, empty, {
+                rows, cards, startSen, stalls: true,
+                months: Infinity, interestSen: Infinity, paidSen: Infinity,
+            });
+        }
     }
 
-    const payInput = $('cardPayment');
-    if (payInput) payInput.placeholder = card.firstMinimum ? fmt(fromSen(card.firstMinimum)) : '0';
-
-    set('cardDistNote', !balanceSen || plan.stalls ? ''
-        : 'Every RM100 owed costs ' + money(fromSen(Math.round(plan.interestSen / (balanceSen / 10000)))) + ' in interest');
-
-    // --- the warning strip ---
-    const notice = $('cardNotice');
-    if (notice) {
-        notice.hidden = !(balanceSen && plan.stalls);
-        set('cardNoticeText', balanceSen && plan.stalls
-            ? money(fromSen(card.payingSen)) + ' a month does not even cover the ' +
-              money(fromSen(card.firstInterest)) + ' of interest, so the balance grows instead of falling. ' +
-              'You need more than ' + money(fromSen(card.firstInterest)) + ' a month just to stand still.'
-            : '');
+    if (cards.some((c) => c.bal > 0)) {
+        return Object.assign({}, empty, {
+            rows, cards, startSen, stalls: true,
+            months: Infinity, interestSen: Infinity, paidSen: Infinity,
+        });
     }
 
-    paintCardDist(card);
-    paintCardCompare(card);
-    paintCardPlan(card);
+    return { rows, cards, months: rows.length, interestSen, paidSen, stalls: false, short: false, startSen };
 }
 
-function cardVerdict(card) {
-    if (!card.balanceSen) return 'Put in what is on the card';
-    if (card.plan.stalls) return 'This payment never clears the card';
+function cardCompute() {
+    const figures = cardState.cards.map(cardFigures);
+    const live = figures.filter((f) => f.live);
+    const budgetSen = Math.max(0, toSen(num('cardPayment')));
+    const strategy = (($('cardStrategy') || {}).dataset || {}).value === 'snowball' ? 'snowball' : 'avalanche';
 
-    const when = monthLabel(card.plan.months - 1);
-    return money(fromSen(card.payingSen)) + ' a month' + (card.onMinimum ? ' (the minimum)' : '') +
-        ' · clear by ' + when;
+    const minimumSen = live.reduce((sum, c) => sum + c.minimumSen, 0);
+    // An empty payment field means "I pay what they ask" — the baseline.
+    const onMinimum = budgetSen <= 0;
+    const spendSen = onMinimum ? minimumSen : budgetSen;
+
+    const plans = {
+        minimum:   payoffRun(figures, 0, 'minimum'),
+        avalanche: payoffRun(figures, spendSen, 'avalanche'),
+        snowball:  payoffRun(figures, spendSen, 'snowball'),
+    };
+    const plan = onMinimum ? plans.minimum : plans[strategy];
+
+    return {
+        figures, live, plans, plan, strategy, onMinimum,
+        budgetSen, spendSen, minimumSen,
+        debtSen: live.reduce((sum, c) => sum + c.balanceSen, 0),
+        limitSen: live.reduce((sum, c) => sum + c.limitSen, 0),
+        paidSen: figures.reduce((sum, c) => sum + c.paidSen, 0),
+        openingSen: figures.reduce((sum, c) => sum + c.openingSen, 0),
+        view: (($('cardView') || {}).dataset || {}).value || 'year',
+        draft: cardFigures(cardDraft()),
+    };
 }
 
-function cardSummaryText() {
-    const card = cardCompute();
-    const lines = ['Credit card — ' + money(fromSen(card.balanceSen)) + ' at ' + pct(card.annualRate, 1) + ' a year'];
+/**
+ * --------------------------------------------------------------------
+ * Form in, form out
+ * --------------------------------------------------------------------
+ */
+function readCardForm() {
+    const card = cardDraft();
+    card.name     = ($('cardName')     || {}).value || '';
+    card.limit    = ($('cardLimit')    || {}).value || '';
+    card.balance  = ($('cardBalance')  || {}).value || '';
+    card.rate     = ($('cardRate')     || {}).value || '';
+    card.minPct   = ($('cardMinPct')   || {}).value || '';
+    card.minFloor = ($('cardMinFloor') || {}).value || '';
+    card.dueDay   = ($('cardDueDay')   || {}).value || '';
+    card.autoRecord = !!($('cardAuto') || {}).checked;
+    card.account  = ($('cardAccount')  || {}).value || '';
+    card.category = ($('cardCategory') || {}).value || '';
+}
 
-    if (!card.balanceSen) return lines[0];
+function fillCardForm() {
+    const card = cardDraft();
+    if ($('cardName'))     $('cardName').value     = card.name;
+    if ($('cardLimit'))    $('cardLimit').value    = card.limit;
+    if ($('cardBalance'))  $('cardBalance').value  = card.balance;
+    if ($('cardRate'))     $('cardRate').value     = card.rate;
+    if ($('cardMinPct'))   $('cardMinPct').value   = card.minPct;
+    if ($('cardMinFloor')) $('cardMinFloor').value = card.minFloor;
+    if ($('cardDueDay'))   $('cardDueDay').value   = card.dueDay;
+    if ($('cardAuto'))     $('cardAuto').checked   = card.autoRecord;
+    buildCardOptions();
+    // Only when the card names one. `buildCardOptions` has already picked a
+    // sensible default, and writing a stored blank over it leaves the select
+    // with nothing selected — which saves as "no account" and quietly stops
+    // every payment reaching Expenses.
+    if ($('cardAccount')  && card.account)  $('cardAccount').value  = card.account;
+    if ($('cardCategory') && card.category) $('cardCategory').value = card.category;
+    syncCardTier();
+}
 
-    if (card.plan.stalls) {
-        lines.push('At ' + money(fromSen(card.payingSen)) + ' a month the balance never comes down.');
-        lines.push('Interest alone is ' + money(fromSen(card.firstInterest)) + ' this month.');
-        return lines.join('\n');
+function buildCardOptions() {
+    const card = cardDraft();
+
+    const accounts = $('cardAccount');
+    if (accounts) {
+        const held = accounts.value || card.account;
+        accounts.innerHTML = '';
+        ledgerState.accounts.filter((a) => a.status !== 'closed').forEach((account) => {
+            const option = document.createElement('option');
+            option.value = account.id;
+            option.textContent = account.name.trim() || 'Unnamed account';
+            accounts.appendChild(option);
+        });
+        if (held && Array.from(accounts.options).some((o) => o.value === held)) accounts.value = held;
     }
 
-    lines.push('Paying ' + money(fromSen(card.payingSen)) + ' a month' + (card.onMinimum ? ' (minimum only)' : '') + ':');
-    lines.push('  cleared in ' + monthsText(card.plan.months) + ' (' + monthLabel(card.plan.months - 1) + ')');
-    lines.push('  interest ' + money(fromSen(card.plan.interestSen)) +
-        ', paid altogether ' + money(fromSen(card.plan.paidSen)));
-
-    cardScenarios(card).slice(1).forEach((scenario) => {
-        if (scenario.paySen === card.paymentSen || scenario.plan.stalls) return;
-        const saved = card.minPlan.stalls ? null : card.minPlan.interestSen - scenario.plan.interestSen;
-        lines.push(scenario.label + ' (' + money(fromSen(scenario.paySen)) + '): ' +
-            monthsText(scenario.plan.months) +
-            (saved > 0 ? ', saves ' + money(fromSen(saved)) : ''));
-    });
-
-    return lines.join('\n');
-}
-
-function renderCard() {
-    paintCard(cardCompute());
-    saveCard();
+    const cats = $('cardCategory');
+    if (cats) {
+        const held = cats.value || card.category;
+        cats.innerHTML = '';
+        categoryListFor('expense').forEach((cat) => {
+            const option = document.createElement('option');
+            option.value = cat.id;
+            option.textContent = cat.label;
+            cats.appendChild(option);
+        });
+        if (held && Array.from(cats.options).some((o) => o.value === held)) cats.value = held;
+        else if (categoryById('debt')) cats.value = 'debt';
+    }
 }
 
 /** Keep the rate preset in step with the rate field. */
@@ -1456,31 +4717,1690 @@ function syncCardTier() {
     setSegment(seg, ['15', '17', '18'].includes(rate) ? rate : 'custom');
 }
 
+const cardHint = (text) => {
+    const hint = $('cardSaveHint');
+    if (!hint) return;
+    hint.innerHTML = '<i class="bi bi-info-circle"></i> ' + escapeHtml(text);
+    clearTimeout(cardHint.timer);
+    cardHint.timer = setTimeout(() => {
+        hint.innerHTML = '<i class="bi bi-hdd"></i> Saved on this device only — nothing leaves your browser.';
+    }, 6000);
+};
+
+/**
+ * --------------------------------------------------------------------
+ * Saving
+ * --------------------------------------------------------------------
+ */
+function cardSaveCard() {
+    readCardForm();
+    const card = cardDraft();
+
+    if (!card.name.trim()) { cardHint('Give the card a name — "Maybank Visa", something you will recognise.'); return; }
+
+    const stamp = todayIso();
+    if (!card.id) {
+        card.id = 'cc' + (++cardState.seq);
+        card.seq = cardState.seq;
+        card.created = stamp;
+        // What was owed when it was first written down. Everything the payment
+        // log reports as progress is measured against this.
+        if (!card.opening) card.opening = card.balance;
+        cardState.cards.push(card);
+        cardState.editing = card.id;
+    } else {
+        const at = cardState.cards.findIndex((c) => c.id === card.id);
+        if (at >= 0) cardState.cards[at] = card;
+    }
+    card.updated = stamp;
+
+    saveCard();
+    renderCard();
+    renderDash();
+    flashButton($('cardSave'), '<i class="bi bi-check-lg"></i> Saved');
+}
+
+function cardOpenCard(id) {
+    const card = cardById(id);
+    if (!card) return;
+    cardState.draft = card;
+    cardState.editing = card.id;
+    fillCardForm();
+    renderCard();
+    const form = $('card-form');
+    if (form) form.scrollIntoView({ block: 'start', behavior: 'smooth' });
+}
+
+function cardNewCard() {
+    cardState.draft = newCard();
+    cardState.editing = null;
+    fillCardForm();
+    renderCard();
+}
+
+function cardToggleClosed() {
+    const card = cardDraft();
+    if (!card.id) return;
+
+    if (card.closed) {
+        card.closed = false;
+        saveCard();
+        renderCard();
+        renderDash();
+        return;
+    }
+
+    askConfirm(
+        'Close ' + cardName(card) + '?',
+        'It drops out of the payoff plan and out of what you owe. Its payment history stays exactly ' +
+        'as it is, and you can open it again later.',
+        'Close the card',
+        () => { card.closed = true; saveCard(); renderCard(); renderDash(); });
+}
+
+function cardDropCard(id) {
+    const card = cardById(id);
+    if (!card) return;
+    const linked = card.payments.filter((p) => p.entryId).length;
+
+    askConfirm(
+        'Delete ' + cardName(card) + '?',
+        'The card and its ' + card.payments.length +
+        (card.payments.length === 1 ? ' logged payment go' : ' logged payments go') + ' for good.' +
+        (linked ? ' The ' + linked + (linked === 1 ? ' entry it wrote' : ' entries it wrote') +
+            ' into Expenses stay where they are.' : '') +
+        ' To take it out of the plan without losing it, close it instead.',
+        'Delete card',
+        () => {
+            cardState.cards = cardState.cards.filter((c) => c.id !== id);
+            if (cardState.editing === id) cardNewCard();
+            saveCard();
+            renderCard();
+            renderDash();
+        });
+}
+
+/**
+ * --------------------------------------------------------------------
+ * Payments
+ * --------------------------------------------------------------------
+ * A payment is a record, and it does two things: it comes off the card's
+ * outstanding, and — if the card says so — it writes one entry into Expenses.
+ * The entry id lives on the payment, so removing the payment removes exactly
+ * that entry and nothing else.
+ */
+function cardAddPayment() {
+    readCardForm();
+    const card = cardDraft();
+    if (!card.id) { cardHint('Save the card first — a payment has to be against something.'); return; }
+
+    const raw = ($('cardPayAmount') || {}).value || '';
+    const sen = Math.max(0, toSen(parseFloat(raw) || 0));
+    if (!sen) { if ($('cardPayAmount')) $('cardPayAmount').focus(); return; }
+
+    const payment = {
+        id: 'cp' + (++cardState.seq),
+        date: ($('cardPayDate') || {}).value || todayIso(),
+        amount: String(raw),
+        note: (($('cardPayNote') || {}).value || '').trim(),
+        entryId: '',
+    };
+    if (card.autoRecord) payment.entryId = cardWriteEntry(card, payment, sen);
+
+    card.payments.push(payment);
+
+    // The outstanding comes down by what was paid. Interest and new spending
+    // push it back up and this app sees neither — that is the reader's to
+    // correct, and the hint under the field says so.
+    card.balance = String(Math.max(0, fromSen(Math.max(0, toSen(parseFloat(card.balance) || 0)) - sen)));
+    card.updated = todayIso();
+
+    saveCard();
+    fillCardForm();
+    if ($('cardPayAmount')) $('cardPayAmount').value = '';
+    if ($('cardPayNote'))   $('cardPayNote').value = '';
+    renderCard();
+    renderLedger();
+    renderDash();
+    cardHint('Logged ' + money(fromSen(sen)) + (payment.entryId ? ' and recorded under Expenses.' : '.'));
+}
+
+function cardDropPayment(id) {
+    const card = cardDraft();
+    const payment = card.payments.find((p) => p.id === id);
+    if (!payment) return;
+
+    const sen = Math.max(0, toSen(parseFloat(payment.amount) || 0));
+    if (payment.entryId) {
+        ledgerState.entries = ledgerState.entries.filter((e) => e.id !== payment.entryId);
+        saveLedger();
+    }
+    card.payments = card.payments.filter((p) => p.id !== id);
+    card.balance = String(fromSen(Math.max(0, toSen(parseFloat(card.balance) || 0)) + sen));
+    card.updated = todayIso();
+
+    saveCard();
+    fillCardForm();
+    renderCard();
+    renderLedger();
+    renderDash();
+    cardHint('Payment removed, and put back on the outstanding.');
+}
+
+function cardWriteEntry(card, payment, sen) {
+    if (!card.account) {
+        cardHint('Logged — but there is no account set, so nothing was written to Expenses.');
+        return '';
+    }
+    const stamp = todayIso();
+    const entry = {
+        id: ledgerId('e'),
+        seq: ++ledgerSeq,
+        type: 'expense',
+        amount: String(fromSen(sen)),
+        currency: BASE_CURRENCY,
+        base: '', rate: '',
+        date: payment.date,
+        category: card.category, sub: '',
+        account: card.account, toAccount: '',
+        note: cardName(card) + ' — card payment',
+        created: stamp, updated: stamp,
+    };
+    ledgerState.entries.push(entry);
+    ledgerState.month = monthOf(entry.date);
+    saveLedger();
+    return entry.id;
+}
+
+/**
+ * --------------------------------------------------------------------
+ * Painting
+ * --------------------------------------------------------------------
+ */
+/** Where the money goes: principal against interest, over the whole plan. */
+function paintCardDist(book) {
+    const dist = $('cardDist');
+    const legend = $('cardLegend');
+    if (!dist || !legend) return;
+
+    dist.innerHTML = '';
+    legend.innerHTML = '';
+
+    const plan = book.plan;
+    if (!book.debtSen || plan.stalls) {
+        dist.innerHTML = '<span class="dist-left" style="width:100%"></span>';
+        legend.innerHTML = '<span class="legend-empty">' +
+            (!book.debtSen
+                ? 'Add a card with something owed on it and the split appears here.'
+                : 'This payment never clears the cards, so there is nothing to split.') +
+            '</span>';
+        return;
+    }
+
+    const parts = [
+        { label: 'What you owe now', tone: 'indigo', sen: plan.startSen },
+        { label: 'Interest on top',  tone: 'red',    sen: plan.interestSen },
+    ];
+    const total = plan.paidSen || 1;
+
+    parts.forEach((part) => {
+        const bar = document.createElement('span');
+        bar.className = 'dist-' + part.tone;
+        bar.style.width = (part.sen / total * 100) + '%';
+        bar.title = part.label + ' · ' + money(fromSen(part.sen));
+        dist.appendChild(bar);
+
+        const item = document.createElement('span');
+        item.className = 'legend-item';
+        item.innerHTML = '<i class="dot dot-' + part.tone + '"></i>' +
+            '<span>' + part.label + ' <b>' + money(fromSen(part.sen)) + '</b> ' +
+            '<small>' + pct(part.sen / total * 100) + '</small></span>';
+        legend.appendChild(item);
+    });
+}
+
+/** Which card clears when, under the plan on screen. */
+function paintCardOrder(book) {
+    const body = $('cardOrderBody');
+    const block = $('cardOrderCard');
+    if (!body || !block) return;
+
+    const plan = book.plan;
+    block.hidden = !book.live.length;
+    body.innerHTML = '';
+
+    if (!book.live.length) return;
+
+    set('cardOrderNote', plan.stalls
+        ? 'No plan to order yet'
+        : CARD_STRATEGIES[book.onMinimum ? 'minimum' : book.strategy].note);
+
+    const rows = plan.cards.slice().sort((a, b) =>
+        (a.clearedMonth || Infinity) - (b.clearedMonth || Infinity) || b.startSen - a.startSen);
+
+    rows.forEach((row, index) => {
+        const tr = document.createElement('tr');
+        tr.appendChild(cell(plan.stalls ? '—' : String(index + 1), 'is-muted'));
+        tr.appendChild(cell('<strong>' + escapeHtml(row.name) + '</strong>' +
+            '<small>' + fmt(row.annualRate, 1) + '% a year</small>'));
+        tr.appendChild(cell(fmt(fromSen(row.startSen)), 'is-strong'));
+        tr.appendChild(cell(fmt(row.annualRate, 1) + '%', 'is-muted'));
+        tr.appendChild(cell(plan.stalls ? '—' : fmt(fromSen(row.interest)),
+            plan.stalls ? 'is-muted' : 'is-minus'));
+        tr.appendChild(cell(plan.stalls || !row.clearedMonth
+            ? 'Never'
+            : monthLabel(row.clearedMonth - 1) + ' · ' + monthsText(row.clearedMonth),
+            plan.stalls ? 'is-minus' : ''));
+        body.appendChild(tr);
+    });
+}
+
+/** Snowball against avalanche, both against doing nothing extra. */
+function paintCardCompare(book) {
+    const body = $('cardCompareBody');
+    const block = $('cardCompareCard');
+    if (!body || !block) return;
+
+    block.hidden = book.live.length < 1;
+    body.innerHTML = '';
+    if (!book.live.length) return;
+
+    const base = book.plans.minimum;
+    const chosen = book.onMinimum ? 'minimum' : book.strategy;
+
+    const cheapest = ['avalanche', 'snowball']
+        .filter((k) => !book.plans[k].stalls)
+        .sort((a, b) => book.plans[a].interestSen - book.plans[b].interestSen)[0];
+
+    set('cardCompareNote', book.onMinimum
+        ? 'Put in a monthly payment to compare them'
+        : book.plans.avalanche.stalls ? 'That payment does not clear them'
+        : 'Avalanche saves ' +
+          money(fromSen(Math.max(0, book.plans.snowball.interestSen - book.plans.avalanche.interestSen))) +
+          ' over snowball');
+
+    ['minimum', 'avalanche', 'snowball'].forEach((key) => {
+        const plan = book.plans[key];
+        const look = CARD_STRATEGIES[key];
+
+        const tr = document.createElement('tr');
+        if (key === chosen) tr.className = 'is-you';
+
+        tr.appendChild(cell(
+            '<strong>' + look.label +
+            (key === chosen ? ' <span class="tag">yours</span>' : '') +
+            (key === cheapest && key !== 'minimum' ? ' <span class="tag is-done">cheapest</span>' : '') +
+            '</strong><small>' + look.note + '</small>'
+        ));
+        tr.appendChild(cell(plan.stalls ? 'Never' : monthsText(plan.months),
+            plan.stalls ? 'is-minus' : 'is-strong'));
+        tr.appendChild(cell(plan.stalls ? '—' : fmt(fromSen(plan.interestSen)),
+            plan.stalls ? 'is-muted' : 'is-minus'));
+        tr.appendChild(cell(plan.stalls ? '—' : fmt(fromSen(plan.paidSen)), 'is-muted'));
+
+        // Measured against the minimum, which is the thing anyone is actually
+        // choosing to stop doing.
+        let saved = '—';
+        let tone = 'is-muted';
+        if (key !== 'minimum' && !plan.stalls) {
+            if (base.stalls) { saved = 'The minimum never clears them'; }
+            else {
+                const diff = base.interestSen - plan.interestSen;
+                const sooner = base.months - plan.months;
+                saved = (diff > 0 ? '− ' : diff < 0 ? '+ ' : '') + fmt(Math.abs(fromSen(diff))) +
+                    ' interest' + (sooner > 0 ? ', ' + monthsText(sooner) + ' sooner' : '');
+                tone = diff > 0 ? 'is-plus' : diff < 0 ? 'is-minus' : 'is-muted';
+            }
+        }
+        tr.appendChild(cell(saved, tone));
+        body.appendChild(tr);
+    });
+}
+
+function paintCardList(book) {
+    const body = $('cardListBody');
+    if (!body) return;
+    body.innerHTML = '';
+
+    const rows = cardState.filter === 'all'
+        ? book.figures
+        : book.figures.filter((f) => !f.card.closed);
+
+    set('cardListNote', book.figures.length
+        ? book.figures.length + (book.figures.length === 1 ? ' card' : ' cards') + ' · ' +
+          money(fromSen(book.debtSen)) + ' owed' +
+          (book.limitSen ? ' of ' + money(fromSen(book.limitSen)) : '')
+        : 'Nothing saved yet');
+
+    if (!rows.length) {
+        body.appendChild(emptyRow(cardState.filter === 'all'
+            ? 'No cards yet. Fill in the form below and press Save card.'
+            : 'No open cards. Switch to All to see the closed ones.', 8));
+        return;
+    }
+
+    rows.forEach((f) => {
+        const tr = document.createElement('tr');
+        if (cardState.editing === f.card.id) tr.className = 'is-you';
+
+        tr.appendChild(cell(
+            '<strong>' + escapeHtml(cardName(f.card)) +
+            (f.card.closed ? ' <span class="tag is-paid">closed</span>' : '') + '</strong>' +
+            '<small>' + fmt(f.annualRate, 1) + '% a year</small>'
+        ));
+        tr.appendChild(cell(f.limitSen ? fmt(fromSen(f.limitSen)) : '—', 'is-muted'));
+        tr.appendChild(cell(fmt(fromSen(f.balanceSen)), f.balanceSen ? 'is-minus' : 'is-plus'));
+        tr.appendChild(cell(f.limitSen ? fmt(fromSen(f.availableSen)) : '—', 'is-muted'));
+        tr.appendChild(cell(f.limitSen ? pct(f.usedPct, 0) : '—',
+            !f.limitSen ? 'is-muted' : 'is-' + cardUsedTone(f.usedPct)));
+        tr.appendChild(cell(f.minimumSen ? fmt(fromSen(f.minimumSen)) : '—', 'is-strong'));
+        tr.appendChild(cell(f.nextDue && f.balanceSen ? dayShort(f.nextDue) : '—', 'is-muted'));
+        tr.appendChild(cell(
+            '<button type="button" class="split-x" data-open-card="' + f.card.id + '" aria-label="Open card">' +
+            '<i class="bi bi-pencil"></i></button>' +
+            '<button type="button" class="split-x" data-drop-card="' + f.card.id + '" aria-label="Delete card">' +
+            '<i class="bi bi-x-lg"></i></button>', 'row-actions'));
+        body.appendChild(tr);
+    });
+
+    if (rows.length > 1) {
+        const total = rows.filter((f) => !f.card.closed);
+        const tr = document.createElement('tr');
+        tr.className = 'total-row';
+        tr.appendChild(cell('All open cards'));
+        tr.appendChild(cell(fmt(fromSen(total.reduce((s, f) => s + f.limitSen, 0)))));
+        tr.appendChild(cell(fmt(fromSen(total.reduce((s, f) => s + f.balanceSen, 0)))));
+        tr.appendChild(cell(fmt(fromSen(total.reduce((s, f) => s + f.availableSen, 0)))));
+        const limit = total.reduce((s, f) => s + f.limitSen, 0);
+        const owed  = total.reduce((s, f) => s + f.balanceSen, 0);
+        tr.appendChild(cell(limit ? pct(owed / limit * 100, 0) : '—'));
+        tr.appendChild(cell(fmt(fromSen(total.reduce((s, f) => s + f.minimumSen, 0)))));
+        tr.appendChild(cell(''));
+        tr.appendChild(cell(''));
+        body.appendChild(tr);
+    }
+}
+
+/** Under 30% is the figure the credit bureaus reward; over 90% is trouble. */
+const cardUsedTone = (used) => (used > 90 ? 'red' : used >= 30 ? 'amber' : 'jade');
+
+function paintCardForm(book) {
+    const f = book.draft;
+    const card = f.card;
+
+    set('cardFormTitle', card.id ? 'Editing ' + cardName(card) : 'New card');
+
+    const pill = $('cardState');
+    if (pill) {
+        pill.dataset.state = !card.id ? 'draft' : card.closed ? 'dirty' : 'saved';
+        pill.textContent = !card.id ? 'Draft' : card.closed ? 'Closed' : 'Saved';
+    }
+
+    const save = $('cardSave');
+    if (save) save.innerHTML = '<i class="bi bi-check-lg"></i> ' + (card.id ? 'Update card' : 'Save card');
+
+    const fresh = $('cardNew');
+    if (fresh) fresh.hidden = !card.id;
+
+    const close = $('cardClose');
+    if (close) {
+        close.hidden = !card.id;
+        close.innerHTML = card.closed
+            ? '<i class="bi bi-arrow-counterclockwise"></i> Re-open this card'
+            : '<i class="bi bi-archive"></i> Close this card';
+    }
+
+    set('cardDueHint', f.nextDue && card.dueDay
+        ? 'Next one falls on ' + dayLabel(f.nextDue) + '.'
+        : 'Day of the month.');
+
+    const auto = $('cardAuto');
+    set('cardLinkSummary', !auto || !auto.checked ? 'Off'
+        : !card.account ? 'No account set'
+        : (accountById(card.account) || {}).name || 'On');
+}
+
+function paintCardPayments(book) {
+    const f = book.draft;
+    const card = f.card;
+    const host = $('cardPayList');
+    const add = $('cardPayAdd');
+    if (!host) return;
+
+    set('cardPaymentsTitle', card.id ? 'Payments — ' + cardName(card) : 'Payments');
+    if (add) add.hidden = !card.id;
+
+    const bar = $('cardProgressBar');
+    if (bar) {
+        bar.style.width = f.progress + '%';
+        bar.className = f.balanceSen <= 0 && f.paidSen > 0 ? 'is-done' : '';
+    }
+
+    set('cardPaymentsNote', card.id
+        ? card.payments.length + (card.payments.length === 1 ? ' payment logged' : ' payments logged')
+        : 'Open a card to log its payments');
+
+    set('cardProgressText', !card.id
+        ? 'Save a card and every payment you make against it is kept here.'
+        : !f.openingSen
+            ? 'Put an outstanding figure on the card and progress starts counting.'
+            : 'Started at ' + money(fromSen(f.openingSen)) + ' · paid ' + money(fromSen(f.paidSen)) +
+              ' · ' + money(fromSen(f.balanceSen)) + ' still owed · ' +
+              pct(f.progressRaw, 2) + ' cleared' +
+              (f.progressRaw > 100 ? ' of what it started at — it has been used again since' : ''));
+
+    host.innerHTML = '';
+    if (!card.id) return;
+
+    if (!card.payments.length) {
+        host.innerHTML = '<p class="goal-log-empty">Nothing logged yet. Every payment here comes off the ' +
+            'outstanding above, and is the honest answer to &ldquo;am I actually paying that much a month?&rdquo;</p>';
+        return;
+    }
+
+    card.payments
+        .slice()
+        .sort((a, b) => (a.date === b.date ? (a.id < b.id ? 1 : -1) : (a.date < b.date ? 1 : -1)))
+        .forEach((p) => {
+            const row = document.createElement('div');
+            row.className = 'goal-c';
+            row.dataset.payment = p.id;
+            row.innerHTML =
+                '<span class="goal-c-when">' + dayLabel(p.date) + '</span>' +
+                '<span class="goal-c-what">' + (p.note ? escapeHtml(p.note) : '<i>No note</i>') +
+                    (p.entryId ? ' · in Expenses' : '') + '</span>' +
+                '<b>' + money(fromSen(Math.max(0, toSen(parseFloat(p.amount) || 0)))) + '</b>' +
+                '<button type="button" class="split-x" data-drop-payment aria-label="Remove payment">' +
+                    '<i class="bi bi-x-lg"></i></button>';
+            host.appendChild(row);
+        });
+}
+
+function paintCardPlanTable(book) {
+    const body = $('cardPlanBody');
+    const block = $('cardScheduleCard');
+    if (!body || !block) return;
+
+    const plan = book.plan;
+    block.hidden = !book.live.length || plan.stalls;
+    body.innerHTML = '';
+    if (block.hidden) return;
+
+    const byMonth = book.view === 'month';
+    set('cardScheduleHead', byMonth ? 'Month' : 'Year');
+    set('cardScheduleNote', plan.rows.length + ' payments · ' +
+        'last one ' + monthLabel(plan.rows.length - 1));
+
+    const rows = byMonth
+        ? plan.rows.map((row) => ({
+            label: monthLabel(row.month - 1),
+            paySen: row.paySen, interestSen: row.interestSen,
+            principalSen: row.principalSen, balanceSen: row.balanceSen,
+        }))
+        : cardYearRows(plan.rows).map((row) => ({
+            label: 'Year ' + row.year + (row.months < 12 ? ' · ' + row.months + ' mo' : ''),
+            paySen: row.paySen, interestSen: row.interestSen,
+            principalSen: row.principalSen, balanceSen: row.balanceSen,
+        }));
+
+    rows.forEach((row) => {
+        const tr = document.createElement('tr');
+        tr.appendChild(cell('<strong>' + row.label + '</strong>'));
+        tr.appendChild(cell(fmt(fromSen(row.paySen))));
+        tr.appendChild(cell(fmt(fromSen(row.interestSen)), 'is-minus'));
+        tr.appendChild(cell(fmt(fromSen(row.principalSen)), 'is-plus'));
+        tr.appendChild(cell(fmt(fromSen(row.balanceSen)), 'is-strong'));
+        body.appendChild(tr);
+    });
+
+    const total = document.createElement('tr');
+    total.className = 'total-row';
+    total.appendChild(cell('Altogether'));
+    total.appendChild(cell(fmt(fromSen(plan.paidSen))));
+    total.appendChild(cell(fmt(fromSen(plan.interestSen))));
+    total.appendChild(cell(fmt(fromSen(plan.paidSen - plan.interestSen))));
+    total.appendChild(cell('0.00'));
+    body.appendChild(total);
+}
+
+function paintCard(book) {
+    const plan = book.plan;
+
+    // --- hero ---
+    set('cardMonths', plan.stalls ? 'Never' : !book.debtSen ? '—' : monthsText(plan.months));
+    set('cardMonthsFoot', !book.debtSen ? 'No card debt on the books'
+        : plan.short ? money(fromSen(plan.shortSen)) + ' short of the minimums'
+        : plan.stalls ? 'This payment never clears them'
+        : 'Clear by ' + monthLabel(plan.months - 1));
+
+    set('cardTotalDebt', money(fromSen(book.debtSen)));
+    set('cardTotalDebtFoot', book.limitSen
+        ? pct(book.debtSen / book.limitSen * 100, 0) + ' of ' + money(fromSen(book.limitSen)) + ' in limits'
+        : book.live.length + (book.live.length === 1 ? ' card' : ' cards') + ' with a balance');
+
+    set('cardInterest', plan.stalls ? '—' : money(fromSen(plan.interestSen)));
+    set('cardInterestFoot', plan.stalls || !book.debtSen ? 'Nothing to work out yet'
+        : pct(plan.interestSen / Math.max(1, plan.startSen) * 100, 0) + ' on top of what you owe');
+
+    // --- the plan card ---
+    set('cardPlanNote', !book.debtSen ? 'Add a card to get started'
+        : book.onMinimum ? 'Paying the minimum: ' + money(fromSen(book.minimumSen)) + ' this month'
+        : money(fromSen(book.spendSen)) + ' a month, ' +
+          CARD_STRATEGIES[book.strategy].label.toLowerCase());
+
+    set('cardPaymentHint', book.minimumSen
+        ? 'The minimums come to ' + money(fromSen(book.minimumSen)) + ' this month. Leave it empty to see what paying only those costs.'
+        : 'Leave it empty to see what paying only the minimums costs.');
+
+    const notice = $('cardNotice');
+    if (notice) {
+        notice.hidden = !plan.stalls || !book.debtSen;
+        set('cardNoticeText', plan.short
+            ? money(fromSen(book.spendSen)) + ' does not cover the minimums, which come to ' +
+              money(fromSen(plan.needSen)) + ' this month — ' + money(fromSen(plan.shortSen)) +
+              ' short. Nothing here is a plan until it does.'
+            : 'At this payment the interest swallows everything and the balance never falls. ' +
+              'It needs more than ' + money(fromSen(book.live.reduce((s, c) => s + c.interestSen, 0))) +
+              ' a month just to stand still.');
+    }
+
+    set('cardTallyDate', plan.stalls || !book.debtSen ? '—' : monthLabel(plan.months - 1));
+    set('cardTallyInterest', plan.stalls ? '—' : money(fromSen(plan.interestSen)));
+    set('cardTallyMin', money(fromSen(book.minimumSen)));
+    set('cardTallyPaid', plan.stalls ? '—' : money(fromSen(plan.paidSen)));
+
+    paintCardDist(book);
+    paintCardOrder(book);
+    paintCardCompare(book);
+    paintCardList(book);
+    paintCardForm(book);
+    paintCardPayments(book);
+    paintCardPlanTable(book);
+}
+
+function cardSummaryText() {
+    const book = cardCompute();
+    if (!book.live.length) return 'No cards with a balance yet.';
+
+    const lines = ['Credit cards — ' + money(fromSen(book.debtSen)) + ' owed across ' +
+        book.live.length + (book.live.length === 1 ? ' card' : ' cards')];
+
+    book.live.forEach((f) => {
+        lines.push('  ' + cardName(f.card) + ': ' + money(fromSen(f.balanceSen)) +
+            ' at ' + fmt(f.annualRate, 1) + '%, minimum ' + money(fromSen(f.minimumSen)) +
+            (f.nextDue ? ', due ' + dayLabel(f.nextDue) : ''));
+    });
+
+    const plan = book.plan;
+    lines.push(book.onMinimum
+        ? 'Paying the minimums, ' + money(fromSen(book.minimumSen)) + ' a month:'
+        : 'Paying ' + money(fromSen(book.spendSen)) + ' a month, ' +
+          CARD_STRATEGIES[book.strategy].label.toLowerCase() + ':');
+
+    if (plan.stalls) {
+        lines.push(plan.short
+            ? '  ' + money(fromSen(plan.shortSen)) + ' short of the minimums — no plan yet'
+            : '  never clears — the interest swallows it');
+    } else {
+        lines.push('  cleared in ' + monthsText(plan.months) + ' (' + monthLabel(plan.months - 1) + ')');
+        lines.push('  interest ' + money(fromSen(plan.interestSen)) +
+            ', paid altogether ' + money(fromSen(plan.paidSen)));
+    }
+
+    ['avalanche', 'snowball'].forEach((key) => {
+        const other = book.plans[key];
+        if (other.stalls || book.onMinimum) return;
+        lines.push('  ' + CARD_STRATEGIES[key].label + ': ' + monthsText(other.months) +
+            ', ' + money(fromSen(other.interestSen)) + ' interest');
+    });
+
+    return lines.join('\n');
+}
+
+function renderCard() {
+    readCardForm();
+    paintCard(cardCompute());
+    saveCard();
+}
+
+/**
+ * --------------------------------------------------------------------
+ * Persistence
+ * --------------------------------------------------------------------
+ */
 function saveCard() {
     try {
-        localStorage.setItem(CARD_KEY, JSON.stringify({
-            balance:  ($('cardBalance')  || {}).value || '',
-            rate:     ($('cardRate')     || {}).value || '',
-            payment:  ($('cardPayment')  || {}).value || '',
-            minPct:   ($('cardMinPct')   || {}).value || '',
-            minFloor: ($('cardMinFloor') || {}).value || '',
-            view:     (($('cardView')    || {}).dataset || {}).value || 'year',
+        storeWrite(CARD_KEY, JSON.stringify({
+            version: 2,
+            seq: cardState.seq,
+            filter: cardState.filter,
+            editing: cardState.editing,
+            payment: ($('cardPayment') || {}).value || '',
+            strategy: (($('cardStrategy') || {}).dataset || {}).value || 'avalanche',
+            view: (($('cardView') || {}).dataset || {}).value || 'year',
+            cards: cardState.cards,
         }));
-    } catch (err) { /* storage unavailable — the session still works */ }
+    } catch (err) { /* unreachable: storeWrite swallows it and reports it */ }
 }
 
 function loadCard() {
     let saved = null;
     try { saved = JSON.parse(storedRaw(CARD_KEY) || 'null'); } catch (err) { saved = null; }
-    if (!saved || typeof saved !== 'object') return;
+    if (!saved || typeof saved !== 'object') { cardState.draft = newCard(); return; }
 
-    [['cardBalance', 'balance'], ['cardRate', 'rate'], ['cardPayment', 'payment'],
-     ['cardMinPct', 'minPct'], ['cardMinFloor', 'minFloor']].forEach(([id, key]) => {
-        if ($(id) && saved[key] !== undefined) $(id).value = saved[key];
+    if (saved.version !== 2) { migrateCardV1(saved); return; }
+
+    cardState.seq = Number(saved.seq) || 0;
+    cardState.filter = saved.filter === 'all' ? 'all' : 'open';
+
+    cardState.cards = (Array.isArray(saved.cards) ? saved.cards : [])
+        .filter((c) => c && c.id)
+        .map((c) => ({
+            id: String(c.id),
+            seq: Number(c.seq) || 0,
+            name: String(c.name || ''),
+            limit: String(c.limit || ''),
+            opening: String(c.opening || ''),
+            balance: String(c.balance || ''),
+            rate: String(c.rate || '18'),
+            minPct: String(c.minPct || '5'),
+            minFloor: String(c.minFloor || '25'),
+            dueDay: String(c.dueDay || ''),
+            autoRecord: c.autoRecord !== false,
+            account: String(c.account || ''),
+            category: String(c.category || ''),
+            closed: !!c.closed,
+            payments: (Array.isArray(c.payments) ? c.payments : [])
+                .filter((p) => p && p.id && /^\d{4}-\d{2}-\d{2}$/.test(p.date || ''))
+                .map((p) => ({
+                    id: String(p.id), date: p.date,
+                    amount: String(p.amount || ''), note: String(p.note || ''),
+                    entryId: String(p.entryId || ''),
+                })),
+            created: String(c.created || ''),
+            updated: String(c.updated || ''),
+        }));
+
+    // An entry the ledger no longer holds is not a link.
+    const entryIds = new Set(ledgerState.entries.map((e) => e.id));
+    cardState.cards.forEach((c) => c.payments.forEach((p) => {
+        if (p.entryId && !entryIds.has(p.entryId)) p.entryId = '';
+    }));
+
+    cardState.cards.forEach((c) => { cardState.seq = Math.max(cardState.seq, c.seq); });
+
+    if ($('cardPayment')) $('cardPayment').value = String(saved.payment || '');
+    if ($('cardStrategy') && ['avalanche', 'snowball'].includes(saved.strategy)) {
+        setSegment($('cardStrategy'), saved.strategy);
+    }
+    if ($('cardView') && ['year', 'month'].includes(saved.view)) setSegment($('cardView'), saved.view);
+
+    const open = cardState.cards.find((c) => c.id === saved.editing);
+    cardState.draft = open || newCard();
+    cardState.editing = open ? open.id : null;
+}
+
+/**
+ * The shape before there were cards: one balance, one rate, one minimum, all
+ * read straight off the form. It becomes a single saved card, because that is
+ * what it was — and the payment field carries over as the budget, since a
+ * one-card budget is still a budget.
+ */
+function migrateCardV1(saved) {
+    const balance = String(saved.balance || '');
+    const hasCard = Math.max(0, toSen(parseFloat(balance) || 0)) > 0;
+
+    if (hasCard) {
+        cardState.seq = 1;
+        cardState.cards = [{
+            id: 'cc1', seq: 1,
+            name: 'My card',
+            limit: '', opening: balance, balance,
+            rate: String(saved.rate || '18'),
+            minPct: String(saved.minPct || '5'),
+            minFloor: String(saved.minFloor || '25'),
+            dueDay: '',
+            autoRecord: true, account: '', category: '',
+            closed: false, payments: [],
+            created: todayIso(), updated: todayIso(),
+        }];
+        cardState.editing = 'cc1';
+        cardState.draft = cardState.cards[0];
+    } else {
+        cardState.draft = newCard();
+    }
+
+    if ($('cardPayment')) $('cardPayment').value = String(saved.payment || '');
+    if ($('cardView') && ['year', 'month'].includes(saved.view)) setSegment($('cardView'), saved.view);
+    saveCard();
+}
+
+
+/**
+ * ====================================================================
+ * SAVINGS & INVESTMENT
+ * ====================================================================
+ * Two questions. What proportion of what came in is still yours at the end of
+ * the month, and what is everything you put away actually worth.
+ *
+ * --------------------------------------------------------------------
+ * The savings half holds no records of its own
+ * --------------------------------------------------------------------
+ * This is the decision the module turns on. Three places already record money
+ * being set aside — the ledger's `save` bucket, the Planner's goal
+ * contributions, and this module's investment contributions — and they are
+ * disjoint **by construction**, because goal and investment contributions
+ * deliberately never write a ledger entry. So they can simply be added, and
+ * the breakdown says which is which rather than presenting one figure nobody
+ * can check.
+ *
+ * A fourth savings store here would have been a second version of the truth,
+ * which is the one thing this app refuses to keep.
+ */
+const GROW_KEY = 'moneyflow.grow.v1';
+
+const INVESTMENT_TYPES = [
+    { id: 'asb',   label: 'ASB / ASNB',   icon: 'bi-flower1' },
+    { id: 'epf',   label: 'EPF / KWSP',   icon: 'bi-bank' },
+    { id: 'fd',    label: 'Fixed deposit', icon: 'bi-safe' },
+    { id: 'stock', label: 'Stocks',       icon: 'bi-graph-up' },
+    { id: 'etf',   label: 'ETF',          icon: 'bi-boxes' },
+    { id: 'unit',  label: 'Unit trust',   icon: 'bi-pie-chart' },
+    { id: 'gold',  label: 'Gold',         icon: 'bi-gem' },
+    { id: 'other', label: 'Something else', icon: 'bi-three-dots' },
+];
+
+const investmentType = (id) => INVESTMENT_TYPES.find((t) => t.id === id) || INVESTMENT_TYPES[INVESTMENT_TYPES.length - 1];
+
+let growState = {
+    investments: [], draft: null, editing: null, seq: 0, filter: 'open',
+    target: { value: '', unit: 'pct' },
+};
+
+const newInvestment = () => ({
+    id: '', seq: 0,
+    name: '', type: 'asb',
+    opened: todayIso(),
+    value: '', valueDate: todayIso(),
+    note: '', closed: false,
+    fd: { rate: '', months: '' },
+    contributions: [],
+});
+
+const growDraft = () => growState.draft || (growState.draft = newInvestment());
+const investmentById = (id) => growState.investments.find((i) => i.id === id) || null;
+const investmentName = (inv) => (inv.name || '').trim() || 'Untitled investment';
+
+/**
+ * --------------------------------------------------------------------
+ * A figure in ringgit, or a percentage of something
+ * --------------------------------------------------------------------
+ * EPF is 11% of salary; a savings target is as often "20% of what I earn" as
+ * it is "RM1,000". So both carry a unit, and nothing is stored resolved — the
+ * unit, the figure and the base are kept, and the ringgit is worked out at
+ * read time. A stored ringgit would go stale the moment the base changed.
+ */
+const unitSen = (figure, unit, baseSen) => {
+    const n = Math.max(0, parseFloat(figure) || 0);
+    if (!n) return 0;
+    return unit === 'pct' ? Math.round(baseSen * n / 100) : toSen(n);
+};
+
+/** What the ledger says came in during a month. The default base for a
+ *  percentage contribution, because "11% of salary" means that month's. */
+function growIncomeIn(from, to) {
+    return ledgerState.entries
+        .filter((e) => e.type === 'income' && e.date >= from && e.date <= to)
+        .reduce((sum, e) => sum + entrySen(e), 0);
+}
+
+const growMonthIncome = (iso) => {
+    const [y, m] = isoNums(iso);
+    if (!y || !m) return 0;
+    return growIncomeIn(monthFirst(y, m), monthLast(y, m));
+};
+
+/**
+ * One contribution, in sen.
+ *
+ * The unit, the figure and the base are all kept — the ringgit is worked out
+ * from them and never stored. But the **base is captured when the
+ * contribution is logged**, not looked up forever: "11% of my salary" is how
+ * you worked the figure out on the day, not a standing formula. Leaving it to
+ * follow the ledger meant editing an old income entry silently rewrote how
+ * much you had put in three months ago, which is not something history should
+ * do. The ledger only ever supplies the *default*, at the moment of typing.
+ */
+function contribSen(c) {
+    if (c.unit !== 'pct') return unitSen(c.figure, 'rm', 0);
+    return unitSen(c.figure, 'pct', contribBaseSen(c));
+}
+
+const contribBaseSen = (c) => Math.max(0, toSen(parseFloat(c.base) || 0));
+
+/**
+ * --------------------------------------------------------------------
+ * One investment
+ * --------------------------------------------------------------------
+ */
+function investmentFigures(inv) {
+    const investedSen = inv.contributions.reduce((sum, c) => sum + contribSen(c), 0);
+
+    // An empty "worth now" means it is worth what went in — which is true of a
+    // fixed deposit on day one, and the least misleading thing to assume.
+    const typedValue = String(inv.value || '').trim();
+    const valueSen = typedValue === '' ? investedSen : Math.max(0, toSen(parseFloat(inv.value) || 0));
+
+    const profitSen = valueSen - investedSen;
+
+    return {
+        inv, investedSen, valueSen, profitSen,
+        valued: typedValue !== '',
+        returnPct: investedSen > 0 ? profitSen / investedSen * 100 : 0,
+        live: !inv.closed,
+        type: investmentType(inv.type),
+    };
+}
+
+/**
+ * A Malaysian fixed deposit pays simple interest at maturity, not monthly —
+ * the linked calculator does not say what it does, so this says what it does.
+ * A tenure over a year is what a rolled-over placement is: successive one-year
+ * terms that compound, then a part-year at simple interest.
+ */
+function fdProjection(principalSen, ratePct, months) {
+    const rate = Math.max(0, parseFloat(ratePct) || 0) / 100;
+    const term = Math.max(0, Math.floor(parseFloat(months) || 0));
+    if (!principalSen || !rate || !term) return null;
+
+    const years = Math.floor(term / 12);
+    const rest  = term % 12;
+
+    let value = principalSen;
+    for (let y = 0; y < years; y++) value += Math.round(value * rate);
+    if (rest) value += Math.round(value * rate * rest / 12);
+
+    return {
+        principalSen, ratePct: Math.max(0, parseFloat(ratePct) || 0), months: term,
+        maturitySen: value, interestSen: value - principalSen,
+        rolled: years >= 1 && term > 12,
+    };
+}
+
+/**
+ * --------------------------------------------------------------------
+ * The savings half
+ * --------------------------------------------------------------------
+ */
+/** Money the ledger says was set aside: expense entries filed under a category
+ *  in the `save` bucket. That is the app's own definition of "still yours
+ *  afterwards", so this module does not invent a second one. */
+function growLedgerSavedIn(from, to) {
+    return ledgerState.entries
+        .filter((e) => {
+            if (e.type !== 'expense' || e.date < from || e.date > to) return false;
+            const cat = categoryOf(e);
+            return cat && cat.bucket === 'save';
+        })
+        .reduce((sum, e) => sum + entrySen(e), 0);
+}
+
+const growGoalsSavedIn = (from, to) => goalState.list.reduce((sum, goal) =>
+    sum + goal.contributions
+        .filter((c) => c.date >= from && c.date <= to)
+        .reduce((s, c) => s + Math.max(0, toSen(parseFloat(c.amount) || 0)), 0), 0);
+
+const growInvestedIn = (from, to) => growState.investments.reduce((sum, inv) =>
+    sum + inv.contributions
+        .filter((c) => c.date >= from && c.date <= to)
+        .reduce((s, c) => s + contribSen(c), 0), 0);
+
+function growSavedIn(from, to) {
+    const ledgerSen = growLedgerSavedIn(from, to);
+    const goalsSen  = growGoalsSavedIn(from, to);
+    const investSen = growInvestedIn(from, to);
+    return { ledgerSen, goalsSen, investSen, totalSen: ledgerSen + goalsSen + investSen };
+}
+
+function growRange() {
+    const which = (($('growPeriod') || {}).dataset || {}).value || 'month';
+    const [y, m] = isoNums(todayIso());
+
+    if (which === 'year') {
+        return { from: isoOf(y, 1, 1), to: isoOf(y, 12, 31), label: String(y), months: 12 };
+    }
+    if (which === 'lastmonth') {
+        const prev = new Date(y, m - 2, 1);
+        const py = prev.getFullYear(), pm = prev.getMonth() + 1;
+        return { from: monthFirst(py, pm), to: monthLast(py, pm), label: monthKeyLabel(isoOf(py, pm, 1).slice(0, 7)), months: 1 };
+    }
+    return { from: monthFirst(y, m), to: monthLast(y, m), label: monthKeyLabel(monthOf(todayIso())), months: 1 };
+}
+
+function growCompute() {
+    const range  = growRange();
+    const saved  = growSavedIn(range.from, range.to);
+    const incomeSen = growIncomeIn(range.from, range.to);
+
+    const target = growState.target;
+    const targetSen = unitSen(target.value, target.unit, incomeSen);
+
+    const figures = growState.investments.map(investmentFigures);
+    const live = figures.filter((f) => f.live);
+
+    // Twelve months back, this month last, so the trend reads left to right.
+    const trend = [];
+    const [ty, tm] = isoNums(todayIso());
+    for (let back = 11; back >= 0; back--) {
+        const when = new Date(ty, tm - 1 - back, 1);
+        const y = when.getFullYear(), m = when.getMonth() + 1;
+        const from = monthFirst(y, m), to = monthLast(y, m);
+        const bit = growSavedIn(from, to);
+        trend.push({
+            key: isoOf(y, m, 1).slice(0, 7),
+            label: MONTH_NAMES[m - 1],
+            savedSen: bit.totalSen,
+            incomeSen: growIncomeIn(from, to),
+        });
+    }
+
+    return {
+        range, saved, incomeSen, target, targetSen,
+        rate: incomeSen > 0 ? saved.totalSen / incomeSen * 100 : 0,
+        gapSen: saved.totalSen - targetSen,
+        figures, live, trend,
+        investedSen: live.reduce((sum, f) => sum + f.investedSen, 0),
+        valueSen:    live.reduce((sum, f) => sum + f.valueSen, 0),
+        profitSen:   live.reduce((sum, f) => sum + f.profitSen, 0),
+        draft: investmentFigures(growDraft()),
+    };
+}
+
+/** What every live investment is worth. The Dashboard asks by this name. */
+const growTotalValueSen = () => growState.investments
+    .filter((i) => !i.closed)
+    .reduce((sum, i) => sum + investmentFigures(i).valueSen, 0);
+
+/**
+ * --------------------------------------------------------------------
+ * Form in, form out
+ * --------------------------------------------------------------------
+ */
+function readGrowForm() {
+    const inv = growDraft();
+    inv.name      = ($('growName')      || {}).value || '';
+    inv.type      = ($('growType')      || {}).value || 'asb';
+    inv.opened    = ($('growOpened')    || {}).value || inv.opened;
+    inv.value     = ($('growValue')     || {}).value || '';
+    inv.valueDate = ($('growValueDate') || {}).value || '';
+    inv.note      = ($('growNote')      || {}).value || '';
+    inv.fd = {
+        rate:   ($('growFdRate')   || {}).value || '',
+        months: ($('growFdMonths') || {}).value || '',
+    };
+
+    growState.target = {
+        value: ($('growTarget') || {}).value || '',
+        unit: (($('growTargetUnit') || {}).dataset || {}).value === 'rm' ? 'rm' : 'pct',
+    };
+}
+
+function fillGrowForm() {
+    const inv = growDraft();
+    buildGrowTypes();
+    if ($('growName'))      $('growName').value      = inv.name;
+    if ($('growType'))      $('growType').value      = inv.type;
+    if ($('growOpened'))    $('growOpened').value    = inv.opened;
+    if ($('growValue'))     $('growValue').value     = inv.value;
+    if ($('growValueDate')) $('growValueDate').value = inv.valueDate;
+    if ($('growNote'))      $('growNote').value      = inv.note;
+    if ($('growFdRate'))    $('growFdRate').value    = inv.fd.rate;
+    if ($('growFdMonths'))  $('growFdMonths').value  = inv.fd.months;
+
+    if ($('growTarget')) $('growTarget').value = growState.target.value;
+    if ($('growTargetUnit')) setSegment($('growTargetUnit'), growState.target.unit);
+    if ($('growCDate')) $('growCDate').value = todayIso();
+}
+
+function buildGrowTypes() {
+    const select = $('growType');
+    if (!select || select.options.length) return;
+    INVESTMENT_TYPES.forEach((t) => {
+        const option = document.createElement('option');
+        option.value = t.id;
+        option.textContent = t.label;
+        select.appendChild(option);
+    });
+}
+
+const growHint = (text) => {
+    const hint = $('growSaveHint');
+    if (!hint) return;
+    hint.innerHTML = '<i class="bi bi-info-circle"></i> ' + escapeHtml(text);
+    clearTimeout(growHint.timer);
+    growHint.timer = setTimeout(() => {
+        hint.innerHTML = '<i class="bi bi-hdd"></i> Saved on this device only — nothing leaves your browser.';
+    }, 6000);
+};
+
+/**
+ * --------------------------------------------------------------------
+ * Saving
+ * --------------------------------------------------------------------
+ */
+function growSaveInvestment() {
+    readGrowForm();
+    const inv = growDraft();
+    if (!inv.name.trim()) { growHint('Give it a name — "ASB", "EPF", something you will recognise.'); return; }
+
+    if (!inv.id) {
+        inv.id = 'iv' + (++growState.seq);
+        inv.seq = growState.seq;
+        growState.investments.push(inv);
+        growState.editing = inv.id;
+    } else {
+        const at = growState.investments.findIndex((i) => i.id === inv.id);
+        if (at >= 0) growState.investments[at] = inv;
+    }
+
+    saveGrow();
+    renderGrow();
+    renderDash();
+    flashButton($('growSave'), '<i class="bi bi-check-lg"></i> Saved');
+}
+
+function growOpenInvestment(id) {
+    const inv = investmentById(id);
+    if (!inv) return;
+    growState.draft = inv;
+    growState.editing = inv.id;
+    fillGrowForm();
+    renderGrow();
+    const form = $('grow-form');
+    if (form) form.scrollIntoView({ block: 'start', behavior: 'smooth' });
+}
+
+function growNewInvestment() {
+    growState.draft = newInvestment();
+    growState.editing = null;
+    fillGrowForm();
+    renderGrow();
+}
+
+function growToggleClosed() {
+    const inv = growDraft();
+    if (!inv.id) return;
+
+    if (inv.closed) {
+        inv.closed = false;
+        saveGrow(); renderGrow(); renderDash();
+        return;
+    }
+    askConfirm(
+        'Close ' + investmentName(inv) + '?',
+        'It drops out of what your investments are worth and out of the savings figures from here on. ' +
+        'Every contribution already logged stays exactly as it is.',
+        'Close it',
+        () => { inv.closed = true; saveGrow(); renderGrow(); renderDash(); });
+}
+
+function growDropInvestment(id) {
+    const inv = investmentById(id);
+    if (!inv) return;
+    askConfirm(
+        'Delete ' + investmentName(inv) + '?',
+        'It and its ' + inv.contributions.length +
+        (inv.contributions.length === 1 ? ' contribution go' : ' contributions go') + ' for good, ' +
+        'and the savings figures for those months change with them. To take it out of the totals ' +
+        'without losing it, close it instead.',
+        'Delete it',
+        () => {
+            growState.investments = growState.investments.filter((i) => i.id !== id);
+            if (growState.editing === id) growNewInvestment();
+            saveGrow(); renderGrow(); renderDash();
+        });
+}
+
+/**
+ * --------------------------------------------------------------------
+ * Contributions
+ * --------------------------------------------------------------------
+ */
+function growAddContribution() {
+    readGrowForm();
+    const inv = growDraft();
+    if (!inv.id) { growHint('Save the investment first — a contribution has to go into something.'); return; }
+
+    const unit = (($('growCUnit') || {}).dataset || {}).value === 'pct' ? 'pct' : 'rm';
+    const figure = ($('growCFigure') || {}).value || '';
+    if (!(parseFloat(figure) > 0)) { if ($('growCFigure')) $('growCFigure').focus(); return; }
+
+    const when = ($('growCDate') || {}).value || todayIso();
+    // Whatever the base is at this moment is written down with it. The ledger
+    // is only the default; from here on the record stands on its own.
+    const typedBase = Math.max(0, toSen(parseFloat(($('growCBase') || {}).value || '') || 0));
+    const baseSen = unit === 'pct' ? (typedBase || growMonthIncome(when)) : 0;
+
+    if (unit === 'pct' && !baseSen) {
+        growHint('There is no income recorded for that month, so a percentage has nothing to be a ' +
+            'percentage of — put the figure it is a share of in the box beside it.');
+        return;
+    }
+
+    const contribution = {
+        id: 'ic' + (++growState.seq),
+        date: when,
+        unit,
+        figure: String(figure),
+        base: unit === 'pct' ? String(fromSen(baseSen)) : '',
+        note: (($('growCNote') || {}).value || '').trim(),
+    };
+
+    inv.contributions.push(contribution);
+    saveGrow();
+    if ($('growCFigure')) $('growCFigure').value = '';
+    if ($('growCNote'))   $('growCNote').value = '';
+    renderGrow();
+    renderDash();
+    growHint('Added ' + money(fromSen(contribSen(contribution))) + ' to ' + investmentName(inv) + '.');
+}
+
+function growDropContribution(id) {
+    const inv = growDraft();
+    inv.contributions = inv.contributions.filter((c) => c.id !== id);
+    saveGrow();
+    renderGrow();
+    renderDash();
+}
+
+function growApplyFd() {
+    readGrowForm();
+    const inv = growDraft();
+    const f = investmentFigures(inv);
+    const fd = fdProjection(f.investedSen, inv.fd.rate, inv.fd.months);
+    if (!fd) { growHint('Put in a rate and a tenure first, and something to place.'); return; }
+
+    inv.value = String(fromSen(fd.maturitySen));
+    inv.valueDate = addMonthsClamped(inv.opened || todayIso(), fd.months);
+    if ($('growValue'))     $('growValue').value = inv.value;
+    if ($('growValueDate')) $('growValueDate').value = inv.valueDate;
+    saveGrow();
+    renderGrow();
+    growHint('Worth-now set to the projected maturity of ' + money(fromSen(fd.maturitySen)) +
+        ' — a projection, not a statement.');
+}
+
+/**
+ * --------------------------------------------------------------------
+ * Painting
+ * --------------------------------------------------------------------
+ */
+function paintGrowRate(book) {
+    set('growRate', book.incomeSen ? pct(book.rate, 2) : '—');
+    set('growRateFoot', !book.incomeSen
+        ? 'No income recorded for ' + book.range.label + ' to measure against'
+        : money(fromSen(book.saved.totalSen)) + ' of ' + money(fromSen(book.incomeSen)) +
+          ' · ' + book.range.label);
+
+    set('growSaved', money(fromSen(book.saved.totalSen)));
+    set('growSavedFoot', book.range.label + (book.range.months > 1
+        ? ' · ' + money(fromSen(Math.round(book.saved.totalSen / book.range.months))) + ' a month'
+        : ''));
+
+    set('growWorth', money(fromSen(book.valueSen)));
+    set('growWorthFoot', book.live.length
+        ? book.live.length + (book.live.length === 1 ? ' investment · ' : ' investments · ') +
+          (book.profitSen >= 0 ? '+' : '−') + money(Math.abs(fromSen(book.profitSen)))
+        : 'Nothing recorded yet');
+
+    set('growTallyIncome', money(fromSen(book.incomeSen)));
+    set('growTallySaved', money(fromSen(book.saved.totalSen)));
+
+    const unit = book.target.unit;
+    set('growTallyTargetLabel', unit === 'pct' && book.target.value
+        ? 'Target · ' + fmt(parseFloat(book.target.value) || 0, 0) + '% of income'
+        : 'Target');
+    set('growTallyTarget', book.targetSen ? money(fromSen(book.targetSen)) : '—');
+
+    const gap = $('growTallyGap');
+    set('growTallyGapLabel', book.gapSen >= 0 ? 'Over target by' : 'Short by');
+    set('growTallyGap', book.targetSen ? money(Math.abs(fromSen(book.gapSen))) : '—');
+    if (gap) gap.classList.toggle('is-minus', !!book.targetSen && book.gapSen < 0);
+
+    const affix = $('growTargetAffix');
+    if (affix) affix.textContent = unit === 'rm' ? 'RM' : '%';
+    set('growTargetHint', unit === 'pct'
+        ? 'A share of whatever comes in — ' + (book.incomeSen
+            ? fmt(parseFloat(book.target.value) || 0, 0) + '% of ' + money(fromSen(book.incomeSen)) +
+              ' is ' + money(fromSen(book.targetSen))
+            : 'it needs some income recorded before it means a figure')
+        : 'A flat figure for ' + book.range.label + '. Switch to % to make it follow what you earn.');
+
+    paintGrowDist(book);
+}
+
+/** Income split into what was kept and what was spent. */
+function paintGrowDist(book) {
+    const dist = $('growDist');
+    const legend = $('growLegend');
+    if (!dist || !legend) return;
+
+    dist.innerHTML = '';
+    legend.innerHTML = '';
+
+    const base = Math.max(book.incomeSen, book.saved.totalSen);
+    if (!base) {
+        dist.innerHTML = '<span class="dist-left" style="width:100%"></span>';
+        legend.innerHTML = '<span class="legend-empty">Record some income and something set aside — ' +
+            'the split appears here.</span>';
+        return;
+    }
+
+    const rest = Math.max(0, book.incomeSen - book.saved.totalSen);
+    const parts = [
+        { label: 'Put away', tone: 'indigo', sen: book.saved.totalSen },
+        { label: 'Everything else', tone: 'left', sen: rest },
+    ].filter((p) => p.sen > 0);
+
+    parts.forEach((p) => {
+        const bar = document.createElement('span');
+        bar.className = 'dist-' + p.tone;
+        bar.style.width = (p.sen / base * 100) + '%';
+        bar.title = p.label + ' · ' + money(fromSen(p.sen));
+        dist.appendChild(bar);
+
+        const item = document.createElement('span');
+        item.className = 'legend-item';
+        item.innerHTML = '<i class="dot dot-' + (p.tone === 'left' ? 'slate' : p.tone) + '"></i>' +
+            '<span>' + p.label + ' <b>' + money(fromSen(p.sen)) + '</b> ' +
+            '<small>' + pct(p.sen / base * 100) + '</small></span>';
+        legend.appendChild(item);
+    });
+}
+
+function paintGrowSources(book) {
+    const body = $('growSourceBody');
+    if (!body) return;
+    body.innerHTML = '';
+
+    const total = book.saved.totalSen;
+    set('growSourceNote', total
+        ? money(fromSen(total)) + ' in ' + book.range.label
+        : 'Nothing set aside in ' + book.range.label);
+
+    const rows = [
+        { label: 'Filed under savings or debt', where: 'Expenses', sen: book.saved.ledgerSen,
+          note: 'Entries in the savings & debt bucket' },
+        { label: 'Into savings goals', where: 'Planner', sen: book.saved.goalsSen,
+          note: 'Goal contributions' },
+        { label: 'Into investments', where: 'Grow', sen: book.saved.investSen,
+          note: 'Contributions logged below' },
+    ];
+
+    if (!total) {
+        body.appendChild(emptyRow('Nothing set aside in ' + book.range.label +
+            ' — file an expense under Savings, top up a goal, or log a contribution below.', 4));
+        return;
+    }
+
+    rows.forEach((row) => {
+        const tr = document.createElement('tr');
+        tr.appendChild(cell('<strong>' + row.label + '</strong><small>' + row.note + '</small>'));
+        tr.appendChild(cell(row.where, 'is-muted'));
+        tr.appendChild(cell(row.sen ? fmt(fromSen(row.sen)) : '—', row.sen ? 'is-strong' : 'is-muted'));
+        tr.appendChild(cell(row.sen ? pct(row.sen / total * 100, 0) : '—', 'is-muted'));
+        body.appendChild(tr);
     });
 
-    if ($('cardView') && ['year', 'month'].includes(saved.view)) setSegment($('cardView'), saved.view);
+    const tr = document.createElement('tr');
+    tr.className = 'total-row';
+    tr.appendChild(cell('Altogether'));
+    tr.appendChild(cell(''));
+    tr.appendChild(cell(fmt(fromSen(total))));
+    tr.appendChild(cell(book.incomeSen ? pct(book.rate, 2) + ' of income' : '—'));
+    body.appendChild(tr);
 }
+
+function paintGrowTrend(book) {
+    const host = $('growTrend');
+    if (!host) return;
+    host.innerHTML = '';
+
+    const peak = Math.max(1, ...book.trend.map((t) => Math.max(t.savedSen, t.incomeSen)));
+    const months = book.trend.filter((t) => t.savedSen > 0).length;
+    const savedSen = book.trend.reduce((s, t) => s + t.savedSen, 0);
+
+    set('growTrendNote', months
+        ? money(fromSen(savedSen)) + ' over ' + months + (months === 1 ? ' month' : ' months')
+        : 'Nothing yet');
+
+    book.trend.forEach((row) => {
+        const rate = row.incomeSen > 0 ? row.savedSen / row.incomeSen * 100 : 0;
+        const line = document.createElement('div');
+        line.className = 'grow-month';
+        line.innerHTML =
+            '<span class="grow-month-id">' + row.label + '</span>' +
+            '<div class="grow-bar">' +
+                '<i class="grow-bar-income" style="width:' + (row.incomeSen / peak * 100) + '%"></i>' +
+                '<i class="grow-bar-saved"  style="width:' + (row.savedSen / peak * 100) + '%"></i>' +
+            '</div>' +
+            '<b>' + (row.savedSen ? money(fromSen(row.savedSen)) : '—') + '</b>' +
+            '<span class="grow-month-rate">' + (row.incomeSen ? pct(rate, 0) : '—') + '</span>';
+        host.appendChild(line);
+    });
+}
+
+function paintGrowList(book) {
+    const body = $('growListBody');
+    if (!body) return;
+    body.innerHTML = '';
+
+    const rows = growState.filter === 'all' ? book.figures : book.figures.filter((f) => f.live);
+
+    set('growListNote', book.figures.length
+        ? money(fromSen(book.valueSen)) + ' across ' + book.live.length +
+          (book.live.length === 1 ? ' investment' : ' investments')
+        : 'Nothing saved yet');
+
+    if (!rows.length) {
+        body.appendChild(emptyRow(growState.filter === 'all'
+            ? 'Nothing yet. Fill in the form below and press Save investment.'
+            : 'Nothing open. Switch to All to see the closed ones.', 7));
+        return;
+    }
+
+    rows.forEach((f) => {
+        const tr = document.createElement('tr');
+        if (growState.editing === f.inv.id) tr.className = 'is-you';
+
+        tr.appendChild(cell(
+            '<strong>' + escapeHtml(investmentName(f.inv)) +
+            (f.inv.closed ? ' <span class="tag is-paid">closed</span>' : '') + '</strong>' +
+            '<small>' + f.inv.contributions.length +
+            (f.inv.contributions.length === 1 ? ' contribution' : ' contributions') +
+            (f.valued && f.inv.valueDate ? ' · valued ' + dayShort(f.inv.valueDate) : '') + '</small>'
+        ));
+        tr.appendChild(cell('<i class="bi ' + f.type.icon + '"></i> ' + f.type.label, 'is-muted'));
+        tr.appendChild(cell(fmt(fromSen(f.investedSen)), 'is-strong'));
+        tr.appendChild(cell(fmt(fromSen(f.valueSen)), f.valued ? '' : 'is-muted'));
+        tr.appendChild(cell(
+            (f.profitSen > 0 ? '+ ' : f.profitSen < 0 ? '− ' : '') + fmt(Math.abs(fromSen(f.profitSen))),
+            f.profitSen > 0 ? 'is-plus' : f.profitSen < 0 ? 'is-minus' : 'is-muted'
+        ));
+        tr.appendChild(cell(f.investedSen ? pct(f.returnPct, 2) : '—',
+            !f.investedSen ? 'is-muted' : f.returnPct > 0 ? 'is-plus' : f.returnPct < 0 ? 'is-minus' : 'is-muted'));
+        tr.appendChild(cell(
+            '<button type="button" class="split-x" data-open-inv="' + f.inv.id + '" aria-label="Open">' +
+            '<i class="bi bi-pencil"></i></button>' +
+            '<button type="button" class="split-x" data-drop-inv="' + f.inv.id + '" aria-label="Delete">' +
+            '<i class="bi bi-x-lg"></i></button>', 'row-actions'));
+        body.appendChild(tr);
+    });
+
+    if (rows.length > 1) {
+        const live = rows.filter((f) => f.live);
+        const tr = document.createElement('tr');
+        tr.className = 'total-row';
+        tr.appendChild(cell('All open'));
+        tr.appendChild(cell(''));
+        tr.appendChild(cell(fmt(fromSen(live.reduce((s, f) => s + f.investedSen, 0)))));
+        tr.appendChild(cell(fmt(fromSen(live.reduce((s, f) => s + f.valueSen, 0)))));
+        const profit = live.reduce((s, f) => s + f.profitSen, 0);
+        const put    = live.reduce((s, f) => s + f.investedSen, 0);
+        tr.appendChild(cell((profit > 0 ? '+ ' : profit < 0 ? '− ' : '') + fmt(Math.abs(fromSen(profit))),
+            profit > 0 ? 'is-plus' : profit < 0 ? 'is-minus' : ''));
+        tr.appendChild(cell(put ? pct(profit / put * 100, 2) : '—'));
+        tr.appendChild(cell(''));
+        body.appendChild(tr);
+    }
+}
+
+function paintGrowForm(book) {
+    const f = book.draft;
+    const inv = f.inv;
+
+    set('growFormTitle', inv.id ? 'Editing ' + investmentName(inv) : 'New investment');
+
+    const pill = $('growState');
+    if (pill) {
+        pill.dataset.state = !inv.id ? 'draft' : inv.closed ? 'dirty' : 'saved';
+        pill.textContent = !inv.id ? 'Draft' : inv.closed ? 'Closed' : 'Saved';
+    }
+
+    const save = $('growSave');
+    if (save) save.innerHTML = '<i class="bi bi-check-lg"></i> ' + (inv.id ? 'Update investment' : 'Save investment');
+
+    const fresh = $('growNew');
+    if (fresh) fresh.hidden = !inv.id;
+
+    const close = $('growClose');
+    if (close) {
+        close.hidden = !inv.id;
+        close.innerHTML = inv.closed
+            ? '<i class="bi bi-arrow-counterclockwise"></i> Re-open this one'
+            : '<i class="bi bi-archive"></i> Close this one';
+    }
+
+    set('growTallyIn', money(fromSen(f.investedSen)));
+    set('growTallyWorth', money(fromSen(f.valueSen)));
+    set('growTallyProfit', (f.profitSen < 0 ? '− ' : '') + money(Math.abs(fromSen(f.profitSen))));
+    const profit = $('growTallyProfit');
+    if (profit) profit.classList.toggle('is-minus', f.profitSen < 0);
+    set('growTallyReturn', f.investedSen ? pct(f.returnPct, 2) : '—');
+
+    set('growValueHint', f.valued
+        ? 'This app cannot see a unit trust price or an EPF dividend, so this figure is yours to update.'
+        : 'Empty, so it is being read as worth exactly what went in — ' +
+          money(fromSen(f.investedSen)) + '.');
+
+    // --- the fixed deposit fold ---
+    const fold = $('growFdFold');
+    if (fold) fold.hidden = inv.type !== 'fd';
+    if (inv.type === 'fd') {
+        const fd = fdProjection(f.investedSen, inv.fd.rate, inv.fd.months);
+        set('growFdSummary', fd ? money(fromSen(fd.maturitySen)) + ' at maturity' : 'Rate and tenure');
+        set('growFdText', !fd
+            ? 'Put in a rate and a tenure, and a placement to work on. A Malaysian FD pays simple interest ' +
+              'at maturity, not monthly — that is what this works out.'
+            : money(fromSen(fd.principalSen)) + ' at ' + fmt(fd.ratePct, 2) + '% for ' +
+              monthsText(fd.months) + ' matures at ' + money(fromSen(fd.maturitySen)) + ' — ' +
+              money(fromSen(fd.interestSen)) + ' of interest' +
+              (fd.rolled ? ', treating each year as a placement rolled over.' :
+               '. Simple interest, paid at maturity.'));
+    }
+}
+
+function paintGrowContributions(book) {
+    const f = book.draft;
+    const inv = f.inv;
+    const host = $('growCList');
+    const add = $('growContribAdd');
+    if (!host) return;
+
+    set('growContribTitle', inv.id ? 'Contributions — ' + investmentName(inv) : 'Contributions');
+    if (add) add.hidden = !inv.id;
+
+    set('growContribNote', inv.id
+        ? inv.contributions.length +
+          (inv.contributions.length === 1 ? ' contribution · ' : ' contributions · ') +
+          money(fromSen(f.investedSen))
+        : 'Save an investment to log what goes into it');
+
+    // The unit switch, and what a percentage would be a percentage of.
+    const unit = (($('growCUnit') || {}).dataset || {}).value === 'pct' ? 'pct' : 'rm';
+    const affix = $('growCAffix');
+    if (affix) affix.textContent = unit === 'rm' ? 'RM' : '%';
+    const baseWrap = $('growCBaseWrap');
+    if (baseWrap) baseWrap.hidden = unit !== 'pct';
+
+    const when = ($('growCDate') || {}).value || todayIso();
+    const monthIncome = growMonthIncome(when);
+    const typedBase = Math.max(0, toSen(parseFloat(($('growCBase') || {}).value || '') || 0));
+    const baseSen = typedBase || monthIncome;
+    const figure = parseFloat(($('growCFigure') || {}).value || '') || 0;
+
+    set('growCHint', !inv.id
+        ? 'Nothing can be logged against a draft — save the investment first.'
+        : unit === 'rm'
+            ? 'A flat amount. Switch to % for anything worked out as a share — EPF at 11% of salary, for instance.'
+            : monthIncome && !typedBase
+                ? fmt(figure, 0) + '% of the ' + money(fromSen(monthIncome)) + ' the ledger has for ' +
+                  monthKeyLabel(monthOf(when)) + ' is ' + money(fromSen(unitSen(figure, 'pct', baseSen))) +
+                  '. Type your own figure beside it to use a different base.'
+                : typedBase
+                    ? fmt(figure, 0) + '% of ' + money(fromSen(typedBase)) + ' is ' +
+                      money(fromSen(unitSen(figure, 'pct', baseSen))) + '.'
+                    : 'No income is recorded for ' + monthKeyLabel(monthOf(when)) +
+                      ', so put the figure it is a percentage of in the box beside it.');
+
+    host.innerHTML = '';
+    if (!inv.id) return;
+
+    if (!inv.contributions.length) {
+        host.innerHTML = '<p class="goal-log-empty">Nothing in yet. Every contribution here counts towards ' +
+            'your savings for the month it is dated.</p>';
+        return;
+    }
+
+    inv.contributions
+        .slice()
+        .sort((a, b) => (a.date === b.date ? (a.id < b.id ? 1 : -1) : (a.date < b.date ? 1 : -1)))
+        .forEach((c) => {
+            const sen = contribSen(c);
+            const row = document.createElement('div');
+            row.className = 'goal-c';
+            row.dataset.contribution = c.id;
+            row.innerHTML =
+                '<span class="goal-c-when">' + dayLabel(c.date) + '</span>' +
+                '<span class="goal-c-what">' +
+                    (c.unit === 'pct'
+                        ? fmt(parseFloat(c.figure) || 0, 0) + '% of ' + money(fromSen(contribBaseSen(c)))
+                        : (c.note ? escapeHtml(c.note) : '<i>No note</i>')) +
+                    (c.unit === 'pct' && c.note ? ' · ' + escapeHtml(c.note) : '') +
+                '</span>' +
+                '<b>' + money(fromSen(sen)) + '</b>' +
+                '<button type="button" class="split-x" data-drop-contrib aria-label="Remove contribution">' +
+                    '<i class="bi bi-x-lg"></i></button>';
+            host.appendChild(row);
+        });
+}
+
+function paintGrow(book) {
+    paintGrowRate(book);
+    paintGrowSources(book);
+    paintGrowTrend(book);
+    paintGrowList(book);
+    paintGrowForm(book);
+    paintGrowContributions(book);
+}
+
+function growSummaryText() {
+    const book = growCompute();
+    const lines = ['Savings — ' + book.range.label];
+
+    lines.push('Income ' + money(fromSen(book.incomeSen)) +
+        ', put away ' + money(fromSen(book.saved.totalSen)) +
+        (book.incomeSen ? ' — a rate of ' + pct(book.rate, 2) : ''));
+
+    if (book.saved.ledgerSen) lines.push('  under savings & debt: ' + money(fromSen(book.saved.ledgerSen)));
+    if (book.saved.goalsSen)  lines.push('  into goals: ' + money(fromSen(book.saved.goalsSen)));
+    if (book.saved.investSen) lines.push('  into investments: ' + money(fromSen(book.saved.investSen)));
+
+    if (book.targetSen) {
+        lines.push(book.gapSen >= 0
+            ? 'Target ' + money(fromSen(book.targetSen)) + ' — over by ' + money(fromSen(book.gapSen))
+            : 'Target ' + money(fromSen(book.targetSen)) + ' — short by ' + money(fromSen(-book.gapSen)));
+    }
+
+    if (book.live.length) {
+        lines.push('');
+        lines.push('Investments — ' + money(fromSen(book.valueSen)) + ' worth, ' +
+            money(fromSen(book.investedSen)) + ' put in');
+        book.live.forEach((f) => {
+            lines.push('  ' + investmentName(f.inv) + ' (' + f.type.label + '): ' +
+                money(fromSen(f.investedSen)) + ' → ' + money(fromSen(f.valueSen)) +
+                (f.investedSen ? ' · ' + (f.profitSen >= 0 ? '+' : '−') +
+                    money(Math.abs(fromSen(f.profitSen))) + ' · ' + pct(f.returnPct, 2) : ''));
+        });
+    }
+
+    return lines.join('\n');
+}
+
+function renderGrow() {
+    readGrowForm();
+    paintGrow(growCompute());
+    saveGrow();
+}
+
+/**
+ * --------------------------------------------------------------------
+ * Persistence
+ * --------------------------------------------------------------------
+ */
+function saveGrow() {
+    try {
+        storeWrite(GROW_KEY, JSON.stringify({
+            seq: growState.seq,
+            filter: growState.filter,
+            editing: growState.editing,
+            period: (($('growPeriod') || {}).dataset || {}).value || 'month',
+            target: growState.target,
+            investments: growState.investments,
+        }));
+    } catch (err) { /* unreachable: storeWrite swallows it and reports it */ }
+}
+
+function loadGrow() {
+    let saved = null;
+    try { saved = JSON.parse(storedRaw(GROW_KEY) || 'null'); } catch (err) { saved = null; }
+    if (!saved || typeof saved !== 'object') { growState.draft = newInvestment(); return; }
+
+    growState.seq = Number(saved.seq) || 0;
+    growState.filter = saved.filter === 'all' ? 'all' : 'open';
+    growState.target = {
+        value: String((saved.target && saved.target.value) || ''),
+        unit: (saved.target && saved.target.unit) === 'rm' ? 'rm' : 'pct',
+    };
+
+    growState.investments = (Array.isArray(saved.investments) ? saved.investments : [])
+        .filter((i) => i && i.id)
+        .map((i) => ({
+            id: String(i.id),
+            seq: Number(i.seq) || 0,
+            name: String(i.name || ''),
+            type: investmentType(i.type).id,
+            opened: /^\d{4}-\d{2}-\d{2}$/.test(i.opened || '') ? i.opened : todayIso(),
+            value: String(i.value || ''),
+            valueDate: /^\d{4}-\d{2}-\d{2}$/.test(i.valueDate || '') ? i.valueDate : '',
+            note: String(i.note || ''),
+            closed: !!i.closed,
+            fd: {
+                rate: String((i.fd && i.fd.rate) || ''),
+                months: String((i.fd && i.fd.months) || ''),
+            },
+            contributions: (Array.isArray(i.contributions) ? i.contributions : [])
+                .filter((c) => c && c.id && /^\d{4}-\d{2}-\d{2}$/.test(c.date || ''))
+                .map((c) => ({
+                    id: String(c.id), date: c.date,
+                    unit: c.unit === 'pct' ? 'pct' : 'rm',
+                    figure: String(c.figure || ''),
+                    base: String(c.base || ''),
+                    note: String(c.note || ''),
+                })),
+        }));
+
+    growState.investments.forEach((i) => { growState.seq = Math.max(growState.seq, i.seq); });
+
+    if ($('growPeriod') && ['month', 'lastmonth', 'year'].includes(saved.period)) {
+        setSegment($('growPeriod'), saved.period);
+    }
+
+    const open = growState.investments.find((i) => i.id === saved.editing);
+    growState.draft = open || newInvestment();
+    growState.editing = open ? open.id : null;
+}
+
 /**
  * ====================================================================
  * DAILY EXPENSES — the ledger
@@ -2115,9 +7035,13 @@ function afterCategoryChange(rebuildRows) {
     saveCategories();
     if (rebuildRows) buildCategoryManager();
     buildCategoryOptions();
+    buildCommitOptions();
+    buildCardOptions();
     buildBudgetRows();
     renderLedger();
     renderBudget();
+    renderCommit();
+    renderCard();
 }
 
 function addCategory() {
@@ -2278,6 +7202,7 @@ function buildAccountOptions() {
         });
         if (ledgerState.accounts.some((a) => a.id === previous)) select.value = previous;
     });
+    buildSplitExpenseOptions();
 }
 
 function buildCategoryOptions() {
@@ -2295,6 +7220,7 @@ function buildCategoryOptions() {
     });
     if (list.some((c) => c.id === previous)) select.value = previous;
     buildSubOptions();
+    buildSplitExpenseOptions();
 }
 
 /** The currency list never changes while the app is open, so it is built
@@ -2417,10 +7343,12 @@ function ledgerCompute() {
     };
 }
 
-/** What the Budget Planner set aside for a category, if anything. */
+/** What the Planner set aside for a category, for the month the ledger is
+ *  showing — not for whichever period the Planner is open on. */
 function budgetedSenFor(categoryId) {
-    const input = $('bgt_' + categoryId);
-    return input ? Math.max(0, toSen(parseFloat(input.value) || 0)) : 0;
+    const [y, m] = isoNums((ledgerState.month || monthOf(todayIso())) + '-01');
+    if (!y || !m) return 0;
+    return budgetLineSen(budgetLinesFor(monthFirst(y, m), monthLast(y, m)), categoryId);
 }
 
 /**
@@ -2673,6 +7601,10 @@ function renderLedger() {
     readLedgerAccounts();
     readCategoryRows();
     buildAccountOptions();
+    // The tracker and the cards name an account and a category too, and a
+    // select has no caret to lose — so they are rebuilt with the rest.
+    buildCommitOptions();
+    buildCardOptions();
     // The picker is rebuilt, the rows are not: rebuilding the rows would take
     // the caret with them while a name is still being typed.
     buildCategoryOptions();
@@ -2785,7 +7717,7 @@ function fetchRates(onDone) {
                     stamp: String(data.time_last_update_utc || ''),
                     rates: data.rates,
                 }));
-            } catch (err) { /* storage unavailable — the session still works */ }
+            } catch (err) { /* unreachable: storeWrite swallows it and reports it */ }
         })
         .catch(() => { /* offline, blocked, or down — the cached rates stand */ })
         .then(() => {
@@ -3147,13 +8079,13 @@ function ledgerSummaryText() {
  */
 function saveLedger() {
     try {
-        localStorage.setItem(LEDGER_KEY, JSON.stringify({
+        storeWrite(LEDGER_KEY, JSON.stringify({
             seq: ledgerSeq,
             month: ledgerState.month,
             accounts: ledgerState.accounts,
             entries: ledgerState.entries,
         }));
-    } catch (err) { /* storage unavailable — the session still works */ }
+    } catch (err) { /* unreachable: storeWrite swallows it and reports it */ }
 }
 
 function loadLedger() {
@@ -3469,14 +8401,22 @@ function dashCompute() {
         }
     });
 
-    // Credit card outstanding: the ledger's own credit accounts are the record
-    // of what is owed. With none on the books, the Card Payoff module's balance
-    // is the only figure this app holds — so it stands in, and says so, rather
-    // than the dashboard reporting nothing owed on a card being paid off.
-    const cardBalanceSen = Math.max(0, toSen(num('cardBalance')));
-    const creditFromCard = creditCount === 0 && cardBalanceSen > 0;
+    // Credit card outstanding. A ledger credit account carrying a balance is
+    // the better record — it is built from real entries — so it wins. But a
+    // *fresh* book seeds an empty "Credit card" account, and testing for the
+    // account's existence meant the Card Payoff figure could never stand in:
+    // the dashboard reported nothing owed while the card book said RM9,500.
+    // So the test is whether anything is actually owed there.
+    const cardBalanceSen = cardTotalDebtSen();
+    const creditFromCard = creditOwingSen === 0 && cardBalanceSen > 0;
 
-    const plan = budgetCompute();
+    // By dates, not by whatever the Planner is showing.
+    const plannedSen = budgetPlannedSenIn(range.from, range.to);
+
+    // The instalment tracker answers the same way: by this period's dates,
+    // not by whichever plan happens to be open.
+    const commitDue = commitDueBetween(range.from, range.to);
+    const instalmentSen = commitOutstandingSen();
 
     return {
         range, entries, balances,
@@ -3494,8 +8434,11 @@ function dashCompute() {
         creditSen: creditFromCard ? cardBalanceSen : creditOwingSen,
         creditFromCard, creditCount,
 
-        plannedSen: plan.plannedSen,
-        budgetLeftSen: plan.plannedSen - totals.expenseSen,
+        plannedSen,
+        budgetLeftSen: plannedSen - totals.expenseSen,
+
+        instalmentSen, commitDue,
+        investmentSen: growTotalValueSen(),
     };
 }
 
@@ -3896,8 +8839,6 @@ function paintDashKpis(book) {
     if (!host) return;
     host.innerHTML = '';
 
-    const monthly = book.range.monthly;
-
     const kpis = [
         {
             label: 'Total balance', icon: 'bi-wallet2', badge: 'jade',
@@ -3929,36 +8870,47 @@ function paintDashKpis(book) {
             foot: 'Accounts kept for savings',
         },
         {
-            label: 'Investment value', icon: 'bi-graph-up-arrow',
-            value: '—', pending: true,
-            foot: 'Arrives with Grow (M7)',
+            label: 'Investment value', icon: 'bi-graph-up-arrow', badge: 'indigo',
+            value: book.investmentSen ? money(fromSen(book.investmentSen)) : '—',
+            pending: !book.investmentSen,
+            foot: book.investmentSen
+                ? 'What your open investments are worth'
+                : 'Nothing recorded — add one under Grow',
         },
         {
-            label: 'Outstanding instalments', icon: 'bi-calendar2-check',
-            value: '—', pending: true,
-            foot: 'Arrives with Commit (M5)',
+            label: 'Outstanding instalments', icon: 'bi-calendar2-check', badge: 'indigo',
+            value: book.instalmentSen ? money(fromSen(book.instalmentSen)) : '—',
+            tone: book.instalmentSen ? 'is-minus' : '',
+            pending: !book.instalmentSen,
+            foot: book.instalmentSen
+                ? 'Still to pay across every live plan'
+                : 'Nothing on instalment — add one under Instalments',
         },
         {
             label: 'Credit card outstanding', icon: 'bi-credit-card-2-front', badge: 'amber',
             value: money(fromSen(book.creditSen)),
             tone: book.creditSen ? 'is-minus' : '',
-            foot: book.creditFromCard ? 'From Card Payoff — no credit account on the books'
+            foot: book.creditFromCard ? 'From your cards under Card Payoff'
                 : book.creditCount ? book.creditCount + (book.creditCount === 1 ? ' credit account' : ' credit accounts')
                 : 'No credit account recorded',
         },
         {
-            label: 'Upcoming payments', icon: 'bi-hourglass-split',
-            value: '—', pending: true,
-            foot: 'Needs due dates — Commit (M5)',
+            label: 'Upcoming payments', icon: 'bi-hourglass-split', badge: 'amber',
+            value: book.commitDue.count ? money(fromSen(book.commitDue.sen)) : '—',
+            pending: !book.commitDue.count,
+            foot: book.commitDue.count
+                ? book.commitDue.count + (book.commitDue.count === 1 ? ' payment due ' : ' payments due ') +
+                  'this period · next ' + dayShort(book.commitDue.soonest)
+                : 'Nothing falls due in this period',
         },
         {
             label: 'Budget remaining', icon: 'bi-clipboard-check', badge: 'amber',
             value: book.plannedSen ? signedMoney(book.budgetLeftSen) : '—',
             tone: !book.plannedSen ? '' : book.budgetLeftSen < 0 ? 'is-minus' : 'is-plus',
             pending: !book.plannedSen,
-            foot: !book.plannedSen ? 'Nothing planned in Budget Planner yet'
-                : monthly ? 'of ' + money(fromSen(book.plannedSen)) + ' planned'
-                : 'monthly plan of ' + money(fromSen(book.plannedSen)) + ' vs this period',
+            foot: !book.plannedSen
+                ? 'No plan covers these dates — set one in the Planner'
+                : 'of ' + money(fromSen(book.plannedSen)) + ' planned',
         },
     ];
 
@@ -4442,9 +9394,20 @@ function paintNav() {
     if (scrim) scrim.hidden = !(drawer && open);
     btn.setAttribute('aria-expanded', String(drawer ? open : !rail));
 
+    // A drawer opens and shuts; a column slides one way or the other. On the
+    // desktop the button is a 26px circle on the sidebar's edge with no room
+    // for a word, so the chevron points where that edge is about to go and
+    // the word survives as the accessible name and the tooltip.
     const icon = btn.querySelector('i');
-    if (icon) icon.className = 'bi ' + (drawer && open ? 'bi-x-lg' : 'bi-list');
-    set('navToggleLabel', drawer ? (open ? 'Close' : 'Menu') : rail ? 'Expand' : 'Collapse');
+    if (icon) {
+        icon.className = 'bi ' + (drawer
+            ? (open ? 'bi-x-lg' : 'bi-list')
+            : (rail ? 'bi-chevron-double-right' : 'bi-chevron-double-left'));
+    }
+
+    const label = drawer ? (open ? 'Close' : 'Menu') : rail ? 'Expand' : 'Collapse';
+    set('navToggleLabel', label);
+    btn.title = drawer ? (open ? 'Close the menu' : 'Menu') : label + ' the sidebar';
 }
 
 function toggleNav() {
@@ -4488,7 +9451,9 @@ const MODULES = {
     ledger: { render: renderLedger },
     split:  { render: renderSplit },
     budget: { render: renderBudget },
+    commit: { render: renderCommit },
     card:   { render: renderCard },
+    grow:   { render: renderGrow },
 };
 
 const FORM_DEFAULTS = {
@@ -4499,11 +9464,22 @@ const FORM_DEFAULTS = {
         dashCmpGrain: 'month',
     },
     ledger: { ledgerType: 'expense', ledgerAmount: '', ledgerNote: '' },
-    split:  { splitCharges: 'none', splitService: '0', splitTax: '0', splitDiscount: '' },
+    split:  {
+        splitCharges: 'none', splitTitle: '',
+        splitService: '0', splitTax: '0', splitDiscount: '',
+    },
     budget: { budgetIncome: '', budgetExtra: '', budgetRule: '502030' },
+    commit: {
+        commitDirection: 'out', commitBasis: 'total', commitName: '', commitWho: '',
+        commitTotal: '', commitMonthly: '', commitMonths: '', commitPaidCount: '',
+    },
     card:   {
-        cardTier: '18', cardBalance: '', cardRate: '18', cardPayment: '',
-        cardMinPct: '5', cardMinFloor: '25', cardView: 'year',
+        cardTier: '18', cardName: '', cardLimit: '', cardBalance: '', cardRate: '18',
+        cardMinPct: '5', cardMinFloor: '25', cardDueDay: '',
+    },
+    grow:   {
+        growName: '', growType: 'asb', growValue: '', growNote: '',
+        growFdRate: '', growFdMonths: '',
     },
 };
 
@@ -4533,22 +9509,32 @@ function resetForm(which) {
         }
     });
 
+    // "Start over" clears the form, not the history: saved bills are records,
+    // and a reset button is not what anyone expects to delete records with.
     if (which === 'split') {
         if ($('splitRound')) $('splitRound').checked = false;
-        splitState = { people: [newPerson(), newPerson()], shared: [] };
-        buildSplitPeople();
-        buildSplitShared();
-        renderSplit();
+        splitNewBill();
     }
 
+    // The plan on screen is emptied; the saved budgets are records and stay.
+    // Reset is not what anyone expects to delete history with.
     if (which === 'budget') {
-        budgetCategories().forEach((cat) => { if ($('bgt_' + cat.id)) $('bgt_' + cat.id).value = ''; });
-        budgetState = { custom: [] };
-        buildBudgetCustom();
+        const plan = planDraft();
+        planState.draft = Object.assign(blankPlan(), {
+            period: plan.period, anchor: plan.anchor, from: plan.from, to: plan.to,
+        });
+        fillBudgetForm();
         renderBudget();
     }
 
-    if (which === 'card') renderCard();
+    // "New plan", not "wipe the tracker": saved plans are records.
+    if (which === 'commit') {
+        commitNewPlan();
+    }
+
+    if (which === 'card') cardNewCard();
+
+    if (which === 'grow') growNewInvestment();
 
     // The dashboard writes nothing, so "reset" is only ever about the view:
     // back to this month, and close whatever account was opened.
@@ -4570,7 +9556,7 @@ function resetForm(which) {
  * ====================================================================
  * BACKUP — the only copy of this data you actually control
  * --------------------------------------------------------------------
- * Everything MoneyFlow remembers lives in this browser's localStorage, which
+ * Everything MoneyFlow remembers lives in this browser — IndexedDB where there
  * means it lives in one browser, on one address, on one machine. Clearing
  * browsing data wipes it. There is no server holding a second copy and nobody
  * to ask for one.
@@ -4594,7 +9580,7 @@ const BACKUP_VERSION = 1;
 // Categories belong in here: they are records, not a display preference.
 // A backup without them would restore a year of entries under names the
 // reader never chose.
-const BACKUP_STORES = [LEDGER_KEY, CATEGORY_KEY, BUDGET_KEY, CARD_KEY];
+const BACKUP_STORES = [LEDGER_KEY, CATEGORY_KEY, BUDGET_KEY, GOALS_KEY, COMMIT_KEY, CARD_KEY, GROW_KEY, SPLIT_KEY];
 
 /**
  * Reads the stores as they sit on disk. `storedRaw` is used rather than the
@@ -4621,14 +9607,57 @@ function backupEnvelope() {
 /** "27 entries across 4 accounts", or "nothing recorded yet" — for the dialog. */
 function backupSummary(envelope) {
     const ledger = (envelope.stores && envelope.stores[LEDGER_KEY]) || {};
+    const split  = (envelope.stores && envelope.stores[SPLIT_KEY])  || {};
+    const budget = (envelope.stores && envelope.stores[BUDGET_KEY]) || {};
+    const goals  = (envelope.stores && envelope.stores[GOALS_KEY])  || {};
     const entries  = Array.isArray(ledger.entries)  ? ledger.entries.length  : 0;
     const accounts = Array.isArray(ledger.accounts) ? ledger.accounts.length : 0;
+    const bills    = Array.isArray(split.bills)     ? split.bills.length     : 0;
+    const plans    = Array.isArray(budget.budgets)  ? budget.budgets.length  : 0;
+    const goalList = Array.isArray(goals.list)      ? goals.list.length      : 0;
+
+    // Plans and goals are records too, so a dialog that only counts entries
+    // understates what is about to be replaced.
+    const also = [
+        bills    ? bills    + (bills    === 1 ? ' shared bill' : ' shared bills')  : '',
+        plans    ? plans    + (plans    === 1 ? ' budget'      : ' budgets')       : '',
+        goalList ? goalList + (goalList === 1 ? ' savings goal': ' savings goals') : '',
+    ].filter(Boolean);
+    const tail = also.length ? ', ' + also.slice(0, -1).concat(
+        (also.length > 1 ? 'and ' : '') + also[also.length - 1]).join(', ') : '';
 
     if (!entries) {
-        return accounts ? accounts + ' accounts and nothing recorded yet' : 'nothing recorded yet';
+        return (accounts ? accounts + ' accounts and nothing recorded yet' : 'nothing recorded yet') + tail;
     }
     return entries + (entries === 1 ? ' entry' : ' entries')
-        + ' across ' + accounts + (accounts === 1 ? ' account' : ' accounts');
+        + ' across ' + accounts + (accounts === 1 ? ' account' : ' accounts') + tail;
+}
+
+/**
+ * Does this browser hold any records at all?
+ *
+ * Categories and accounts are seeded on a first visit, so their presence says
+ * nothing — only things the reader put there count. This is what tells the
+ * Drive layer whether to offer to bring a copy down, which is the one moment
+ * that offer is worth making: a browser that was cleared, or a machine seeing
+ * the app for the first time.
+ */
+function storeIsEmpty() {
+    const stores = backupEnvelope().stores;
+    const some = (key, pick) => {
+        const held = stores[key];
+        if (!held) return false;
+        const rows = pick(held);
+        return Array.isArray(rows) && rows.length > 0;
+    };
+
+    return !some(LEDGER_KEY, (v) => v.entries)
+        && !some(SPLIT_KEY,  (v) => v.bills)
+        && !some(BUDGET_KEY, (v) => v.budgets)
+        && !some(GOALS_KEY,  (v) => v.list)
+        && !some(COMMIT_KEY, (v) => v.plans)
+        && !some(CARD_KEY,   (v) => v.cards)
+        && !some(GROW_KEY,   (v) => v.investments);
 }
 
 function backupFilename() {
@@ -4699,24 +9728,59 @@ function backupRead(file) {
  * state in its own variables, so a reload is the one way to be certain nothing
  * survives from before the import.
  */
+/**
+ * Restoring is all-or-nothing, and it has to be.
+ *
+ * Writing store by store and giving up on the first failure leaves half the
+ * new book and half the old one — the two blended together, which is the exact
+ * outcome "replace, never merge" exists to prevent. Worse, the message said
+ * "nothing was changed", which by then was untrue.
+ *
+ * So the old values are held first, every store is written, and any failure
+ * puts all of them back before anyone is told. A restore either happened or it
+ * did not.
+ */
 function backupApply(envelope) {
-    try {
+    const held = {};
+    BACKUP_STORES.forEach((key) => { held[key] = storedRaw(key); });
+
+    const rollback = () => {
         BACKUP_STORES.forEach((key) => {
-            if (Object.prototype.hasOwnProperty.call(envelope.stores, key)) {
-                localStorage.setItem(key, JSON.stringify(envelope.stores[key]));
-            } else {
-                // Absent from the backup means absent afterwards. Leaving the
-                // old value would blend two books, which is the one thing
-                // replacing is meant to prevent.
-                localStorage.removeItem(key);
-            }
+            if (held[key] === null || held[key] === undefined) MFStore.remove(key);
+            else MFStore.set(key, held[key]);
         });
-        location.reload();
-    } catch (err) {
-        backupSay('Could not restore the backup',
-            'The browser refused to write to storage, so nothing was changed. That usually '
-            + 'means private browsing, or storage being full.');
-    }
+    };
+
+    const gaveUp = () => {
+        rollback();
+        MFStore.flush();
+        storeBroken = false;
+        storeBrokenWhy = '';
+        paintStoreAlert();
+        backupSay('Could not restore that backup',
+            'It did not fit in this browser, so everything has been put back exactly as it was — '
+            + 'nothing of yours was lost. Try it in a browser holding fewer records, or export what '
+            + 'is here first and prune it.');
+    };
+
+    let failed = false;
+    BACKUP_STORES.forEach((key) => {
+        if (Object.prototype.hasOwnProperty.call(envelope.stores, key)) {
+            if (!storeWrite(key, JSON.stringify(envelope.stores[key]))) failed = true;
+        } else {
+            // Absent from the backup means absent afterwards. Leaving the old
+            // value would blend two books, which is the one thing replacing is
+            // meant to prevent.
+            MFStore.remove(key);
+        }
+    });
+
+    if (failed) return gaveUp();
+
+    // On IndexedDB the writes are still in flight, and reloading onto a
+    // half-written book would be the very thing the rollback exists to
+    // prevent — so the reload waits for the flush to say it landed.
+    MFStore.flush().then((ok) => { if (ok) location.reload(); else gaveUp(); });
 }
 
 /* ------------------------------- dialog ------------------------------ */
@@ -4832,11 +9896,23 @@ function setSegment(seg, value) {
     });
 }
 
+/**
+ * Nothing below may run before the records are in memory, and reading them out
+ * of IndexedDB is asynchronous. Where there is no database to wait for — the
+ * localStorage fallback, which is what every test in this repo runs on — the
+ * store hydrates in this same tick and the app starts exactly as it always
+ * did. See store.js.
+ */
 document.addEventListener('DOMContentLoaded', () => {
+    if (MFStore.initSync(storeReport)) startApp();
+    else MFStore.init(storeReport).then(startApp);
+});
 
-    // --- bill split ---
-    buildSplitPeople();
-    buildSplitShared();
+function startApp() {
+
+    // --- bill split: the saved bills first, then a blank form over them ---
+    loadSplit();
+    paintSplitForm();
 
     loadNav();
     loadRates();
@@ -4844,14 +9920,12 @@ document.addEventListener('DOMContentLoaded', () => {
     // --- categories: everything below names one, so they load first ---
     loadCategories();
 
-    // --- budget planner: build the rows before restoring their values ---
-    buildBudgetRows();
+    // --- financial planner: the plan first, then the rows it fills ---
     loadBudget();
-    buildBudgetCustom();
-
-    // --- card payoff ---
-    loadCard();
-    syncCardTier();
+    buildBudgetRows();
+    fillBudgetForm();
+    loadGoals();
+    buildGoals();
 
     // --- daily ledger: accounts first, they are what entries point at ---
     buildStaticOptions();
@@ -4860,6 +9934,19 @@ document.addEventListener('DOMContentLoaded', () => {
     buildCategoryManager();
     buildAccountOptions();
     syncLedgerForm();
+
+    // --- instalment tracker and card payoff: strictly after the ledger. Both
+    //     check their payments' entry links against the entries that actually
+    //     exist, and against an empty book every link looks broken. ---
+    loadCommit();
+    fillCommitForm();
+    loadCard();
+    fillCardForm();
+
+    // --- savings & investment: last, because it reads the ledger, the goals
+    //     and its own contributions together ---
+    loadGrow();
+    fillGrowForm();
     ledgerClearForm();
 
     document.querySelectorAll('.seg').forEach((seg) => {
@@ -4868,18 +9955,54 @@ document.addEventListener('DOMContentLoaded', () => {
             if (!btn) return;
             setSegment(seg, btn.dataset.val);
             if (seg.id === 'splitCharges') { applyChargePreset(btn.dataset.val); renderSplit(); }
+            if (seg.id === 'splitFilter') { splitState.filter = btn.dataset.val; saveSplit(); paintBills(); }
+            if (seg.id === 'splitDiscountUnit') onSplitFormEdit();
+            // The unit lives in each dish row's affix, so the rows are rebuilt.
+            if (seg.id === 'splitItemOffUnit') {
+                readSplitState();
+                buildSplitPeople();
+                buildSplitShared();
+                commitBill();
+                renderSplit();
+            }
             if (seg.id === 'budgetRule') renderBudget();
-            if (seg.id === 'cardTier' && $('cardRate')) $('cardRate').value = btn.dataset.val;
-            if (seg.id === 'cardTier' || seg.id === 'cardView') renderCard();
+            // Direction decides which category list the picker offers, so the
+            // pickers are rebuilt rather than repainted.
+            if (seg.id === 'commitDirection') {
+                readCommitForm();
+                // Money coming back from a loan is not income, so an incoming
+                // plan starts with the link off. Only while it is still a
+                // draft — flipping a saved plan must not undo its own setting.
+                const fresh = commitDraft();
+                if (!fresh.id) {
+                    fresh.autoRecord = fresh.direction === 'out';
+                    if ($('commitAuto')) $('commitAuto').checked = fresh.autoRecord;
+                }
+                buildCommitOptions();
+                renderCommit();
+            }
+            if (seg.id === 'commitBasis') renderCommit();
+            if (seg.id === 'commitFilter') { commitState.filter = btn.dataset.val; saveCommit(); renderCommit(); }
+            // Switching the period is switching budgets: whatever is saved for
+            // the new one opens, and an unsaved draft for the old one stays put
+            // under its own key rather than following the reader across.
+            if (seg.id === 'budgetPeriod') { readBudgetState(); loadPeriodIntoForm(); }
+            if (seg.id === 'cardTier' && $('cardRate') && btn.dataset.val !== 'custom') {
+                $('cardRate').value = btn.dataset.val;
+            }
+            if (seg.id === 'cardFilter') { cardState.filter = btn.dataset.val; saveCard(); }
+            if (seg.id === 'growFilter') { growState.filter = btn.dataset.val; saveGrow(); }
+            if (['growPeriod', 'growTargetUnit', 'growCUnit', 'growFilter'].includes(seg.id)) renderGrow();
+            if (['cardTier', 'cardView', 'cardStrategy', 'cardFilter'].includes(seg.id)) renderCard();
             if (seg.id === 'ledgerType') { syncLedgerForm(); renderLedger(); }
             if (['dashPeriod', 'dashDim', 'dashDimChart', 'dashTrend', 'dashTrendView', 'dashCmpGrain']
                 .includes(seg.id)) renderDash();
         });
     });
 
-    document.querySelectorAll('#split-form input').forEach((el) => {
-        el.addEventListener('input', renderSplit);
-        el.addEventListener('change', renderSplit);
+    document.querySelectorAll('#split-form input, #split-form select').forEach((el) => {
+        el.addEventListener('input', onSplitFormEdit);
+        el.addEventListener('change', onSplitFormEdit);
     });
 
     document.querySelectorAll('#budget-form input').forEach((el) => {
@@ -4900,34 +10023,167 @@ document.addEventListener('DOMContentLoaded', () => {
         });
     }
 
-    document.querySelectorAll('#card-form input').forEach((el) => {
+    document.querySelectorAll('#card-form input, #card-form select').forEach((el) => {
         const paint = () => { syncCardTier(); renderCard(); };
         el.addEventListener('input', paint);
         el.addEventListener('change', paint);
     });
 
+    // The budget and the strategy live above the form — they belong to the
+    // plan across every card, not to whichever card is open.
+    ['cardPayment', 'cardPayDate', 'cardPayAmount', 'cardPayNote'].forEach((id) => {
+        const el = $(id);
+        if (!el) return;
+        el.addEventListener('input', renderCard);
+        el.addEventListener('change', renderCard);
+    });
+
+    const cardSave = $('cardSave');
+    if (cardSave) cardSave.addEventListener('click', cardSaveCard);
+
+    const cardNew = $('cardNew');
+    if (cardNew) cardNew.addEventListener('click', cardNewCard);
+
+    const cardClose = $('cardClose');
+    if (cardClose) cardClose.addEventListener('click', cardToggleClosed);
+
+    // --- savings & investment ---
+    document.querySelectorAll('#grow-form input, #grow-form select').forEach((el) => {
+        el.addEventListener('input', renderGrow);
+        el.addEventListener('change', renderGrow);
+    });
+
+    // The target and the contribution row sit outside the form — one belongs
+    // to the period, the other to the investment that happens to be open.
+    ['growTarget', 'growCDate', 'growCFigure', 'growCBase', 'growCNote'].forEach((id) => {
+        const el = $(id);
+        if (!el) return;
+        el.addEventListener('input', renderGrow);
+        el.addEventListener('change', renderGrow);
+    });
+
+    const growSave = $('growSave');
+    if (growSave) growSave.addEventListener('click', growSaveInvestment);
+
+    const growNew = $('growNew');
+    if (growNew) growNew.addEventListener('click', growNewInvestment);
+
+    const growClose = $('growClose');
+    if (growClose) growClose.addEventListener('click', growToggleClosed);
+
+    const growCopy = $('growCopy');
+    if (growCopy) growCopy.addEventListener('click', () => copySummary(growCopy, growSummaryText(), 'Copy summary'));
+
+    const growCAdd = $('growCAdd');
+    if (growCAdd) growCAdd.addEventListener('click', growAddContribution);
+
+    const growFdApply = $('growFdApply');
+    if (growFdApply) growFdApply.addEventListener('click', growApplyFd);
+
+    const growListHost = $('growListBody');
+    if (growListHost) {
+        growListHost.addEventListener('click', (event) => {
+            const btn = event.target.closest('button[data-open-inv], button[data-drop-inv]');
+            if (!btn) return;
+            if (btn.dataset.openInv) growOpenInvestment(btn.dataset.openInv);
+            else growDropInvestment(btn.dataset.dropInv);
+        });
+    }
+
+    const growCListHost = $('growCList');
+    if (growCListHost) {
+        growCListHost.addEventListener('click', (event) => {
+            const btn = event.target.closest('button[data-drop-contrib]');
+            if (!btn) return;
+            growDropContribution(btn.closest('.goal-c').dataset.contribution);
+        });
+    }
+
+    const cardPayAddBtn = $('cardPayAddBtn');
+    if (cardPayAddBtn) cardPayAddBtn.addEventListener('click', cardAddPayment);
+
+    const cardListHost = $('cardListBody');
+    if (cardListHost) {
+        cardListHost.addEventListener('click', (event) => {
+            const btn = event.target.closest('button[data-open-card], button[data-drop-card]');
+            if (!btn) return;
+            if (btn.dataset.openCard) cardOpenCard(btn.dataset.openCard);
+            else cardDropCard(btn.dataset.dropCard);
+        });
+    }
+
+    const cardPayHost = $('cardPayList');
+    if (cardPayHost) {
+        cardPayHost.addEventListener('click', (event) => {
+            const btn = event.target.closest('button[data-drop-payment]');
+            if (!btn) return;
+            cardDropPayment(btn.closest('.goal-c').dataset.payment);
+        });
+    }
+
     // Rows are built on the fly, so their events are delegated to the host.
     ['splitPeople', 'splitShared'].forEach((id) => {
         const host = $(id);
         if (!host) return;
-        host.addEventListener('input', renderSplit);
+        host.addEventListener('input', onSplitFormEdit);
         host.addEventListener('click', onSplitEdit);
     });
 
-    ['budgetRows', 'budgetCustom'].forEach((id) => {
-        const host = $(id);
-        if (!host) return;
-        host.addEventListener('input', renderBudget);
-        host.addEventListener('change', (event) => { onBudgetBucketChange(event); renderBudget(); });
-        host.addEventListener('click', onBudgetEdit);
-    });
+    // Budget rows are built on the fly, so their events are delegated to the
+    // host. The name and the bucket act on the shared category list; the money
+    // input is read back by `readBudgetState` like every other field.
+    const budgetRowsHost = $('budgetRows');
+    if (budgetRowsHost) {
+        budgetRowsHost.addEventListener('input', (event) => { onBudgetRowInput(event); renderBudget(); });
+        budgetRowsHost.addEventListener('change', (event) => { onBudgetRowChange(event); renderBudget(); });
+        budgetRowsHost.addEventListener('click', onBudgetRowClick);
+    }
+
+    const goalListHost = $('goalList');
+    if (goalListHost) {
+        goalListHost.addEventListener('input', onGoalInput);
+        goalListHost.addEventListener('change', onGoalInput);
+        goalListHost.addEventListener('click', onGoalClick);
+    }
+
+    const goalAdd = $('goalAdd');
+    if (goalAdd) goalAdd.addEventListener('click', addGoal);
+
+    // --- the plan's own controls ---
+    const budgetSave = $('budgetSave');
+    if (budgetSave) budgetSave.addEventListener('click', saveBudgetPlan);
+
+    const budgetRevert = $('budgetRevert');
+    if (budgetRevert) budgetRevert.addEventListener('click', revertBudgetPlan);
+
+    const budgetCopyPrev = $('budgetCopyPrev');
+    if (budgetCopyPrev) budgetCopyPrev.addEventListener('click', copyPreviousPlan);
+
+    const budgetPrev = $('budgetPrev');
+    if (budgetPrev) budgetPrev.addEventListener('click', () => stepBudgetPeriod(-1));
+
+    const budgetNext = $('budgetNext');
+    if (budgetNext) budgetNext.addEventListener('click', () => stepBudgetPeriod(1));
+
+    const budgetPlansHost = $('budgetPlans');
+    if (budgetPlansHost) {
+        budgetPlansHost.addEventListener('click', (event) => {
+            const btn = event.target.closest('button[data-open-plan], button[data-drop-plan]');
+            if (!btn) return;
+            if (btn.dataset.openPlan) openSavedPlan(btn.dataset.openPlan);
+            else dropSavedPlan(btn.dataset.dropPlan);
+        });
+    }
 
     const addPerson = $('splitAddPerson');
     if (addPerson) {
         addPerson.addEventListener('click', () => {
             readSplitState();
-            splitState.people.push(newPerson());
+            draft().people.push(newPerson());
             buildSplitPeople();
+            // A new head means a new portion box on every dish that has them.
+            buildSplitShared();
+            commitBill();
             renderSplit();
         });
     }
@@ -4936,23 +10192,100 @@ document.addEventListener('DOMContentLoaded', () => {
     if (addShared) {
         addShared.addEventListener('click', () => {
             readSplitState();
-            splitState.shared.push(newItem());
+            draft().shared.push(newItem());
             buildSplitShared();
+            commitBill();
             renderSplit();
         });
     }
 
-    const addCat = $('budgetAddCat');
-    if (addCat) {
-        addCat.addEventListener('click', () => {
-            readBudgetState();
-            budgetState.custom.push(newCategory());
-            buildBudgetCustom();
-            renderBudget();
-            const last = document.querySelector('#budgetCustom .bgt-row:last-child .bgt-label');
-            if (last) last.focus();
+    // The per-dish column changes the shape of every item row, so the rows
+    // are rebuilt rather than repainted.
+    const itemOff = $('splitItemOff');
+    if (itemOff) {
+        itemOff.addEventListener('change', () => {
+            readSplitState();
+            buildSplitPeople();
+            buildSplitShared();
+            commitBill();
+            renderSplit();
         });
     }
+
+    // --- instalment tracker ---
+    document.querySelectorAll('#commit-form input, #commit-form select').forEach((el) => {
+        el.addEventListener('input', renderCommit);
+        el.addEventListener('change', renderCommit);
+    });
+
+    const commitSave = $('commitSave');
+    if (commitSave) commitSave.addEventListener('click', commitSavePlan);
+
+    const commitNew = $('commitNew');
+    if (commitNew) commitNew.addEventListener('click', commitNewPlan);
+
+    const commitCancel = $('commitCancelPlan');
+    if (commitCancel) commitCancel.addEventListener('click', commitCancelPlan);
+
+    const commitCopy = $('commitCopy');
+    if (commitCopy) commitCopy.addEventListener('click', () => copySummary(commitCopy, commitSummaryText(), 'Copy summary'));
+
+    // The schedule is rebuilt on every paint, so its events are delegated.
+    const commitMonths = $('commitMonthsList');
+    if (commitMonths) {
+        commitMonths.addEventListener('click', (event) => {
+            const btn = event.target.closest('button[data-tick]');
+            if (btn) commitTogglePayment(Number(btn.dataset.tick));
+        });
+        // `change`, not `input`: repainting mid-keystroke would take the caret.
+        commitMonths.addEventListener('change', (event) => {
+            const field = event.target.closest('.commit-amount');
+            if (!field) return;
+            commitSetAmount(Number(field.dataset.n), field.value);
+            renderCommit();
+        });
+    }
+
+    const commitPlansHost = $('commitPlans');
+    if (commitPlansHost) {
+        commitPlansHost.addEventListener('click', (event) => {
+            const btn = event.target.closest('button[data-open-plan], button[data-drop-plan]');
+            if (!btn) return;
+            if (btn.dataset.openPlan) commitOpenPlan(btn.dataset.openPlan);
+            else commitDropPlan(btn.dataset.dropPlan);
+        });
+    }
+
+    const splitSave = $('splitSave');
+    if (splitSave) splitSave.addEventListener('click', splitSaveBill);
+
+    const splitCancel = $('splitCancel');
+    if (splitCancel) splitCancel.addEventListener('click', splitNewBill);
+
+    const settleList = $('splitSettleList');
+    if (settleList) settleList.addEventListener('click', onSettleClick);
+
+    const expense = $('splitExpense');
+    if (expense) {
+        expense.addEventListener('click', (event) => {
+            if (event.target.closest('#splitExpAdd'))  splitRecordShare();
+            if (event.target.closest('#splitExpUndo')) splitRemoveShare();
+        });
+    }
+
+    const bills = $('splitBills');
+    if (bills) {
+        bills.addEventListener('click', (event) => {
+            const btn = event.target.closest('button[data-open-bill], button[data-copy-bill], button[data-drop-bill]');
+            if (!btn) return;
+            if (btn.dataset.openBill) splitOpenBill(btn.dataset.openBill);
+            else if (btn.dataset.copyBill) splitCopyBill(btn.dataset.copyBill);
+            else splitDropBill(btn.dataset.dropBill);
+        });
+    }
+
+    const addCat = $('budgetAddCat');
+    if (addCat) addCat.addEventListener('click', addBudgetCategory);
 
     const splitCopy = $('splitCopy');
     if (splitCopy) splitCopy.addEventListener('click', () => copySummary(splitCopy, splitSummaryText(), 'Copy summary'));
@@ -5169,11 +10502,28 @@ document.addEventListener('DOMContentLoaded', () => {
 
     wireBackup();
 
+    // Says nothing at all until a write fails or the store fills up.
+    const storeAlertExport = $('storeAlertExport');
+    if (storeAlertExport) storeAlertExport.addEventListener('click', () => backupExport(storeAlertExport));
+    paintStoreAlert();
+
     renderLedger();
     renderSplit();
     renderBudget();
+    renderCommit();
     renderCard();
+    renderGrow();
 
     // Last, because it reads what every other module has just put on screen.
     renderDash();
-});
+
+    // Ask the browser how much room it is actually offering, then repaint the
+    // usage line with the real ceiling rather than the five-megabyte guess.
+    if (MFStore.measure) MFStore.measure().then(paintStoreAlert);
+
+    // And ask it not to throw the records away when the disk gets tight —
+    // but only once there are records, since Firefox turns this into a
+    // permission prompt and a prompt about an empty book is a prompt about
+    // nothing.
+    if (MFStore.persist && !storeIsEmpty()) MFStore.persist();
+}

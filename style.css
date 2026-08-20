@@ -224,7 +224,7 @@ body {
 .brand img { display: block; width: 152px; height: auto; }
 
 .tagline {
-    margin: 6px 0 22px;
+    margin: 6px 0 0;
     padding: 0 8px;
     font-size: 12px;
     font-weight: 600;
@@ -232,7 +232,11 @@ body {
     color: var(--muted);
 }
 
-.tabs { display: flex; flex-direction: column; gap: 3px; }
+/* The gap above the first module used to be the tagline's bottom margin, so
+   every screen that hides the tagline — the rail, and anything under 1080px —
+   had the wordmark sitting straight on top of Dashboard. The space belongs to
+   the nav, which is always there, not to the line that comes and goes. */
+.tabs { display: flex; flex-direction: column; gap: 3px; margin-top: 22px; }
 
 /* Full-width rows, so the target is the column rather than the word — and so
    a long module name costs nothing that a short one does not. */
@@ -277,8 +281,8 @@ body {
    -------------------------------------------------------------------------- */
 .app.is-rail .sidebar { flex-basis: 76px; padding-left: 12px; padding-right: 12px; }
 .app.is-rail .tagline { display: none; }
-.app.is-rail .brand { padding: 0; }
-.app.is-rail .brand img { width: 40px; content: url(logo-icon.svg); }
+.app.is-rail .brand { display: flex; justify-content: center; padding: 0; }
+.app.is-rail .brand img { width: 34px; content: url(logo-icon.svg); }
 .app.is-rail .tabs button { justify-content: center; padding: 12px 0; }
 .app.is-rail .tabs button i { font-size: 17px; }
 
@@ -297,10 +301,16 @@ body {
    Top bar
 
 /* The one control that folds the sidebar away. What it does depends on how
-   much room there is: a drawer on a phone, a rail on a desktop. */
+   much room there is: a drawer on a phone, a rail on a desktop — and the two
+   jobs want two different shapes, so it is styled twice.
+
+   On a phone it is a button in the top bar, because the sidebar it opens is
+   not on the page to hang anything off.
+   */
 .nav-toggle {
     display: inline-flex;
     align-items: center;
+    justify-content: center;
     gap: 8px;
     margin-right: auto;
     padding: 8px 12px;
@@ -318,6 +328,53 @@ body {
 .nav-toggle:hover { border-color: var(--jade); background: var(--jade-soft); color: var(--jade); }
 .nav-toggle i { font-size: 15px; }
 
+/* --------------------------------------------------------------------------
+   The desktop shape: a handle on the sidebar's own edge
+   --------------------------------------------------------------------------
+   It was a labelled pill in the top bar, which read as a fifth toolbar action
+   sitting a long way from the thing it moves — and once collapsed, a wide
+   "Expand" button was the loudest control on a page whose whole point was to
+   have less chrome. On the edge it is where the movement happens, it costs a
+   26px circle instead of a row, and the chevron says which way the column is
+   about to go without needing a word for it.
+
+   `fixed` rather than in-flow: the button straddles the border, and no
+   sensible place in either the sidebar or the top bar can sit on top of it.
+   Its offsets are read against the top bar rather than the window — the top
+   bar's `backdrop-filter` makes it the containing block for anything fixed
+   inside it — and the top bar begins exactly where the sidebar ends. So
+   `left: -13px` is the edge in both states, with no width to keep in step.
+   -------------------------------------------------------------------------- */
+@media (min-width: 1001px) {
+    .nav-toggle {
+        position: fixed;
+        top: 30px;
+        left: -13px;               /* half the button, past the column's edge */
+        width: 26px;
+        height: 26px;
+        margin: 0;
+        padding: 0;
+        border-radius: 50%;
+        background: var(--paper);
+        color: var(--muted);
+        box-shadow: 0 1px 5px rgba(0, 0, 0, .16);
+    }
+
+    .nav-toggle i { font-size: 11px; }
+
+    /* Clipped, not removed: the icon has no text of its own, so `display:
+       none` here would leave a button that announces nothing. */
+    .nav-toggle span {
+        position: absolute;
+        width: 1px;
+        height: 1px;
+        margin: -1px;
+        overflow: hidden;
+        clip-path: inset(50%);
+        white-space: nowrap;
+    }
+}
+
 .scrim {
     position: fixed;
     inset: 0;
@@ -332,7 +389,9 @@ body {
 .topbar {
     position: sticky;
     top: 0;
-    z-index: 10;
+    /* Above the sidebar's 12: the collapse handle is a child of this bar and
+       has to paint over the column edge it straddles. */
+    z-index: 14;
     display: flex;
     align-items: center;
     justify-content: flex-end;
@@ -711,6 +770,13 @@ input[type="date"]:hover::-webkit-calendar-picker-indicator { opacity: .85; }
 
 .check-line:hover { color: var(--ink); }
 
+/* A checkbox with a setting hanging off it: the setting only appears once the
+   box is ticked, so an unticked line reads as one plain choice. */
+.check-row { display: flex; align-items: center; gap: 14px; flex-wrap: wrap; }
+
+.check-row .check-line { flex: 0 1 auto; }
+.check-row .seg.is-compact[hidden] { display: none; }
+
 /* ==========================================================================
    Bill split — one card per person, their items nested inside
    ========================================================================== */
@@ -767,6 +833,178 @@ input[type="date"]:hover::-webkit-calendar-picker-indicator { opacity: .85; }
 
 .split-item-label { padding: 9px 12px; font-size: 13.5px; }
 
+/* A dish carrying its own discount needs a fourth column. It is off by
+   default, so the ordinary row stays three fields wide. */
+.split-item.has-off { grid-template-columns: minmax(0, 1fr) 118px 104px 30px; }
+
+/* Money coming off reads as money coming off, not as a second price. */
+.money-input-sm.is-off .affix { color: var(--red); }
+.money-input-sm.is-off input { color: var(--red); }
+.money-input-sm.is-off:focus-within { border-color: var(--red); }
+
+/* --------------------------------------------------------------------
+   Portions — a shared dish that did not divide evenly
+   --------------------------------------------------------------------
+   Sits under its dish rather than inside the row: the row is a grid of
+   fields, and a variable number of people will not fit one. Off, it is a
+   single quiet line, so an ordinary shared dish costs no extra height. */
+
+.split-portions {
+    margin: -2px 0 4px;
+    padding: 8px 10px;
+    border: 1px solid transparent;
+    border-radius: 12px;
+    transition: border-color .16s ease, background .16s ease;
+}
+
+/* The strip only earns a box once the dish stops being "everyone, equally" —
+   until then it is a control sitting quietly under its row. */
+.split-portions.is-on,
+.split-portions.has-out {
+    border-color: var(--line-2);
+    background: var(--paper-2);
+}
+
+/* Who had it. The chips wrap; the toggle is pushed to the far end so the two
+   questions read left to right — who, then how much. */
+.split-share {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 8px;
+}
+
+.split-share-label {
+    font-size: 11.5px;
+    font-weight: 650;
+    color: var(--ink-3);
+}
+
+.split-chips { display: flex; flex-wrap: wrap; gap: 6px; }
+
+.split-chip {
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    max-width: 160px;
+    padding: 5px 10px;
+    border: 1px solid var(--line);
+    border-radius: 999px;
+    background: var(--paper);
+    font: inherit;
+    font-size: 11.5px;
+    font-weight: 650;
+    color: var(--ink-4);
+    cursor: pointer;
+    transition: all .16s ease;
+}
+
+.split-chip span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.split-chip i { font-size: 10px; }
+
+/* Out is the quiet state and in is the loud one, because "everyone" is the
+   default and the eye should be drawn to whoever is missing. */
+.split-chip.is-in {
+    border-color: transparent;
+    background: var(--jade-soft);
+    color: var(--jade);
+}
+
+.split-chip:hover { border-color: var(--jade); color: var(--jade); }
+.split-chip.is-in:hover { background: var(--jade); color: var(--on-jade); }
+
+/* The toggle sits at the end of the same row. */
+.split-share .split-portion-toggle { margin-left: auto; }
+
+/* A real button, not a text link — it is a control that changes how the dish
+   divides, and it has to look like one sitting under a row of fields. Cut
+   from the same cloth as .ghost-btn, one notch smaller. */
+.split-portion-toggle {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 6px 11px;
+    border: 1px solid var(--line);
+    border-radius: 9px;
+    background: var(--paper);
+    font: inherit;
+    font-size: 12px;
+    font-weight: 650;
+    color: var(--ink-2);
+    cursor: pointer;
+    white-space: nowrap;
+    transition: all .16s ease;
+}
+
+.split-portion-toggle:hover {
+    border-color: var(--jade);
+    background: var(--jade-soft);
+    color: var(--jade);
+}
+
+.split-portion-toggle i { font-size: 11px; }
+
+/* Inside the open box the button turns off a mode rather than turning one on,
+   so it steps back: no fill until it is reached for. */
+.split-portion-toggle.is-on {
+    padding: 5px 10px;
+    border-color: transparent;
+    background: transparent;
+    color: var(--ink-3);
+}
+
+.split-portion-toggle.is-on:hover { border-color: var(--line); background: var(--paper); color: var(--ink-2); }
+
+.split-portion-head {
+    margin: 11px 0 8px;
+    font-size: 12px;
+    color: var(--ink-3);
+}
+
+.split-portion-head b { color: var(--ink); font-variant-numeric: tabular-nums; }
+
+.split-portion-row {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+}
+
+.split-portion {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    flex: 0 1 118px;
+    min-width: 0;
+}
+
+.split-portion > span {
+    font-size: 11px;
+    font-weight: 650;
+    color: var(--ink-3);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.split-unit {
+    width: 100%;
+    padding: 8px 10px;
+    font-size: 13px;
+    font-weight: 650;
+    text-align: center;
+    font-variant-numeric: tabular-nums;
+}
+
+.split-portion-foot[hidden] { display: none; }
+
+.split-portion-foot {
+    margin: 9px 0 0;
+    font-size: 12px;
+    line-height: 1.5;
+    color: var(--ink-2);
+    font-variant-numeric: tabular-nums;
+}
+
 .split-add {
     display: inline-flex;
     align-items: center;
@@ -786,6 +1024,168 @@ input[type="date"]:hover::-webkit-calendar-picker-indicator { opacity: .85; }
 .split-add:hover { text-decoration: underline; }
 
 .split-empty { margin: 0; font-size: 13px; line-height: 1.55; color: var(--ink-3); }
+
+/* The reader's own row. Marked rather than merely first, because every
+   figure the module reports — your share, what you are owed, the expense it
+   can write — is measured from it. */
+.split-person.is-me { border-color: var(--jade-line); background: var(--jade-soft); }
+
+.split-you {
+    flex: 0 0 auto;
+    padding: 3px 8px;
+    border-radius: 6px;
+    background: var(--jade);
+    font-size: 10px;
+    font-weight: 700;
+    letter-spacing: .04em;
+    text-transform: uppercase;
+    color: var(--on-jade);
+}
+
+.split-person-sum { margin-left: auto; }
+
+/* --------------------------------------------------------------------------
+   A fold
+   --------------------------------------------------------------------------
+   Service charge, SST and a discount are four fields that most bills leave at
+   zero, and they were taking the top third of the card to say so. Folded away
+   they cost one line, and that line reports what is inside it — so a bill
+   *with* charges never hides them behind a shut door.
+   -------------------------------------------------------------------------- */
+.fold {
+    margin-top: 18px;
+    border: 1px solid var(--line);
+    border-radius: 14px;
+    background: var(--paper-2);
+}
+
+.fold > summary {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    padding: 13px 16px;
+    font-size: 13px;
+    font-weight: 650;
+    color: var(--ink-2);
+    cursor: pointer;
+    list-style: none;
+}
+
+.fold > summary::-webkit-details-marker { display: none; }
+.fold > summary:hover { color: var(--ink); }
+.fold > summary i { margin-right: 8px; color: var(--ink-3); }
+
+.fold > summary b {
+    font-size: 12px;
+    font-weight: 700;
+    color: var(--ink-3);
+    font-variant-numeric: tabular-nums;
+}
+
+.fold[open] > summary { border-bottom: 1px solid var(--line); }
+.fold[open] > summary b { color: var(--jade); }
+.fold > .field-grid { padding: 18px 16px 4px; }
+.fold > .check-line { padding: 0 16px 16px; }
+
+/* --------------------------------------------------------------------------
+   Settle up
+   --------------------------------------------------------------------------
+   One row per debt, and a button that only ever means "the money moved". The
+   sentence is written from the reader's side of it, because "John owes you"
+   and "you owe John" are the same arithmetic and completely different news.
+   -------------------------------------------------------------------------- */
+.split-settle-lead {
+    margin: 0 0 16px;
+    font-size: 14px;
+    line-height: 1.6;
+    color: var(--ink-2);
+}
+
+.settle-row {
+    display: flex;
+    align-items: center;
+    gap: 14px;
+    padding: 12px 15px;
+    border: 1px solid var(--line-2);
+    border-radius: 12px;
+    background: var(--paper-2);
+}
+
+.settle-row + .settle-row { margin-top: 8px; }
+.settle-row .settle-who { flex: 1 1 auto; min-width: 0; font-size: 13.5px; color: var(--ink-2); }
+.settle-row .settle-who strong { font-weight: 700; color: var(--ink); }
+
+.settle-row > b {
+    flex: 0 0 auto;
+    font-size: 15px;
+    font-weight: 750;
+    color: var(--ink);
+    font-variant-numeric: tabular-nums;
+}
+
+/* A settled debt stays on the list — the record is that it was paid, not that
+   it never existed — but it stops competing for attention. */
+.settle-row.is-done { background: transparent; border-style: dashed; }
+.settle-row.is-done .settle-who,
+.settle-row.is-done > b { color: var(--ink-3); }
+
+.settle-done {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 12px;
+    font-weight: 700;
+    color: var(--jade);
+}
+
+.ghost-btn.is-small { padding: 5px 10px; font-size: 11.5px; border-radius: 8px; }
+
+/* --------------------------------------------------------------------------
+   The link into the ledger
+   -------------------------------------------------------------------------- */
+.split-expense {
+    margin-top: 18px;
+    padding: 16px;
+    border: 1px dashed var(--jade-line);
+    border-radius: 14px;
+    background: var(--jade-soft);
+}
+
+.split-expense-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    font-size: 13.5px;
+    font-weight: 650;
+    color: var(--ink-2);
+}
+
+.split-expense-head i { margin-right: 8px; color: var(--jade); }
+.split-expense-head b { font-weight: 750; color: var(--jade-ink); }
+
+.split-expense-state {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    font-size: 12.5px;
+    font-weight: 650;
+    color: var(--jade-ink);
+}
+
+.split-expense-body {
+    display: flex;
+    align-items: flex-end;
+    gap: 12px;
+    margin-top: 14px;
+}
+
+.split-expense-body .field { flex: 1 1 180px; }
+.split-expense-body .primary-btn { flex: 0 0 auto; }
+.split-expense .hint { margin-top: 12px; }
+.split-expense-body[hidden] { display: none; }
+
 
 /* --------------------------------------------------------------------------
    Empty state
@@ -918,11 +1318,6 @@ input[type="date"]:hover::-webkit-calendar-picker-indicator { opacity: .85; }
     text-align: right;
     font-variant-numeric: tabular-nums;
 }
-
-/* A category the user invented: name and bucket become editable, so the share
-   column gives up its place to the picker and the remove button. */
-.bgt-row.is-custom { grid-template-columns: 38px minmax(0, 1fr) 124px 140px 30px; }
-.bgt-row.is-custom .bgt-label { padding: 9px 12px; font-size: 13.5px; font-weight: 650; }
 
 .bgt-bucket {
     padding: 9px 11px;
@@ -1151,6 +1546,7 @@ input[type="date"]:hover::-webkit-calendar-picker-indicator { opacity: .85; }
 .field-pair { display: flex; gap: 8px; align-items: stretch; }
 .field-pair > :first-child { flex: 1 1 auto; min-width: 0; }
 .field-pair > select { flex: 0 0 auto; width: 122px; }
+.field-pair > .seg.is-compact { flex: 0 0 auto; align-self: stretch; }
 
 /* Codes read better as codes: fixed width, and not shouted at in lower case. */
 /* ==========================================================================
@@ -1389,6 +1785,40 @@ input[type="date"]:hover::-webkit-calendar-picker-indicator { opacity: .85; }
     vertical-align: 1px;
 }
 
+/* Three states, three readings: who already paid, what is closed, what is
+   still out. The open one is a figure rather than a word — the amount is the
+   thing anyone is actually chasing. */
+.data-table .tag.is-paid { background: var(--track-2); color: var(--ink-2); }
+.data-table .tag.is-done { background: var(--jade); color: var(--on-jade); }
+
+/* The instalment tracker's statuses, in the same alphabet. A tag that only
+   ever came in jade could not tell "running" from "cancelled". */
+.data-table .tag.is-jade  { background: var(--jade-soft);  color: var(--jade); }
+.data-table .tag.is-amber { background: var(--amber-soft); color: var(--amber); }
+.data-table .tag.is-red   { background: var(--red-soft);   color: var(--red); }
+.data-table .tag.is-slate { background: var(--track-2);    color: var(--ink-3); }
+
+.data-table .tag.is-open {
+    margin-left: 0;
+    background: var(--amber-soft);
+    color: var(--amber);
+    text-transform: none;
+    letter-spacing: 0;
+    font-size: 11.5px;
+    font-variant-numeric: tabular-nums;
+}
+
+.data-table .row-actions { white-space: nowrap; text-align: right; }
+.data-table .row-actions .split-x { width: 28px; height: 28px; }
+.data-table .row-actions .split-x:hover { background: var(--jade-soft); color: var(--jade); }
+.data-table .row-actions .split-x:last-child:hover { background: var(--red-soft); color: var(--red); }
+
+/* The bill currently open in the form above, so the two are visibly the
+   same thing rather than a form and a list that happen to agree. */
+.data-table tr.is-current td { background: var(--jade-soft); }
+.data-table tr.is-current td:first-child { padding-left: 12px; border-top-left-radius: 10px; border-bottom-left-radius: 10px; }
+.data-table tr.is-current td:last-child  { border-top-right-radius: 10px; border-bottom-right-radius: 10px; }
+
 .data-table .total-row td {
     padding-top: 16px;
     border-top: 1.5px solid var(--line-strong);
@@ -1575,6 +2005,17 @@ input[type="date"]:hover::-webkit-calendar-picker-indicator { opacity: .85; }
 
 .primary-btn:hover { background: var(--jade-2); box-shadow: 0 4px 14px rgba(14, 124, 102, .34); }
 .primary-btn:active { transform: translateY(1px); }
+
+/* Nothing to save is not a failure, so the button goes quiet rather than
+   vanishing — the pill beside the heading already says why. */
+.primary-btn:disabled,
+.primary-btn:disabled:hover {
+    background: var(--track-2);
+    color: var(--ink-4);
+    box-shadow: none;
+    cursor: default;
+    transform: none;
+}
 .primary-btn i { font-size: 12px; }
 
 /* A day's heading: the date on the left, what it cost on the right. */
@@ -1767,6 +2208,539 @@ input[type="date"]:hover::-webkit-calendar-picker-indicator { opacity: .85; }
 }
 
 /* ==========================================================================
+   Financial Planner
+   ==========================================================================
+   A budget row now carries six things — the icon, an editable name over a
+   used-versus-budget bar, the bucket, the figure, the percentage badge and a
+   delete. The bar measures *used against budget*, not share of income: the
+   question this module answers is "am I over the line", and a share-of-income
+   bar cannot say. */
+
+.bgt-row.is-plan { grid-template-columns: 38px minmax(0, 1fr) 118px 128px 52px 30px; }
+
+.bgt-name {
+    width: 100%;
+    padding: 7px 10px;
+    font-size: 13.5px;
+    font-weight: 650;
+}
+
+.bgt-row.is-plan .bgt-meta small { margin-top: 3px; padding-left: 2px; }
+
+.bgt-bar i.is-jade  { background: var(--jade); }
+.bgt-bar i.is-amber { background: var(--amber); }
+.bgt-bar i.is-red   { background: var(--red); }
+
+.bgt-pct.is-jade  { color: var(--jade); }
+.bgt-pct.is-amber { color: var(--amber); }
+.bgt-pct.is-red   { color: var(--red); }
+
+/* The same three tones inside the report table, so a row reads the same in
+   both places. */
+.data-table .is-jade  { color: var(--jade); }
+.data-table .is-amber { color: var(--amber); }
+.data-table .is-red   { color: var(--red); font-weight: 700; }
+
+/* Draft · Saved · Unsaved changes. The pill is the answer to "did that stick",
+   so it sits with the heading rather than beside the button. */
+.plan-state {
+    padding: 4px 10px;
+    border-radius: 999px;
+    font-size: 11.5px;
+    font-weight: 700;
+    letter-spacing: .01em;
+    background: var(--track-2);
+    color: var(--ink-2);
+    white-space: nowrap;
+}
+
+.plan-state[data-state="saved"] { background: var(--jade-soft);  color: var(--jade); }
+.plan-state[data-state="dirty"] { background: var(--amber-soft); color: var(--amber); }
+
+/* A custom range has no next range, so the stepper stands down rather than
+   pretending its arrows do something. */
+.month-nav.is-off button { opacity: .3; pointer-events: none; }
+
+/* ==========================================================================
+   Savings goals
+   ==========================================================================
+   One card each: what it is, how far along, the two monthly figures that
+   decide whether it lands, and the log the "current" figure is made of. */
+
+.goal-list { display: grid; gap: 12px; }
+
+.goal {
+    padding: 14px 16px 12px;
+    border: 1px solid var(--line-2);
+    border-radius: 16px;
+    background: var(--paper-2);
+    transition: border-color .16s ease;
+}
+
+.goal:focus-within { border-color: var(--line-strong); }
+
+.goal-head {
+    display: grid;
+    grid-template-columns: 38px minmax(0, 1fr) auto 30px;
+    gap: 12px;
+    align-items: center;
+}
+
+.goal-icon {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 38px;
+    height: 38px;
+    border-radius: 12px;
+    background: var(--indigo-soft);
+    color: var(--indigo);
+    font-size: 16px;
+}
+
+.goal-id { min-width: 0; }
+
+.goal-name {
+    width: 100%;
+    padding: 7px 10px;
+    font-size: 14px;
+    font-weight: 700;
+}
+
+.goal-id small {
+    display: block;
+    margin-top: 3px;
+    padding-left: 2px;
+    font-size: 11.5px;
+    color: var(--ink-3);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.goal-pct {
+    font-size: 15px;
+    font-weight: 800;
+    color: var(--ink-3);
+    font-variant-numeric: tabular-nums;
+}
+
+.goal-pct.is-done  { color: var(--jade); }
+.goal-pct.is-short { color: var(--red); }
+
+.goal-bar {
+    height: 7px;
+    margin: 12px 0 2px;
+    border-radius: 999px;
+    background: var(--track);
+    overflow: hidden;
+}
+
+.goal-bar i {
+    display: block;
+    height: 100%;
+    border-radius: 999px;
+    background: var(--indigo);
+    transition: width .22s ease;
+}
+
+.goal-bar i.is-done  { background: var(--jade); }
+.goal-bar i.is-short { background: var(--amber); }
+
+.goal-fields {
+    display: grid;
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+    gap: 10px;
+    margin-top: 14px;
+}
+
+.goal-field { display: block; min-width: 0; }
+
+.goal-field > span {
+    display: block;
+    margin-bottom: 5px;
+    font-size: 11.5px;
+    font-weight: 650;
+    color: var(--ink-3);
+}
+
+.goal-field select,
+.goal-field input[type="date"] { width: 100%; padding: 8px 10px; font-size: 12.5px; }
+
+/* The derived half. These are read, never typed, so they are set flat against
+   the card rather than dressed as inputs. */
+.goal-facts {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    margin-top: 14px;
+}
+
+.goal-fact {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    flex: 1 1 140px;
+    padding: 8px 11px;
+    border-radius: 11px;
+    background: var(--track);
+}
+
+.goal-fact small { font-size: 11px; color: var(--ink-3); }
+.goal-fact b { font-size: 13px; font-weight: 700; color: var(--ink); font-variant-numeric: tabular-nums; }
+
+.goal-fact.is-done  { background: var(--jade-soft); }
+.goal-fact.is-done b { color: var(--jade); }
+.goal-fact.is-short { background: var(--red-soft); }
+.goal-fact.is-short b { color: var(--red); }
+
+.goal-warn {
+    flex: 1 1 100%;
+    margin: 2px 0 0;
+    font-size: 12px;
+    line-height: 1.5;
+    color: var(--red);
+}
+
+.goal-log { margin-top: 12px; }
+.goal-log > summary { font-size: 12.5px; }
+.goal-log-body { padding-top: 10px; }
+.goal-log-list { display: grid; gap: 6px; }
+
+.goal-log-empty { margin: 0 0 4px; font-size: 12.5px; color: var(--ink-3); }
+
+.goal-c {
+    display: grid;
+    grid-template-columns: 96px minmax(0, 1fr) auto 28px;
+    gap: 10px;
+    align-items: center;
+    padding: 7px 10px;
+    border-radius: 10px;
+    background: var(--track);
+    font-size: 12.5px;
+}
+
+.goal-c-when { color: var(--ink-3); font-variant-numeric: tabular-nums; }
+.goal-c-what { color: var(--ink-2); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.goal-c-what i { color: var(--ink-4); }
+.goal-c b { font-variant-numeric: tabular-nums; }
+.goal-c .split-x { width: 26px; height: 26px; }
+
+.goal-add {
+    display: grid;
+    grid-template-columns: 140px 128px minmax(0, 1fr) auto;
+    gap: 8px;
+    align-items: center;
+    margin-top: 10px;
+}
+
+.goal-add input[type="date"],
+.goal-add input[type="text"] { padding: 8px 10px; font-size: 12.5px; }
+
+@media (max-width: 900px) {
+    .bgt-row.is-plan { grid-template-columns: 38px minmax(0, 1fr) 110px 30px; }
+    .bgt-row.is-plan .bgt-bucket { grid-column: 2 / 3; }
+    .bgt-row.is-plan .bgt-pct { display: none; }
+    .goal-fields { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+    .goal-add { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); }
+    .goal-add button { grid-column: 1 / -1; justify-content: center; }
+}
+
+@media (max-width: 560px) {
+    .bgt-row.is-plan { grid-template-columns: 38px minmax(0, 1fr) 30px; }
+    .bgt-row.is-plan .bgt-bucket,
+    .bgt-row.is-plan .money-input { grid-column: 2 / 3; }
+    .goal-fields { grid-template-columns: minmax(0, 1fr); }
+    .goal-c { grid-template-columns: minmax(0, 1fr) auto 28px; }
+    .goal-c-when { grid-column: 1 / -1; }
+}
+
+/* ==========================================================================
+   Instalment tracker
+   ==========================================================================
+   One row per month, and the row is the control: the tick is the button, the
+   amount is editable in place, and the flag on the right says where that month
+   stands. A schedule read down the page is the thing the module exists for, so
+   nothing about it hides behind a click. */
+
+.commit-progress {
+    height: 8px;
+    margin-bottom: 12px;
+    border-radius: 999px;
+    background: var(--track);
+    overflow: hidden;
+}
+
+.commit-progress i {
+    display: block;
+    height: 100%;
+    border-radius: 999px;
+    background: var(--jade);
+    transition: width .22s ease;
+}
+
+.commit-progress i.is-red  { background: var(--red); }
+.commit-progress i.is-done { background: var(--jade); }
+
+.commit-countdown {
+    margin: 0 0 16px;
+    font-size: 13px;
+    line-height: 1.6;
+    color: var(--ink-2);
+}
+
+.commit-months { display: grid; gap: 7px; }
+
+.commit-month {
+    display: grid;
+    grid-template-columns: 34px minmax(0, 1fr) 122px 104px;
+    gap: 12px;
+    align-items: center;
+    padding: 8px 12px;
+    border: 1px solid var(--line-2);
+    border-radius: 12px;
+    background: var(--paper-2);
+    transition: border-color .16s ease, background .16s ease;
+}
+
+.commit-month:focus-within { border-color: var(--line-strong); }
+
+/* Paid months step back. The eye should land on what is still owed, not on
+   the eight rows that are already settled. */
+.commit-month.is-paid { background: var(--jade-soft); border-color: transparent; }
+.commit-month.is-red  { border-color: var(--red-line); background: var(--red-soft); }
+.commit-month.is-amber { border-color: var(--amber); }
+
+.commit-tick {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 34px;
+    height: 34px;
+    padding: 0;
+    border: 0;
+    border-radius: 10px;
+    background: var(--track);
+    font-size: 16px;
+    color: var(--ink-4);
+    cursor: pointer;
+    transition: all .16s ease;
+}
+
+.commit-tick:hover { background: var(--jade-soft); color: var(--jade); }
+.commit-month.is-paid .commit-tick { background: var(--jade); color: var(--on-jade); }
+.commit-month.is-red .commit-tick  { color: var(--red); }
+.commit-month.is-amber .commit-tick { color: var(--amber); }
+
+.commit-month-id { min-width: 0; }
+
+.commit-month-id b {
+    display: block;
+    font-size: 13.5px;
+    font-weight: 650;
+    color: var(--ink);
+}
+
+.commit-month-id small {
+    display: block;
+    margin-top: 2px;
+    font-size: 11.5px;
+    color: var(--ink-3);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.commit-amount { text-align: right; font-variant-numeric: tabular-nums; }
+
+/* A figure typed over the schedule is a fact, not a default — it says so. */
+.money-input-sm.is-set { border-color: var(--indigo); }
+.money-input-sm.is-set .affix { color: var(--indigo); }
+
+.commit-flag {
+    font-size: 11.5px;
+    font-weight: 650;
+    text-align: right;
+    color: var(--ink-3);
+    font-variant-numeric: tabular-nums;
+}
+
+.commit-flag.is-jade  { color: var(--jade); }
+.commit-flag.is-amber { color: var(--amber); }
+.commit-flag.is-red   { color: var(--red); }
+
+@media (max-width: 720px) {
+    .commit-month { grid-template-columns: 34px minmax(0, 1fr) 104px; }
+    .commit-flag { grid-column: 2 / -1; text-align: left; }
+}
+
+@media (max-width: 460px) {
+    .commit-month { grid-template-columns: 34px minmax(0, 1fr); }
+    .commit-month .money-input-sm { grid-column: 2 / 3; }
+}
+
+/* ==========================================================================
+   Savings & investment
+   ==========================================================================
+   A figure that can be stated two ways needs the switch beside it, not above
+   it — the unit and the number are one answer. Same shape the Bill Splitter's
+   discount uses, which is where the reader has already met it. */
+
+.unit-input { display: flex; align-items: stretch; gap: 8px; }
+.unit-input .money-input { flex: 1 1 auto; min-width: 0; }
+.unit-input .seg.is-compact { flex: 0 0 auto; }
+
+/* Twelve months, income behind and saved in front — one bar, not two, because
+   the question is what share of it stayed. */
+.grow-trend { display: grid; gap: 6px; }
+
+.grow-month {
+    display: grid;
+    grid-template-columns: 38px minmax(0, 1fr) 100px 46px;
+    gap: 12px;
+    align-items: center;
+    font-size: 12.5px;
+}
+
+.grow-month-id { font-weight: 650; color: var(--ink-3); }
+
+.grow-bar {
+    position: relative;
+    height: 16px;
+    border-radius: 6px;
+    background: var(--track);
+    overflow: hidden;
+}
+
+.grow-bar i {
+    position: absolute;
+    top: 0;
+    left: 0;
+    height: 100%;
+    border-radius: 6px;
+    transition: width .22s ease;
+}
+
+.grow-bar-income { background: var(--track-2); }
+.grow-bar-saved  { background: var(--indigo); }
+
+.grow-month b { text-align: right; font-variant-numeric: tabular-nums; color: var(--ink); }
+
+.grow-month-rate {
+    text-align: right;
+    font-weight: 650;
+    color: var(--ink-3);
+    font-variant-numeric: tabular-nums;
+}
+
+/* The contribution row: date, unit, figure, the base it is a share of, a note
+   and the button. The base only appears in per-cent mode. */
+.grow-add {
+    display: grid;
+    grid-template-columns: 138px auto 118px 132px minmax(0, 1fr) auto;
+    gap: 8px;
+    align-items: center;
+}
+
+.grow-add[hidden] { display: none; }
+.grow-add input[type="date"],
+.grow-add input[type="text"] { padding: 8px 10px; font-size: 12.5px; }
+.grow-add .money-input-sm[hidden] { display: none; }
+.grow-add .money-input-sm .affix { white-space: nowrap; }
+
+@media (max-width: 900px) {
+    .grow-add { grid-template-columns: 138px auto minmax(0, 1fr); }
+    .grow-add input[type="text"] { grid-column: 1 / -1; }
+    .grow-add button { grid-column: 1 / -1; justify-content: center; }
+}
+
+@media (max-width: 560px) {
+    .grow-month { grid-template-columns: 34px minmax(0, 1fr) 46px; }
+    .grow-month b { grid-column: 2 / 3; text-align: left; font-size: 11.5px; }
+    .grow-add { grid-template-columns: minmax(0, 1fr); }
+    .unit-input { flex-wrap: wrap; }
+}
+
+/* The auto-push switch. Off is the resting state and looks like it — this is
+   a thing you turn on deliberately, not a button you press by accident. */
+.drive-auto.is-on {
+    border-color: transparent;
+    background: var(--jade);
+    color: var(--on-jade);
+}
+
+.drive-auto.is-on:hover { background: var(--jade-2); }
+.drive-auto.is-on i { animation: none; }
+
+/* ==========================================================================
+   The store alert
+   ==========================================================================
+   Full width, under the topbar, and hidden until there is something to say.
+   A warning about losing records has to be impossible to scroll past, which
+   is the one place in this app that earns a full-bleed strip. */
+
+.store-alert {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 12px 22px;
+    font-size: 13px;
+    line-height: 1.5;
+    border-bottom: 1px solid var(--red-line);
+    background: var(--red-soft);
+    color: var(--red-ink);
+}
+
+.store-alert[hidden] { display: none; }
+.store-alert i { flex: 0 0 auto; font-size: 15px; color: var(--red); }
+.store-alert span { flex: 1 1 auto; }
+
+.store-alert[data-tone="amber"] {
+    border-bottom-color: var(--amber);
+    background: var(--amber-soft);
+    color: var(--ink);
+}
+
+.store-alert[data-tone="amber"] i { color: var(--amber); }
+
+.store-alert button {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    flex: 0 0 auto;
+    padding: 7px 13px;
+    border: 1px solid currentColor;
+    border-radius: 10px;
+    background: transparent;
+    font: inherit;
+    font-size: 12.5px;
+    font-weight: 650;
+    color: inherit;
+    cursor: pointer;
+    white-space: nowrap;
+    transition: background .16s ease;
+}
+
+.store-alert button:hover { background: rgba(255, 255, 255, .35); }
+
+/* An offer, not a warning — so it wears the app's own colour rather than a
+   danger one. Nothing has gone wrong; there is simply something to fetch. */
+.store-alert[data-tone="jade"] {
+    border-bottom-color: var(--jade);
+    background: var(--jade-soft);
+    color: var(--ink);
+}
+
+.store-alert[data-tone="jade"] i { color: var(--jade); }
+.store-alert button.is-quiet { border-color: transparent; opacity: .75; }
+.store-alert button.is-quiet:hover { opacity: 1; }
+
+@media (max-width: 720px) {
+    .store-alert { flex-wrap: wrap; padding: 11px 16px; font-size: 12.5px; }
+    .store-alert button { width: 100%; justify-content: center; }
+}
+
+/* ==========================================================================
    Responsive
    ========================================================================== */
 /* Two panes stop paying for themselves once each column is under about 600px:
@@ -1812,7 +2786,25 @@ input[type="date"]:hover::-webkit-calendar-picker-indicator { opacity: .85; }
 
     /* The last column has to stay as wide as the button itself, or it clips. */
     .split-item { grid-template-columns: minmax(0, 1fr) 104px 30px; gap: 6px; }
+
+    /* Four fields do not fit across a phone. The dish name takes its own
+       line and the two figures sit under it, which is also the order they
+       are read in. */
+    .split-item.has-off { grid-template-columns: minmax(0, 1fr) 104px 30px; }
+    .split-item.has-off .split-item-label { grid-column: 1 / -1; }
     .split-person-sum { font-size: 14px; }
+
+    /* Name and "you" on the first line, the figure and the total under it —
+       four controls do not fit across a phone, and squeezing them makes the
+       name field too narrow to read the name in. */
+    .split-person-head { flex-wrap: wrap; gap: 8px 10px; }
+
+    .settle-row { flex-wrap: wrap; gap: 8px 12px; }
+    .settle-row .settle-who { flex: 1 1 100%; }
+    .settle-row > b { margin-right: auto; }
+
+    .split-expense-body { flex-direction: column; align-items: stretch; }
+    .split-expense-head { flex-direction: column; align-items: flex-start; gap: 8px; }
 
     /* The share column is the first thing to go — the same figure is in the
        "Every ringgit" table two cards down. */
@@ -1927,8 +2919,17 @@ input[type="date"]:hover::-webkit-calendar-picker-indicator { opacity: .85; }
 
 @media (max-width: 700px) {
     .topbar { padding: 10px 14px; }
-    .nav-toggle span { display: none; }
     .nav-toggle { padding: 8px 10px; }
+
+    .nav-toggle span {
+        position: absolute;
+        width: 1px;
+        height: 1px;
+        margin: -1px;
+        overflow: hidden;
+        clip-path: inset(50%);
+        white-space: nowrap;
+    }
 }
 
 @media (max-width: 460px) {

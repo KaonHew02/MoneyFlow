@@ -35,10 +35,16 @@
                 <i class="bi bi-people-fill"></i><span>Bill Split</span>
             </button>
             <button type="button" data-module="budget">
-                <i class="bi bi-pie-chart-fill"></i><span>Budget Planner</span>
+                <i class="bi bi-pie-chart-fill"></i><span>Planner</span>
+            </button>
+            <button type="button" data-module="commit">
+                <i class="bi bi-calendar2-check-fill"></i><span>Instalments</span>
             </button>
             <button type="button" data-module="card">
                 <i class="bi bi-credit-card-2-front-fill"></i><span>Card Payoff</span>
+            </button>
+            <button type="button" data-module="grow">
+                <i class="bi bi-graph-up-arrow"></i><span>Grow</span>
             </button>
         </nav>
     </aside>
@@ -53,11 +59,19 @@
 
         <div class="backup">
             <span class="drive-stamp" id="driveStamp"></span>
+            <button type="button" class="drive-auto" id="driveAuto" aria-pressed="false"
+                    title="Off &mdash; nothing goes to Drive unless you press &quot;To Drive&quot;.">
+                <i class="bi bi-arrow-repeat"></i><span>Auto</span>
+            </button>
             <button type="button" id="drivePush" title="Save a copy into your Google Drive folder">
                 <i class="bi bi-cloud-arrow-up"></i><span>To Drive</span>
             </button>
             <button type="button" id="drivePull" title="Replace what is here with the copy in Drive">
                 <i class="bi bi-cloud-arrow-down"></i><span>From Drive</span>
+            </button>
+            <button type="button" id="driveArchive"
+                    title="Write a dated copy into Drive that nothing will ever overwrite. Take one before deleting old records.">
+                <i class="bi bi-archive"></i><span>Archive</span>
             </button>
             <span class="backup-sep"></span>
             <button type="button" id="backupExport" title="Save everything to a file you keep">
@@ -69,6 +83,31 @@
             <input type="file" id="backupFile" accept=".json,application/json" hidden>
         </div>
     </header>
+
+    <!-- Hidden until it matters: a write that did not land, or a store filling
+         up. Both are silent otherwise, and both lose records. -->
+    <!-- Shown once, on a browser holding nothing, when Drive is set up. The
+         cleared-browser recovery path: the person who most needs to press
+         "From Drive" is the one least likely to know it exists. -->
+    <div class="store-alert" id="driveOffer" data-tone="jade" hidden>
+        <i class="bi bi-cloud-arrow-down-fill"></i>
+        <span>There are no records in this browser. If you have a copy in your Google Drive folder, bring it down &mdash; it will tell you what is in both before replacing anything.</span>
+        <button type="button" id="driveOfferPull">
+            <i class="bi bi-cloud-arrow-down"></i> Check Drive
+        </button>
+        <button type="button" class="is-quiet" id="driveOfferNo">Not now</button>
+    </div>
+
+    <div class="store-alert" id="storeAlert" data-tone="red" hidden>
+        <i class="bi bi-exclamation-triangle-fill"></i>
+        <span id="storeAlertText"></span>
+        <button type="button" id="storeAlertArchive" hidden>
+            <i class="bi bi-archive"></i> Archive to Drive
+        </button>
+        <button type="button" id="storeAlertExport">
+            <i class="bi bi-download"></i> Export now
+        </button>
+    </div>
 
     <main class="main">
 
@@ -524,7 +563,7 @@
                         </div>
                     </div>
                     <div class="cat-list" id="categoryList"></div>
-                    <p class="hint" id="categoryListHint">Rename anything here and the new name follows into every entry already filed under it &mdash; the record points at the category, not at its name. The bucket is what keeps the 50/30/20 reading honest, and it is the same list the Budget Planner plans against. Anything with entries behind it cannot be deleted; retire it with the eye instead and its history stays intact.</p>
+                    <p class="hint" id="categoryListHint">Rename anything here and the new name follows into every entry already filed under it &mdash; the record points at the category, not at its name. The bucket is what keeps the 50/30/20 reading honest, and it is the same list the Planner plans against, and you can add, rename or retire a category from either place. Anything with entries behind it cannot be deleted; retire it with the eye instead and its history stays intact.</p>
                     <p class="hint" id="categoryMethodHint" hidden>A payment method is an account: choosing one is what moves its balance, which is why cash and a credit card cannot be the same entry. Opening balance, kind and currency live on the Accounts card below &mdash; this is for naming them.</p>
                 </section>
 
@@ -575,6 +614,11 @@
 
         <!-- ==============================================================
              BILL SPLIT
+             ==============================================================
+             A bill here is a record, not a sum. It is saved, it keeps the
+             people who were at the table, and it keeps track of who has
+             actually paid back — which is the part a calculator cannot do,
+             and the only part anyone is still thinking about a week later.
              ============================================================== -->
         <section class="module" id="module-split" hidden>
 
@@ -586,14 +630,14 @@
                 </div>
                 <div class="hero-stats">
                     <div class="hero-stat">
-                        <span class="hero-stat-label">Food ordered</span>
-                        <span class="hero-stat-value" id="splitFood">RM 0.00</span>
-                        <span class="hero-stat-foot" id="splitFoodFoot">&mdash;</span>
+                        <span class="hero-stat-label">Your share</span>
+                        <span class="hero-stat-value" id="splitYourShare">RM 0.00</span>
+                        <span class="hero-stat-foot" id="splitYourShareFoot">&mdash;</span>
                     </div>
                     <div class="hero-stat">
-                        <span class="hero-stat-label">Charges added</span>
-                        <span class="hero-stat-value" id="splitChargeAdded">RM 0.00</span>
-                        <span class="hero-stat-foot" id="splitChargeFoot">&mdash;</span>
+                        <span class="hero-stat-label" id="splitOwedLabel">Owed to you</span>
+                        <span class="hero-stat-value" id="splitOwed">RM 0.00</span>
+                        <span class="hero-stat-foot" id="splitOwedFoot">&mdash;</span>
                     </div>
                 </div>
             </div>
@@ -602,56 +646,126 @@
 
                 <form class="card" id="split-form" autocomplete="off" onsubmit="return false;">
                     <div class="card-head">
-                        <h2>The bill</h2>
-                        <button type="button" class="ghost-btn" data-reset="split">
-                            <i class="bi bi-arrow-counterclockwise"></i> Reset
-                        </button>
+                        <h2 id="splitFormTitle">New bill</h2>
+                        <div class="card-actions">
+                            <span class="card-note" id="splitDirtyNote" hidden>Unsaved</span>
+                            <button type="button" class="ghost-btn" data-reset="split">
+                                <i class="bi bi-arrow-counterclockwise"></i> Start over
+                            </button>
+                        </div>
                     </div>
 
                     <div class="field-grid">
-                        <div class="field is-wide">
-                            <label>What the place charges</label>
-                            <div class="seg" id="splitCharges" data-value="none">
-                                <button type="button" data-val="none" class="is-on">None</button>
-                                <button type="button" data-val="tax">6%</button>
-                                <button type="button" data-val="svc">10%</button>
-                                <button type="button" data-val="both">10% + 6%</button>
-                            </div>
-                            <p class="hint">Service charge goes on first, then SST is charged on top of it &mdash; same order as the receipt.</p>
+                        <div class="field">
+                            <label for="splitTitle">What for</label>
+                            <input type="text" id="splitTitle" placeholder="Dinner, Langkawi trip, groceries&hellip;">
                         </div>
 
                         <div class="field">
-                            <label for="splitService">Service charge</label>
-                            <div class="money-input is-suffix">
-                                <span class="affix">%</span>
-                                <input type="number" id="splitService" min="0" max="100" step="1" value="0" inputmode="decimal">
-                            </div>
+                            <label for="splitDate">When</label>
+                            <input type="date" id="splitDate">
                         </div>
 
                         <div class="field">
-                            <label for="splitTax">SST</label>
-                            <div class="money-input is-suffix">
-                                <span class="affix">%</span>
-                                <input type="number" id="splitTax" min="0" max="100" step="1" value="0" inputmode="decimal">
-                            </div>
+                            <label for="splitPaidBy">Paid by</label>
+                            <select id="splitPaidBy"></select>
                         </div>
 
-                        <div class="field">
-                            <label for="splitDiscount">Discount <span class="per">off the food</span></label>
-                            <div class="money-input">
-                                <span class="affix">RM</span>
-                                <input type="number" id="splitDiscount" min="0" step="1" placeholder="0" inputmode="decimal">
-                            </div>
-                        </div>
+
                     </div>
+
+                    <!-- ----------------------------------------------------
+                         What the place adds on top. These scale every share by
+                         the same factor, so they never change who owes more
+                         than whom — but they are still part of what each
+                         person hands over.
+                         ---------------------------------------------------- -->
+                    <details class="fold" id="splitChargeFold">
+                        <summary>
+                            <span><i class="bi bi-receipt"></i> Service charge, SST &amp; discount</span>
+                            <b id="splitChargeSummary">None</b>
+                        </summary>
+
+                        <div class="field-grid">
+                            <div class="field is-wide">
+                                <label>What the place charges</label>
+                                <div class="seg" id="splitCharges" data-value="none">
+                                    <button type="button" data-val="none" class="is-on">None</button>
+                                    <button type="button" data-val="tax">6%</button>
+                                    <button type="button" data-val="svc">10%</button>
+                                    <button type="button" data-val="both">10% + 6%</button>
+                                </div>
+                                <p class="hint">Service charge goes on first, then SST is charged on top of it &mdash; same order as the receipt.</p>
+                            </div>
+
+                            <div class="field">
+                                <label for="splitService">Service charge</label>
+                                <div class="money-input is-suffix">
+                                    <span class="affix">%</span>
+                                    <input type="number" id="splitService" min="0" max="100" step="1" value="0" inputmode="decimal">
+                                </div>
+                            </div>
+
+                            <div class="field">
+                                <label for="splitTax">SST</label>
+                                <div class="money-input is-suffix">
+                                    <span class="affix">%</span>
+                                    <input type="number" id="splitTax" min="0" max="100" step="1" value="0" inputmode="decimal">
+                                </div>
+                            </div>
+
+                            <div class="field">
+                                <label for="splitDiscount">Discount <span class="per">off the whole bill</span></label>
+                                <div class="field-pair">
+                                    <div class="money-input is-suffix" id="splitDiscountBox">
+                                        <span class="affix" id="splitDiscountAffix">%</span>
+                                        <input type="number" id="splitDiscount" min="0" step="1" placeholder="0" inputmode="decimal">
+                                    </div>
+                                    <!-- Most discounts are a percentage; a voucher is
+                                         the exception, so ringgit is the second button
+                                         rather than the only one. -->
+                                    <div class="seg is-compact" id="splitDiscountUnit" data-value="pct">
+                                        <button type="button" data-val="pct" class="is-on">%</button>
+                                        <button type="button" data-val="rm">RM</button>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- A promo on one dish is a different thing from a
+                             promo on the bill: it belongs to whoever ate that
+                             dish, so it comes off before anyone's share is
+                             worked out. Off by default — most bills have none,
+                             and a column per dish is a lot to carry for a rare
+                             case. -->
+                        <div class="check-row" id="splitItemOffLine">
+                            <label class="check-line">
+                                <input type="checkbox" id="splitItemOff">
+                                <span>Some dishes have their own discount</span>
+                            </label>
+                            <div class="seg is-compact" id="splitItemOffUnit" data-value="pct" hidden>
+                                <button type="button" data-val="pct" class="is-on">%</button>
+                                <button type="button" data-val="rm">RM</button>
+                            </div>
+                        </div>
+
+                        <label class="check-line">
+                            <input type="checkbox" id="splitRound">
+                            <span>Round the total to 5 sen (paying cash)</span>
+                        </label>
+                    </details>
 
                     <div class="tally">
                         <div class="tally-cell">
-                            <span>Food ordered</span>
+                            <span>Ordered</span>
                             <b id="splitTallyFood">RM 0.00</b>
                         </div>
+                        <div class="tally-cell" id="splitRowItemOff" hidden>
+                            <span>Dish discounts</span>
+                            <b id="splitTallyItemOff" class="is-minus">RM 0.00</b>
+                        </div>
                         <div class="tally-cell" id="splitRowDiscount" hidden>
-                            <span>Discount</span>
+                            <span id="splitTallyDiscountLabel">Discount</span>
                             <b id="splitTallyDiscount" class="is-minus">RM 0.00</b>
                         </div>
                         <div class="tally-cell" id="splitRowService" hidden>
@@ -668,36 +782,45 @@
                         </div>
                     </div>
 
-                    <label class="check-line">
-                        <input type="checkbox" id="splitRound">
-                        <span>Round the total to 5 sen (paying cash)</span>
-                    </label>
+                    <div class="form-foot">
+                        <button type="button" class="primary-btn" id="splitSave">
+                            <i class="bi bi-check-lg"></i> Save bill
+                        </button>
+                        <button type="button" class="ghost-btn" id="splitCancel" hidden>
+                            <i class="bi bi-x-lg"></i> Cancel
+                        </button>
+                        <span class="hint" id="splitSaveHint">
+                            <i class="bi bi-hdd"></i> Saved on this device only &mdash; nothing leaves your browser.
+                        </span>
+                    </div>
                 </form>
 
                 <section class="card">
                     <div class="card-head">
-                        <h2>Who ate what</h2>
+                        <h2>Who was there</h2>
                         <div class="card-actions">
-                            <span class="card-note">Ordered <b id="splitOwnTotal">RM 0.00</b></span>
+                            <span class="card-note" id="splitPeopleNote">&mdash;</span>
                             <button type="button" class="ghost-btn" id="splitAddPerson">
                                 <i class="bi bi-person-plus"></i> Add person
                             </button>
                         </div>
                     </div>
                     <div id="splitPeople"></div>
+                    <p class="hint" id="splitPeopleHint">One line per thing somebody had, under the person who had it &mdash; a name on the line is optional, so a single figure for someone who does not want it itemised works too. Anything the table shared goes in the card below. The first person is you: your share, what you are owed and the expense entry are all measured from that row.</p>
                 </section>
 
-                <section class="card">
+                <section class="card" id="splitSharedCard">
                     <div class="card-head">
                         <h2>Shared by everyone</h2>
                         <div class="card-actions">
-                            <span class="card-note">Split evenly <b id="splitSharedTotal">RM 0.00</b></span>
+                            <span class="card-note">Shared <b id="splitSharedTotal">RM 0.00</b></span>
                             <button type="button" class="ghost-btn" id="splitAddShared">
                                 <i class="bi bi-plus-lg"></i> Add item
                             </button>
                         </div>
                     </div>
                     <div id="splitShared"></div>
+                    <p class="hint">Everyone, equally, by default. Tap a name off <b>Shared by</b> when somebody did not have that dish &mdash; four at the table but only two on the plate &mdash; and press <b>Split by portions</b> when they did not have the same amount of it: three of the five pao, two of the three beers. The price follows.</p>
                 </section>
 
                 <section class="card">
@@ -715,7 +838,7 @@
                             <thead>
                                 <tr>
                                     <th>Person</th>
-                                    <th>Ate</th>
+                                    <th>Had</th>
                                     <th>Share of charges</th>
                                     <th>Pays</th>
                                 </tr>
@@ -725,16 +848,94 @@
                     </div>
                 </section>
 
+                <!-- ------------------------------------------------------
+                     The half a calculator never reaches: the money has been
+                     worked out, and now it has to actually move.
+                     ------------------------------------------------------ -->
+                <section class="card" id="splitSettleCard">
+                    <div class="card-head">
+                        <h2>Settle up</h2>
+                        <span class="card-note" id="splitSettleNote">&mdash;</span>
+                    </div>
+                    <p class="split-settle-lead" id="splitSettleLead">&mdash;</p>
+                    <div id="splitSettleList"></div>
+
+                    <!-- Only the reader's own share is ever an expense. The
+                         rest was lent for the length of a dinner. -->
+                    <div class="split-expense" id="splitExpense">
+                        <div class="split-expense-head">
+                            <span><i class="bi bi-journal-plus"></i> Add <b id="splitExpAmount">RM 0.00</b> to your expenses</span>
+                            <span class="split-expense-state" id="splitExpState" hidden></span>
+                        </div>
+                        <div class="split-expense-body" id="splitExpBody">
+                            <div class="field">
+                                <label for="splitExpCategory">Category</label>
+                                <select id="splitExpCategory"></select>
+                            </div>
+                            <div class="field">
+                                <label for="splitExpAccount">Paid from</label>
+                                <select id="splitExpAccount"></select>
+                            </div>
+                            <button type="button" class="primary-btn" id="splitExpAdd">
+                                <i class="bi bi-plus-lg"></i> Record my share
+                            </button>
+                        </div>
+                        <p class="hint" id="splitExpHint">Your share only. The rest of the bill was never your money, so recording all of it would tell every total in the app that you spent far more than you did.</p>
+                    </div>
+                </section>
+
+                <section class="card is-wide">
+                    <div class="card-head">
+                        <h2>Saved bills</h2>
+                        <div class="card-actions">
+                            <div class="seg is-compact" id="splitFilter" data-value="open">
+                                <button type="button" data-val="open" class="is-on">Open</button>
+                                <button type="button" data-val="settled">Settled</button>
+                                <button type="button" data-val="all">All</button>
+                            </div>
+                            <span class="card-note" id="splitBillsNote">&mdash;</span>
+                        </div>
+                    </div>
+                    <div class="table-wrap" id="splitBillsWrap">
+                        <table class="data-table">
+                            <thead>
+                                <tr>
+                                    <th>When</th>
+                                    <th>Bill</th>
+                                    <th>Total</th>
+                                    <th>Your share</th>
+                                    <th>Settled</th>
+                                    <th></th>
+                                </tr>
+                            </thead>
+                            <tbody id="splitBills"></tbody>
+                        </table>
+                    </div>
+                </section>
+
             </div>
         </section>
 
         <!-- ==============================================================
-             BUDGET PLANNER
+             FINANCIAL PLANNER
+             ==============================================================
+             Where the money should go, decided before it goes anywhere. The
+             budget is a record per period, not a setting: the form is a draft
+             until "Save plan" makes it history.
              ============================================================== -->
         <section class="module" id="module-budget" hidden>
 
             <div class="hero">
                 <div class="hero-main">
+                    <div class="month-nav" id="budgetNav">
+                        <button type="button" id="budgetPrev" aria-label="Previous period">
+                            <i class="bi bi-chevron-left"></i>
+                        </button>
+                        <span id="budgetPeriodLabel">&mdash;</span>
+                        <button type="button" id="budgetNext" aria-label="Next period">
+                            <i class="bi bi-chevron-right"></i>
+                        </button>
+                    </div>
                     <span class="hero-label">Left over</span>
                     <span class="hero-value" id="budgetLeft">RM 0.00</span>
                     <span class="hero-foot" id="budgetLeftFoot">&mdash;</span>
@@ -757,15 +958,52 @@
 
                 <form class="card" id="budget-form" autocomplete="off" onsubmit="return false;">
                     <div class="card-head">
-                        <h2>Your month</h2>
-                        <button type="button" class="ghost-btn" data-reset="budget">
-                            <i class="bi bi-arrow-counterclockwise"></i> Reset
-                        </button>
+                        <h2>Your plan</h2>
+                        <div class="card-actions">
+                            <span class="plan-state" id="budgetPlanState" data-state="draft">Draft</span>
+                            <button type="button" class="ghost-btn" data-reset="budget">
+                                <i class="bi bi-arrow-counterclockwise"></i> Reset
+                            </button>
+                        </div>
                     </div>
 
                     <div class="field-grid">
                         <div class="field">
-                            <label for="budgetIncome">Monthly income <span class="per">take-home</span></label>
+                            <label>Budget period</label>
+                            <div class="seg" id="budgetPeriod" data-value="month">
+                                <button type="button" data-val="week">Weekly</button>
+                                <button type="button" data-val="month" class="is-on">Monthly</button>
+                                <button type="button" data-val="year">Yearly</button>
+                                <button type="button" data-val="custom">Custom</button>
+                            </div>
+                            <p class="hint" id="budgetPeriodHint">Every period keeps its own budget &mdash; step through them with the arrows above.</p>
+                        </div>
+
+                        <div class="field">
+                            <label>Measure against</label>
+                            <div class="seg" id="budgetRule" data-value="502030">
+                                <button type="button" data-val="502030" class="is-on">50/30/20</button>
+                                <button type="button" data-val="702010">70/20/10</button>
+                                <button type="button" data-val="off">Off</button>
+                            </div>
+                            <p class="hint">A yardstick, not a category. 50/30/20 means half your income on needs, 30% on wants, 20% put away; 70/20/10 is the gentler version, for when rent already eats the month. &ldquo;Off&rdquo; plans without one.</p>
+                        </div>
+                    </div>
+
+                    <div class="field-grid" id="budgetCustomDates" hidden>
+                        <div class="field">
+                            <label for="budgetFrom">From</label>
+                            <input type="date" id="budgetFrom">
+                        </div>
+                        <div class="field">
+                            <label for="budgetTo">To</label>
+                            <input type="date" id="budgetTo">
+                        </div>
+                    </div>
+
+                    <div class="field-grid">
+                        <div class="field">
+                            <label for="budgetIncome">Income for this period <span class="per">take-home</span></label>
                             <div class="money-input">
                                 <span class="affix">RM</span>
                                 <input type="number" id="budgetIncome" min="0" step="100" placeholder="0" inputmode="decimal">
@@ -779,16 +1017,6 @@
                                 <span class="affix">RM</span>
                                 <input type="number" id="budgetExtra" min="0" step="50" placeholder="0" inputmode="decimal">
                             </div>
-                        </div>
-
-                        <div class="field">
-                            <label>Plan against</label>
-                            <div class="seg" id="budgetRule" data-value="502030">
-                                <button type="button" data-val="502030" class="is-on">50/30/20</button>
-                                <button type="button" data-val="702010">70/20/10</button>
-                                <button type="button" data-val="off">Off</button>
-                            </div>
-                            <p class="hint">70/20/10 is the gentler version, for when rent already eats the month.</p>
                         </div>
                     </div>
 
@@ -811,28 +1039,39 @@
                         </div>
                     </div>
 
-                    <p class="hint" id="budgetStore">
-                        <i class="bi bi-hdd"></i> Saved on this device only &mdash; nothing leaves your browser.
-                    </p>
+                    <div class="form-foot">
+                        <button type="button" class="primary-btn" id="budgetSave">
+                            <i class="bi bi-check-lg"></i> Save plan
+                        </button>
+                        <button type="button" class="ghost-btn" id="budgetRevert" hidden>
+                            <i class="bi bi-arrow-counterclockwise"></i> Discard changes
+                        </button>
+                        <button type="button" class="ghost-btn" id="budgetCopyPrev" hidden>
+                            <i class="bi bi-files"></i> Copy last saved plan
+                        </button>
+                        <span class="hint" id="budgetSaveHint">
+                            <i class="bi bi-hdd"></i> Saved on this device only &mdash; nothing leaves your browser.
+                        </span>
+                    </div>
                 </form>
 
                 <section class="card">
                     <div class="card-head">
                         <h2>Your budget</h2>
                         <div class="card-actions">
-                            <span class="card-note">Planned <b id="budgetPlanned">RM 0.00</b></span>
+                            <span class="card-note" id="budgetRowsNote">&mdash;</span>
                             <button type="button" class="ghost-btn" id="budgetAddCat">
                                 <i class="bi bi-plus-lg"></i> Add category
                             </button>
                         </div>
                     </div>
                     <div class="bgt-list" id="budgetRows"></div>
-                    <div class="bgt-list" id="budgetCustom"></div>
+                    <p class="hint" id="budgetRowsHint">Type what each category gets for the period. <b>Used</b> is summed live from your Expenses for these dates &mdash; nothing is typed twice. Renaming or deleting here changes the one category list the whole app shares, so a rename follows into every entry already filed under it, and anything with history is retired rather than deleted.</p>
                 </section>
 
                 <section class="card">
                     <div class="card-head">
-                        <h2>Where the month goes</h2>
+                        <h2>Where the period goes</h2>
                         <div class="card-actions">
                             <span class="card-note" id="budgetDistNote">&mdash;</span>
                             <button type="button" class="ghost-btn" id="budgetCopy">
@@ -866,7 +1105,7 @@
 
                 <section class="card">
                     <div class="card-head">
-                        <h2>Every ringgit</h2>
+                        <h2>Budget vs actual</h2>
                         <span class="card-note" id="budgetTableNote">&mdash;</span>
                     </div>
                     <div class="table-wrap">
@@ -875,11 +1114,286 @@
                                 <tr>
                                     <th>Category</th>
                                     <th>Bucket</th>
-                                    <th>Per month</th>
-                                    <th>Of income</th>
+                                    <th>Budget</th>
+                                    <th>Used</th>
+                                    <th>Remaining</th>
+                                    <th>Used %</th>
                                 </tr>
                             </thead>
                             <tbody id="budgetBody"></tbody>
+                        </table>
+                    </div>
+                </section>
+
+                <!-- ------------------------------------------------------
+                     A target, what is in it, and the arithmetic that says
+                     whether you will get there. Current is never typed: it
+                     is the sum of the contributions.
+                     ------------------------------------------------------ -->
+                <section class="card" id="goalCard">
+                    <div class="card-head">
+                        <h2>Savings goals</h2>
+                        <div class="card-actions">
+                            <span class="card-note" id="goalNote">&mdash;</span>
+                            <button type="button" class="ghost-btn" id="goalAdd">
+                                <i class="bi bi-plus-lg"></i> Add goal
+                            </button>
+                        </div>
+                    </div>
+                    <div class="goal-list" id="goalList"></div>
+                </section>
+
+                <section class="card">
+                    <div class="card-head">
+                        <h2>Saved plans</h2>
+                        <span class="card-note" id="budgetPlansNote">&mdash;</span>
+                    </div>
+                    <div class="table-wrap">
+                        <table class="data-table">
+                            <thead>
+                                <tr>
+                                    <th>Period</th>
+                                    <th>Dates</th>
+                                    <th>Income</th>
+                                    <th>Budget</th>
+                                    <th>Used</th>
+                                    <th></th>
+                                </tr>
+                            </thead>
+                            <tbody id="budgetPlans"></tbody>
+                        </table>
+                    </div>
+                </section>
+
+            </div>
+        </section>
+
+        <!-- ==============================================================
+             INSTALMENT TRACKER
+             ==============================================================
+             Money already promised — outgoing, and the money owed back to
+             you. One plan, one record; the schedule cannot be ticked until
+             the plan is saved.
+             ============================================================== -->
+        <section class="module" id="module-commit" hidden>
+
+            <div class="hero">
+                <div class="hero-main">
+                    <span class="hero-label">Still to pay</span>
+                    <span class="hero-value" id="commitOwing">RM 0.00</span>
+                    <span class="hero-foot" id="commitOwingFoot">&mdash;</span>
+                </div>
+                <div class="hero-stats">
+                    <div class="hero-stat">
+                        <span class="hero-stat-label">Next payment</span>
+                        <span class="hero-stat-value" id="commitNext">&mdash;</span>
+                        <span class="hero-stat-foot" id="commitNextFoot">&mdash;</span>
+                    </div>
+                    <div class="hero-stat">
+                        <span class="hero-stat-label">Owed to you</span>
+                        <span class="hero-stat-value" id="commitOwed">RM 0.00</span>
+                        <span class="hero-stat-foot" id="commitOwedFoot">&mdash;</span>
+                    </div>
+                </div>
+            </div>
+
+            <div class="stack">
+
+                <form class="card" id="commit-form" autocomplete="off" onsubmit="return false;">
+                    <div class="card-head">
+                        <h2 id="commitFormTitle">New plan</h2>
+                        <div class="card-actions">
+                            <span class="plan-state" id="commitState" data-state="draft">Draft</span>
+                            <button type="button" class="ghost-btn" data-reset="commit">
+                                <i class="bi bi-arrow-counterclockwise"></i> Reset
+                            </button>
+                        </div>
+                    </div>
+
+                    <div class="field-grid">
+                        <div class="field">
+                            <label>Which way does the money go?</label>
+                            <div class="seg" id="commitDirection" data-value="out">
+                                <button type="button" data-val="out" class="is-on">I pay it</button>
+                                <button type="button" data-val="in">Owed to me</button>
+                            </div>
+                            <p class="hint" id="commitDirectionHint">A phone, a car, SPayLater &mdash; anything you are paying off over months.</p>
+                        </div>
+
+                        <div class="field">
+                            <label for="commitName">What is it</label>
+                            <input type="text" id="commitName" placeholder="iPhone 15" maxlength="60">
+                        </div>
+
+                        <div class="field">
+                            <label for="commitWho" id="commitWhoLabel">Who to <span class="per">optional</span></label>
+                            <input type="text" id="commitWho" placeholder="SPayLater" maxlength="60">
+                        </div>
+                    </div>
+
+                    <div class="field-grid">
+                        <div class="field">
+                            <label>You know the&hellip;</label>
+                            <div class="seg" id="commitBasis" data-value="total">
+                                <button type="button" data-val="total" class="is-on">Total</button>
+                                <button type="button" data-val="monthly">Monthly</button>
+                            </div>
+                            <p class="hint">Type whichever you have &mdash; the other works itself out.</p>
+                        </div>
+
+                        <div class="field" id="commitTotalField">
+                            <label for="commitTotal">Total amount</label>
+                            <div class="money-input">
+                                <span class="affix">RM</span>
+                                <input type="number" id="commitTotal" min="0" step="10" placeholder="0.00" inputmode="decimal">
+                            </div>
+                        </div>
+
+                        <div class="field" id="commitMonthlyField" hidden>
+                            <label for="commitMonthly">Monthly payment</label>
+                            <div class="money-input">
+                                <span class="affix">RM</span>
+                                <input type="number" id="commitMonthly" min="0" step="10" placeholder="0.00" inputmode="decimal">
+                            </div>
+                        </div>
+
+                        <div class="field">
+                            <label for="commitMonths">Over how many months</label>
+                            <input type="number" id="commitMonths" min="1" max="600" step="1" placeholder="24" inputmode="numeric">
+                        </div>
+
+                        <div class="field">
+                            <label for="commitFirstDue">First payment due</label>
+                            <input type="date" id="commitFirstDue">
+                            <p class="hint" id="commitDueHint">Every later payment falls on the same day of the month &mdash; the 20th, if that is your SPayLater date.</p>
+                        </div>
+
+                        <div class="field">
+                            <label for="commitPaidCount" id="commitPaidCountLabel">How many months paid</label>
+                            <input type="number" id="commitPaidCount" min="0" step="1" placeholder="0" inputmode="numeric">
+                            <p class="hint" id="commitPaidCountHint">Picking this up part-way through? Put in how many months are already settled and the schedule ticks them for you.</p>
+                        </div>
+                    </div>
+
+                    <div class="tally">
+                        <div class="tally-cell">
+                            <span>Total</span>
+                            <b id="commitTallyTotal">RM 0.00</b>
+                        </div>
+                        <div class="tally-cell">
+                            <span>Each month</span>
+                            <b id="commitTallyMonthly">RM 0.00</b>
+                        </div>
+                        <div class="tally-cell">
+                            <span>Paid so far</span>
+                            <b id="commitTallyPaid">RM 0.00</b>
+                        </div>
+                        <div class="tally-cell is-total">
+                            <span id="commitTallyLeftLabel">Still to pay</span>
+                            <b id="commitTallyLeft">RM 0.00</b>
+                        </div>
+                    </div>
+
+                    <details class="fold" id="commitLinkFold">
+                        <summary>
+                            <span><i class="bi bi-journal-plus"></i> Record payments in Expenses</span>
+                            <b id="commitLinkSummary">Off</b>
+                        </summary>
+                        <div class="field-grid">
+                            <div class="field is-wide">
+                                <label class="check-line">
+                                    <input type="checkbox" id="commitAuto">
+                                    <span id="commitAutoLabel">Write an entry every time I tick a payment</span>
+                                </label>
+                                <p class="hint" id="commitLinkHint">Ticking a payment files it under Expenses; un-ticking takes it back out. Nothing is written twice.</p>
+                            </div>
+                            <div class="field">
+                                <label for="commitAccount">Account</label>
+                                <select id="commitAccount"></select>
+                            </div>
+                            <div class="field">
+                                <label for="commitCategory">Category</label>
+                                <select id="commitCategory"></select>
+                            </div>
+                        </div>
+                    </details>
+
+                    <div class="form-foot">
+                        <button type="button" class="primary-btn" id="commitSave">
+                            <i class="bi bi-check-lg"></i> Save plan
+                        </button>
+                        <button type="button" class="ghost-btn" id="commitNew" hidden>
+                            <i class="bi bi-plus-lg"></i> New plan
+                        </button>
+                        <button type="button" class="ghost-btn" id="commitCancelPlan" hidden>
+                            <i class="bi bi-slash-circle"></i> Cancel this plan
+                        </button>
+                        <span class="hint" id="commitSaveHint">
+                            <i class="bi bi-hdd"></i> Saved on this device only &mdash; nothing leaves your browser.
+                        </span>
+                    </div>
+                </form>
+
+                <section class="card" id="commitScheduleCard">
+                    <div class="card-head">
+                        <h2>Payment schedule</h2>
+                        <div class="card-actions">
+                            <span class="card-note" id="commitScheduleNote">&mdash;</span>
+                            <button type="button" class="ghost-btn" id="commitCopy">
+                                <i class="bi bi-clipboard"></i> Copy summary
+                            </button>
+                        </div>
+                    </div>
+                    <div class="commit-progress"><i id="commitProgressBar" style="width:0%"></i></div>
+                    <p class="commit-countdown" id="commitCountdown">&mdash;</p>
+                    <div class="commit-months" id="commitMonthsList"></div>
+                </section>
+
+                <section class="card">
+                    <div class="card-head">
+                        <h2>Coming up</h2>
+                        <span class="card-note" id="commitUpcomingNote">&mdash;</span>
+                    </div>
+                    <div class="table-wrap">
+                        <table class="data-table">
+                            <thead>
+                                <tr>
+                                    <th>Due</th>
+                                    <th>Plan</th>
+                                    <th>Which</th>
+                                    <th>Amount</th>
+                                    <th>Status</th>
+                                </tr>
+                            </thead>
+                            <tbody id="commitUpcoming"></tbody>
+                        </table>
+                    </div>
+                </section>
+
+                <section class="card">
+                    <div class="card-head">
+                        <h2>Your commitments</h2>
+                        <div class="card-actions">
+                            <div class="seg is-compact" id="commitFilter" data-value="live">
+                                <button type="button" data-val="live" class="is-on">Live</button>
+                                <button type="button" data-val="all">All</button>
+                            </div>
+                            <span class="card-note" id="commitPlansNote">&mdash;</span>
+                        </div>
+                    </div>
+                    <div class="table-wrap">
+                        <table class="data-table">
+                            <thead>
+                                <tr>
+                                    <th>Plan</th>
+                                    <th>Status</th>
+                                    <th>Progress</th>
+                                    <th>Each month</th>
+                                    <th>Left</th>
+                                    <th></th>
+                                </tr>
+                            </thead>
+                            <tbody id="commitPlans"></tbody>
                         </table>
                     </div>
                 </section>
@@ -889,6 +1403,10 @@
 
         <!-- ==============================================================
              CREDIT CARD PAYOFF
+             ==============================================================
+             A book of cards, one budget across all of them, and the two
+             strategies people mean by "which one first". The engine is
+             simulated month by month — a card has no term.
              ============================================================== -->
         <section class="module" id="module-card" hidden>
 
@@ -900,170 +1418,611 @@
                 </div>
                 <div class="hero-stats">
                     <div class="hero-stat">
+                        <span class="hero-stat-label">Total owed</span>
+                        <span class="hero-stat-value" id="cardTotalDebt">RM 0.00</span>
+                        <span class="hero-stat-foot" id="cardTotalDebtFoot">&mdash;</span>
+                    </div>
+                    <div class="hero-stat">
                         <span class="hero-stat-label">Total interest</span>
                         <span class="hero-stat-value" id="cardInterest">RM 0.00</span>
                         <span class="hero-stat-foot" id="cardInterestFoot">&mdash;</span>
-                    </div>
-                    <div class="hero-stat">
-                        <span class="hero-stat-label">Total paid</span>
-                        <span class="hero-stat-value" id="cardPaid">RM 0.00</span>
-                        <span class="hero-stat-foot" id="cardPaidFoot">&mdash;</span>
                     </div>
                 </div>
             </div>
 
             <div class="stack">
 
-                <form class="card" id="card-form" autocomplete="off" onsubmit="return false;">
+                <!-- ------------------------------------------------------
+                     The plan comes first: it is the answer, and the cards
+                     below it are the working.
+                     ------------------------------------------------------ -->
+                <section class="card" id="cardPlanCard">
                     <div class="card-head">
-                        <h2>The card</h2>
-                        <button type="button" class="ghost-btn" data-reset="card">
-                            <i class="bi bi-arrow-counterclockwise"></i> Reset
-                        </button>
-                    </div>
-
-                    <div class="field-grid">
-                        <div class="field is-wide">
-                            <label>What the card charges</label>
-                            <div class="seg" id="cardTier" data-value="18">
-                                <button type="button" data-val="15">15%</button>
-                                <button type="button" data-val="17">17%</button>
-                                <button type="button" data-val="18" class="is-on">18%</button>
-                            </div>
-                            <p class="hint">Malaysian cards charge 15&ndash;18% a year under Bank Negara's tiered framework &mdash; the better your payment record, the lower the tier. 18% is the cap, and the usual starting point.</p>
-                        </div>
-
-                        <div class="field">
-                            <label for="cardBalance">Outstanding balance</label>
-                            <div class="money-input">
-                                <span class="affix">RM</span>
-                                <input type="number" id="cardBalance" min="0" step="100" placeholder="0" inputmode="decimal">
-                            </div>
-                        </div>
-
-                        <div class="field">
-                            <label for="cardRate">Interest rate <span class="per">a year</span></label>
-                            <div class="money-input is-suffix">
-                                <span class="affix">%</span>
-                                <input type="number" id="cardRate" min="0" max="60" step="0.5" value="18" inputmode="decimal">
-                            </div>
-                        </div>
-
-                        <div class="field">
-                            <label for="cardPayment">Monthly payment</label>
-                            <div class="money-input">
-                                <span class="affix">RM</span>
-                                <input type="number" id="cardPayment" min="0" step="50" placeholder="0" inputmode="decimal">
-                            </div>
-                            <p class="hint" id="cardPaymentHint">Leave it empty to see what paying only the minimum does.</p>
-                        </div>
-
-                        <div class="field">
-                            <label for="cardMinPct">Minimum payment <span class="per">of the balance</span></label>
-                            <div class="money-input is-suffix">
-                                <span class="affix">%</span>
-                                <input type="number" id="cardMinPct" min="0" max="100" step="1" value="5" inputmode="decimal">
-                            </div>
-                        </div>
-
-                        <div class="field">
-                            <label for="cardMinFloor">&hellip; or at least</label>
-                            <div class="money-input">
-                                <span class="affix">RM</span>
-                                <input type="number" id="cardMinFloor" min="0" step="5" value="25" inputmode="decimal">
-                            </div>
-                            <p class="hint">Banks here ask for 5% of the balance, subject to a small floor.</p>
-                        </div>
-                    </div>
-
-                    <div class="tally">
-                        <div class="tally-cell">
-                            <span>Balance</span>
-                            <b id="cardTallyBalance">RM 0.00</b>
-                        </div>
-                        <div class="tally-cell">
-                            <span>Interest this month</span>
-                            <b id="cardTallyInterest" class="is-minus">RM 0.00</b>
-                        </div>
-                        <div class="tally-cell">
-                            <span>Minimum due</span>
-                            <b id="cardTallyMin">RM 0.00</b>
-                        </div>
-                        <div class="tally-cell is-total">
-                            <span>You pay</span>
-                            <b id="cardTallyPay">RM 0.00</b>
-                        </div>
-                    </div>
-
-                    <p class="hint" id="cardStore">
-                        <i class="bi bi-hdd"></i> Saved on this device only &mdash; nothing leaves your browser.
-                    </p>
-                </form>
-
-                <section class="card">
-                    <div class="card-head">
-                        <h2>What the debt costs</h2>
+                        <h2>Your payoff plan</h2>
                         <div class="card-actions">
-                            <span class="card-note" id="cardDistNote">&mdash;</span>
+                            <span class="card-note" id="cardPlanNote">&mdash;</span>
                             <button type="button" class="ghost-btn" id="cardCopy">
                                 <i class="bi bi-clipboard"></i> Copy summary
                             </button>
                         </div>
                     </div>
+
+                    <div class="field-grid">
+                        <div class="field">
+                            <label for="cardPayment">Monthly payment <span class="per">across every card</span></label>
+                            <div class="money-input">
+                                <span class="affix">RM</span>
+                                <input type="number" id="cardPayment" min="0" step="50" placeholder="0" inputmode="decimal">
+                            </div>
+                            <p class="hint" id="cardPaymentHint">Leave it empty to see what paying only the minimums costs.</p>
+                        </div>
+
+                        <div class="field">
+                            <label>Which card gets the extra</label>
+                            <div class="seg" id="cardStrategy" data-value="avalanche">
+                                <button type="button" data-val="avalanche" class="is-on">Avalanche</button>
+                                <button type="button" data-val="snowball">Snowball</button>
+                            </div>
+                            <p class="hint" id="cardStrategyHint">Avalanche pays the highest rate first &mdash; always the cheapest. Snowball pays the smallest balance first, so a card clears sooner.</p>
+                        </div>
+                    </div>
+
                     <div class="notice" id="cardNotice" hidden>
-                        <i class="bi bi-exclamation-triangle-fill"></i>
+                        <i class="bi bi-exclamation-triangle"></i>
                         <span id="cardNoticeText"></span>
                     </div>
+
+                    <div class="tally">
+                        <div class="tally-cell">
+                            <span>Cleared by</span>
+                            <b id="cardTallyDate">&mdash;</b>
+                        </div>
+                        <div class="tally-cell">
+                            <span>Interest</span>
+                            <b id="cardTallyInterest" class="is-minus">RM 0.00</b>
+                        </div>
+                        <div class="tally-cell">
+                            <span>Minimum due now</span>
+                            <b id="cardTallyMin">RM 0.00</b>
+                        </div>
+                        <div class="tally-cell is-total">
+                            <span>Paid altogether</span>
+                            <b id="cardTallyPaid">RM 0.00</b>
+                        </div>
+                    </div>
+
                     <div class="dist" id="cardDist"></div>
                     <div class="legend" id="cardLegend"></div>
                 </section>
 
-                <section class="card">
+                <section class="card" id="cardOrderCard">
                     <div class="card-head">
-                        <h2>Pay more, finish sooner</h2>
+                        <h2>The order they clear</h2>
+                        <span class="card-note" id="cardOrderNote">&mdash;</span>
+                    </div>
+                    <div class="table-wrap">
+                        <table class="data-table">
+                            <thead>
+                                <tr>
+                                    <th>#</th>
+                                    <th>Card</th>
+                                    <th>Owed now</th>
+                                    <th>Rate</th>
+                                    <th>Interest</th>
+                                    <th>Cleared</th>
+                                </tr>
+                            </thead>
+                            <tbody id="cardOrderBody"></tbody>
+                        </table>
+                    </div>
+                </section>
+
+                <section class="card" id="cardCompareCard">
+                    <div class="card-head">
+                        <h2>Snowball vs avalanche</h2>
                         <span class="card-note" id="cardCompareNote">&mdash;</span>
                     </div>
                     <div class="table-wrap">
                         <table class="data-table">
                             <thead>
                                 <tr>
-                                    <th>Plan</th>
-                                    <th>Per month</th>
-                                    <th>Cleared in</th>
-                                    <th>Interest</th>
-                                    <th>You save</th>
+                                    <th>Strategy</th>
+                                    <th>Debt free in</th>
+                                    <th>Total interest</th>
+                                    <th>Paid altogether</th>
+                                    <th>Against the minimum</th>
                                 </tr>
                             </thead>
                             <tbody id="cardCompareBody"></tbody>
                         </table>
                     </div>
+                    <p class="hint">Avalanche is never the more expensive of the two &mdash; it is arithmetic, not opinion. Snowball costs a little more and buys a card cleared sooner, which is worth having if that is what keeps you going.</p>
                 </section>
 
                 <section class="card">
                     <div class="card-head">
-                        <h2>The way down</h2>
+                        <h2>Your cards</h2>
                         <div class="card-actions">
-                            <span class="card-note" id="cardPlanNote">&mdash;</span>
-                            <div class="seg is-compact" id="cardView" data-value="year">
-                                <button type="button" data-val="year" class="is-on">By year</button>
-                                <button type="button" data-val="month">By month</button>
+                            <div class="seg is-compact" id="cardFilter" data-value="open">
+                                <button type="button" data-val="open" class="is-on">Open</button>
+                                <button type="button" data-val="all">All</button>
                             </div>
+                            <span class="card-note" id="cardListNote">&mdash;</span>
                         </div>
                     </div>
                     <div class="table-wrap">
                         <table class="data-table">
                             <thead>
                                 <tr>
-                                    <th id="cardPlanHead">Year</th>
+                                    <th>Card</th>
+                                    <th>Limit</th>
+                                    <th>Outstanding</th>
+                                    <th>Available</th>
+                                    <th>Used</th>
+                                    <th>Minimum</th>
+                                    <th>Due</th>
+                                    <th></th>
+                                </tr>
+                            </thead>
+                            <tbody id="cardListBody"></tbody>
+                        </table>
+                    </div>
+                </section>
+
+                <form class="card" id="card-form" autocomplete="off" onsubmit="return false;">
+                    <div class="card-head">
+                        <h2 id="cardFormTitle">New card</h2>
+                        <div class="card-actions">
+                            <span class="plan-state" id="cardState" data-state="draft">Draft</span>
+                            <button type="button" class="ghost-btn" data-reset="card">
+                                <i class="bi bi-arrow-counterclockwise"></i> Reset
+                            </button>
+                        </div>
+                    </div>
+
+                    <div class="field-grid">
+                        <div class="field">
+                            <label for="cardName">Card</label>
+                            <input type="text" id="cardName" placeholder="Maybank Visa" maxlength="60">
+                        </div>
+
+                        <div class="field">
+                            <label for="cardLimit">Credit limit</label>
+                            <div class="money-input">
+                                <span class="affix">RM</span>
+                                <input type="number" id="cardLimit" min="0" step="500" placeholder="0" inputmode="decimal">
+                            </div>
+                        </div>
+
+                        <div class="field">
+                            <label for="cardBalance">Outstanding now</label>
+                            <div class="money-input">
+                                <span class="affix">RM</span>
+                                <input type="number" id="cardBalance" min="0" step="100" placeholder="0" inputmode="decimal">
+                            </div>
+                            <p class="hint">Straight off the statement. Interest and new spending push it up, and this app cannot see either &mdash; so correct it here whenever the statement lands.</p>
+                        </div>
+
+                        <div class="field">
+                            <label for="cardDueDay">Payment due on the</label>
+                            <input type="number" id="cardDueDay" min="1" max="31" step="1" placeholder="15" inputmode="numeric">
+                            <p class="hint" id="cardDueHint">Day of the month.</p>
+                        </div>
+                    </div>
+
+                    <div class="field-grid">
+                        <div class="field">
+                            <label>Interest rate <span class="per">a year</span></label>
+                            <div class="seg" id="cardTier" data-value="18">
+                                <button type="button" data-val="15">15%</button>
+                                <button type="button" data-val="17">17%</button>
+                                <button type="button" data-val="18" class="is-on">18%</button>
+                                <button type="button" data-val="custom">Other</button>
+                            </div>
+                            <p class="hint">Bank Negara caps card interest at 18%, tiered down to 17% and 15% on a good payment record.</p>
+                        </div>
+
+                        <div class="field">
+                            <label for="cardRate">Rate</label>
+                            <div class="money-input">
+                                <span class="affix">%</span>
+                                <input type="number" id="cardRate" min="0" max="100" step="0.5" placeholder="18" inputmode="decimal">
+                            </div>
+                        </div>
+
+                        <div class="field">
+                            <label for="cardMinPct">Minimum payment</label>
+                            <div class="money-input">
+                                <span class="affix">%</span>
+                                <input type="number" id="cardMinPct" min="0" max="100" step="1" placeholder="5" inputmode="decimal">
+                            </div>
+                            <p class="hint">Of the statement &mdash; balance plus that month's interest.</p>
+                        </div>
+
+                        <div class="field">
+                            <label for="cardMinFloor">&hellip; but never below</label>
+                            <div class="money-input">
+                                <span class="affix">RM</span>
+                                <input type="number" id="cardMinFloor" min="0" step="5" placeholder="25" inputmode="decimal">
+                            </div>
+                        </div>
+                    </div>
+
+                    <details class="fold" id="cardLinkFold">
+                        <summary>
+                            <span><i class="bi bi-journal-plus"></i> Record payments in Expenses</span>
+                            <b id="cardLinkSummary">Off</b>
+                        </summary>
+                        <div class="field-grid">
+                            <div class="field is-wide">
+                                <label class="check-line">
+                                    <input type="checkbox" id="cardAuto">
+                                    <span>Write an expense every time I log a payment on this card</span>
+                                </label>
+                            </div>
+                            <div class="field">
+                                <label for="cardAccount">Account</label>
+                                <select id="cardAccount"></select>
+                            </div>
+                            <div class="field">
+                                <label for="cardCategory">Category</label>
+                                <select id="cardCategory"></select>
+                            </div>
+                        </div>
+                    </details>
+
+                    <div class="form-foot">
+                        <button type="button" class="primary-btn" id="cardSave">
+                            <i class="bi bi-check-lg"></i> Save card
+                        </button>
+                        <button type="button" class="ghost-btn" id="cardNew" hidden>
+                            <i class="bi bi-plus-lg"></i> New card
+                        </button>
+                        <button type="button" class="ghost-btn" id="cardClose" hidden>
+                            <i class="bi bi-archive"></i> Close this card
+                        </button>
+                        <span class="hint" id="cardSaveHint">
+                            <i class="bi bi-hdd"></i> Saved on this device only &mdash; nothing leaves your browser.
+                        </span>
+                    </div>
+                </form>
+
+                <section class="card" id="cardPaymentsCard">
+                    <div class="card-head">
+                        <h2 id="cardPaymentsTitle">Payments</h2>
+                        <span class="card-note" id="cardPaymentsNote">&mdash;</span>
+                    </div>
+
+                    <div class="commit-progress"><i id="cardProgressBar" style="width:0%"></i></div>
+                    <p class="commit-countdown" id="cardProgressText">&mdash;</p>
+
+                    <div class="goal-add" id="cardPayAdd">
+                        <input type="date" id="cardPayDate" aria-label="Date">
+                        <div class="money-input money-input-sm"><span class="affix">RM</span>
+                            <input type="number" id="cardPayAmount" min="0" step="50" placeholder="0" inputmode="decimal" aria-label="Amount"></div>
+                        <input type="text" id="cardPayNote" placeholder="Note (optional)" aria-label="Note" maxlength="60">
+                        <button type="button" class="ghost-btn" id="cardPayAddBtn">
+                            <i class="bi bi-plus-lg"></i> Log payment
+                        </button>
+                    </div>
+
+                    <div class="goal-log-list" id="cardPayList"></div>
+                </section>
+
+                <section class="card" id="cardScheduleCard">
+                    <div class="card-head">
+                        <h2>Month by month</h2>
+                        <div class="card-actions">
+                            <div class="seg is-compact" id="cardView" data-value="year">
+                                <button type="button" data-val="year" class="is-on">By year</button>
+                                <button type="button" data-val="month">By month</button>
+                            </div>
+                            <span class="card-note" id="cardScheduleNote">&mdash;</span>
+                        </div>
+                    </div>
+                    <div class="table-wrap">
+                        <table class="data-table">
+                            <thead>
+                                <tr>
+                                    <th id="cardScheduleHead">Year</th>
                                     <th>Paid</th>
                                     <th>Interest</th>
                                     <th>Off the balance</th>
-                                    <th>Still owing</th>
+                                    <th>Still owed</th>
                                 </tr>
                             </thead>
                             <tbody id="cardPlanBody"></tbody>
                         </table>
                     </div>
+                </section>
+
+            </div>
+        </section>
+
+        <!-- ==============================================================
+             SAVINGS & INVESTMENT
+             ==============================================================
+             Two questions: what proportion of what came in is still yours,
+             and what is everything you put away actually worth. The savings
+             half holds no records of its own — it reads the three that
+             already exist.
+             ============================================================== -->
+        <section class="module" id="module-grow" hidden>
+
+            <div class="hero">
+                <div class="hero-main">
+                    <span class="hero-label">Savings rate</span>
+                    <span class="hero-value" id="growRate">0.0%</span>
+                    <span class="hero-foot" id="growRateFoot">&mdash;</span>
+                </div>
+                <div class="hero-stats">
+                    <div class="hero-stat">
+                        <span class="hero-stat-label">Put away</span>
+                        <span class="hero-stat-value" id="growSaved">RM 0.00</span>
+                        <span class="hero-stat-foot" id="growSavedFoot">&mdash;</span>
+                    </div>
+                    <div class="hero-stat">
+                        <span class="hero-stat-label">Investments worth</span>
+                        <span class="hero-stat-value" id="growWorth">RM 0.00</span>
+                        <span class="hero-stat-foot" id="growWorthFoot">&mdash;</span>
+                    </div>
+                </div>
+            </div>
+
+            <div class="stack">
+
+                <section class="card" id="growRateCard">
+                    <div class="card-head">
+                        <h2>How much of it you kept</h2>
+                        <div class="card-actions">
+                            <div class="seg is-compact" id="growPeriod" data-value="month">
+                                <button type="button" data-val="month" class="is-on">This month</button>
+                                <button type="button" data-val="lastmonth">Last month</button>
+                                <button type="button" data-val="year">This year</button>
+                            </div>
+                            <button type="button" class="ghost-btn" id="growCopy">
+                                <i class="bi bi-clipboard"></i> Copy summary
+                            </button>
+                        </div>
+                    </div>
+
+                    <div class="tally">
+                        <div class="tally-cell">
+                            <span>Income</span>
+                            <b id="growTallyIncome">RM 0.00</b>
+                        </div>
+                        <div class="tally-cell">
+                            <span>Put away</span>
+                            <b id="growTallySaved">RM 0.00</b>
+                        </div>
+                        <div class="tally-cell">
+                            <span id="growTallyTargetLabel">Target</span>
+                            <b id="growTallyTarget">&mdash;</b>
+                        </div>
+                        <div class="tally-cell is-total">
+                            <span id="growTallyGapLabel">Against target</span>
+                            <b id="growTallyGap">&mdash;</b>
+                        </div>
+                    </div>
+
+                    <div class="field-grid">
+                        <div class="field">
+                            <label for="growTarget">How much do you want to put away</label>
+                            <div class="unit-input">
+                                <div class="seg is-compact" id="growTargetUnit" data-value="pct">
+                                    <button type="button" data-val="rm">RM</button>
+                                    <button type="button" data-val="pct" class="is-on">%</button>
+                                </div>
+                                <div class="money-input">
+                                    <span class="affix" id="growTargetAffix">%</span>
+                                    <input type="number" id="growTarget" min="0" step="1" placeholder="20" inputmode="decimal">
+                                </div>
+                            </div>
+                            <p class="hint" id="growTargetHint">Either works &mdash; a figure a month, or a share of whatever comes in.</p>
+                        </div>
+                    </div>
+
+                    <div class="dist" id="growDist"></div>
+                    <div class="legend" id="growLegend"></div>
+                </section>
+
+                <section class="card">
+                    <div class="card-head">
+                        <h2>Where it came from</h2>
+                        <span class="card-note" id="growSourceNote">&mdash;</span>
+                    </div>
+                    <div class="table-wrap">
+                        <table class="data-table">
+                            <thead>
+                                <tr>
+                                    <th>Source</th>
+                                    <th>Recorded in</th>
+                                    <th>Amount</th>
+                                    <th>Of what you saved</th>
+                                </tr>
+                            </thead>
+                            <tbody id="growSourceBody"></tbody>
+                        </table>
+                    </div>
+                    <p class="hint">This module keeps no savings of its own. Each of those three already records what it records, and none of them overlap &mdash; goal and investment contributions deliberately never write an entry into Expenses, so nothing here is counted twice.</p>
+                </section>
+
+                <section class="card">
+                    <div class="card-head">
+                        <h2>Twelve months of it</h2>
+                        <span class="card-note" id="growTrendNote">&mdash;</span>
+                    </div>
+                    <div class="grow-trend" id="growTrend"></div>
+                </section>
+
+                <section class="card">
+                    <div class="card-head">
+                        <h2>Your investments</h2>
+                        <div class="card-actions">
+                            <div class="seg is-compact" id="growFilter" data-value="open">
+                                <button type="button" data-val="open" class="is-on">Open</button>
+                                <button type="button" data-val="all">All</button>
+                            </div>
+                            <span class="card-note" id="growListNote">&mdash;</span>
+                        </div>
+                    </div>
+                    <div class="table-wrap">
+                        <table class="data-table">
+                            <thead>
+                                <tr>
+                                    <th>Investment</th>
+                                    <th>Type</th>
+                                    <th>Put in</th>
+                                    <th>Worth now</th>
+                                    <th>Profit</th>
+                                    <th>Return</th>
+                                    <th></th>
+                                </tr>
+                            </thead>
+                            <tbody id="growListBody"></tbody>
+                        </table>
+                    </div>
+                </section>
+
+                <form class="card" id="grow-form" autocomplete="off" onsubmit="return false;">
+                    <div class="card-head">
+                        <h2 id="growFormTitle">New investment</h2>
+                        <div class="card-actions">
+                            <span class="plan-state" id="growState" data-state="draft">Draft</span>
+                            <button type="button" class="ghost-btn" data-reset="grow">
+                                <i class="bi bi-arrow-counterclockwise"></i> Reset
+                            </button>
+                        </div>
+                    </div>
+
+                    <div class="field-grid">
+                        <div class="field">
+                            <label for="growName">What is it</label>
+                            <input type="text" id="growName" placeholder="ASB" maxlength="60">
+                        </div>
+
+                        <div class="field">
+                            <label for="growType">Type</label>
+                            <select id="growType"></select>
+                        </div>
+
+                        <div class="field">
+                            <label for="growOpened">Started</label>
+                            <input type="date" id="growOpened">
+                        </div>
+
+                        <div class="field">
+                            <label for="growValue">Worth now <span class="per">leave empty for what went in</span></label>
+                            <div class="money-input">
+                                <span class="affix">RM</span>
+                                <input type="number" id="growValue" min="0" step="100" placeholder="0.00" inputmode="decimal">
+                            </div>
+                            <p class="hint" id="growValueHint">This app cannot see a unit trust price or an EPF dividend, so this figure is yours to update.</p>
+                        </div>
+
+                        <div class="field">
+                            <label for="growValueDate">Valued on</label>
+                            <input type="date" id="growValueDate">
+                        </div>
+
+                        <div class="field is-wide">
+                            <label for="growNote">Notes <span class="per">optional</span></label>
+                            <input type="text" id="growNote" placeholder="Account number, broker, anything worth remembering" maxlength="120">
+                        </div>
+                    </div>
+
+                    <div class="tally">
+                        <div class="tally-cell">
+                            <span>Put in</span>
+                            <b id="growTallyIn">RM 0.00</b>
+                        </div>
+                        <div class="tally-cell">
+                            <span>Worth now</span>
+                            <b id="growTallyWorth">RM 0.00</b>
+                        </div>
+                        <div class="tally-cell">
+                            <span>Profit</span>
+                            <b id="growTallyProfit">RM 0.00</b>
+                        </div>
+                        <div class="tally-cell is-total">
+                            <span>Return</span>
+                            <b id="growTallyReturn">&mdash;</b>
+                        </div>
+                    </div>
+
+                    <details class="fold" id="growFdFold" hidden>
+                        <summary>
+                            <span><i class="bi bi-safe"></i> Fixed deposit projection</span>
+                            <b id="growFdSummary">&mdash;</b>
+                        </summary>
+                        <div class="field-grid">
+                            <div class="field">
+                                <label for="growFdRate">Rate <span class="per">a year</span></label>
+                                <div class="money-input">
+                                    <span class="affix">%</span>
+                                    <input type="number" id="growFdRate" min="0" max="100" step="0.05" placeholder="3.50" inputmode="decimal">
+                                </div>
+                            </div>
+                            <div class="field">
+                                <label for="growFdMonths">Tenure</label>
+                                <div class="money-input">
+                                    <span class="affix">mo</span>
+                                    <input type="number" id="growFdMonths" min="1" max="600" step="1" placeholder="12" inputmode="numeric">
+                                </div>
+                            </div>
+                            <div class="field is-wide">
+                                <p class="hint" id="growFdText">&mdash;</p>
+                                <button type="button" class="ghost-btn" id="growFdApply">
+                                    <i class="bi bi-arrow-down-circle"></i> Use as the current value
+                                </button>
+                            </div>
+                        </div>
+                    </details>
+
+                    <div class="form-foot">
+                        <button type="button" class="primary-btn" id="growSave">
+                            <i class="bi bi-check-lg"></i> Save investment
+                        </button>
+                        <button type="button" class="ghost-btn" id="growNew" hidden>
+                            <i class="bi bi-plus-lg"></i> New investment
+                        </button>
+                        <button type="button" class="ghost-btn" id="growClose" hidden>
+                            <i class="bi bi-archive"></i> Close this one
+                        </button>
+                        <span class="hint" id="growSaveHint">
+                            <i class="bi bi-hdd"></i> Saved on this device only &mdash; nothing leaves your browser.
+                        </span>
+                    </div>
+                </form>
+
+                <section class="card" id="growContribCard">
+                    <div class="card-head">
+                        <h2 id="growContribTitle">Contributions</h2>
+                        <span class="card-note" id="growContribNote">&mdash;</span>
+                    </div>
+
+                    <div class="grow-add" id="growContribAdd">
+                        <input type="date" id="growCDate" aria-label="Date">
+                        <div class="seg is-compact" id="growCUnit" data-value="rm">
+                            <button type="button" data-val="rm" class="is-on">RM</button>
+                            <button type="button" data-val="pct">%</button>
+                        </div>
+                        <div class="money-input money-input-sm">
+                            <span class="affix" id="growCAffix">RM</span>
+                            <input type="number" id="growCFigure" min="0" step="50" placeholder="0" inputmode="decimal" aria-label="Amount">
+                        </div>
+                        <div class="money-input money-input-sm" id="growCBaseWrap" hidden>
+                            <span class="affix">of RM</span>
+                            <input type="number" id="growCBase" min="0" step="100" placeholder="0" inputmode="decimal" aria-label="Base amount">
+                        </div>
+                        <input type="text" id="growCNote" placeholder="Note (optional)" aria-label="Note" maxlength="60">
+                        <button type="button" class="ghost-btn" id="growCAdd">
+                            <i class="bi bi-plus-lg"></i> Add
+                        </button>
+                    </div>
+                    <p class="hint" id="growCHint">&mdash;</p>
+
+                    <div class="goal-log-list" id="growCList"></div>
                 </section>
 
             </div>
@@ -1091,6 +2050,7 @@
      working store and every screen runs without a network. The three below it
      add the Drive copy on top, and are allowed to fail without taking the app
      with them — which is why they load last. -->
+<script src="store.js"></script>
 <script src="app.js"></script>
 <script src="https://accounts.google.com/gsi/client" async defer></script>
 <script src="drive-config.js"></script>

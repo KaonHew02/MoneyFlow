@@ -249,6 +249,72 @@
     }
 
     /**
+     * --------------------------------------------------------------------
+     * Archiving
+     * --------------------------------------------------------------------
+     * The live file is a **mirror**: every push overwrites it, so deleting an
+     * old bill here deletes it there on the next push. That is right for a
+     * backup — a backup you cannot trust to match is no backup — but it means
+     * the folder cannot also be where history goes to be kept.
+     *
+     * So an archive is a different thing: a dated file, created fresh and
+     * **never written to again**. Take one before pruning, and the records you
+     * remove are still in Drive, in a file with the date on it, whatever the
+     * live copy does afterwards.
+     */
+    async function archive(btn) {
+        if (!configured()) return notConfigured();
+
+        try {
+            flashButton(btn, '<i class="bi bi-arrow-repeat"></i><span>Archiving…</span>');
+            await authorize(false);
+            const name = await writeArchive(backupEnvelope());
+            flashButton(btn, '<i class="bi bi-check-lg"></i><span>Archived</span>');
+            backupSay('Archived to Drive',
+                'Written as ' + name + '. Nothing will ever overwrite it — the ordinary "To Drive" '
+                + 'copy is separate and keeps being replaced. You can safely delete records here '
+                + 'now; this file still holds them.');
+        } catch (err) {
+            backupSay('Could not archive to Drive', err.message);
+        }
+    }
+
+    /** Always creates. Never looks for an existing file, which is the point. */
+    async function writeArchive(envelope) {
+        const now = new Date();
+        const two = (n) => (n < 10 ? '0' : '') + n;
+        const name = 'moneyflow-archive-'
+            + now.getFullYear() + '-' + two(now.getMonth() + 1) + '-' + two(now.getDate())
+            + '-' + two(now.getHours()) + two(now.getMinutes()) + '.json';
+
+        const body = JSON.stringify(envelope, null, 2);
+        const boundary = 'moneyflow-' + Math.random().toString(36).slice(2);
+        const metadata = { name, parents: [cfg.folderId], mimeType: 'application/json' };
+
+        // Built from parts and joined with CRLF. multipart/related wants CRLF
+        // specifically, and a bare newline gets the whole request rejected.
+        const CRLF = String.fromCharCode(13, 10);
+        const multipart = [
+            '--' + boundary,
+            'Content-Type: application/json; charset=UTF-8',
+            '',
+            JSON.stringify(metadata),
+            '--' + boundary,
+            'Content-Type: application/json',
+            '',
+            body,
+            '--' + boundary + '--',
+        ].join(CRLF);
+
+        await call(`${UPLOAD}/files?uploadType=multipart&fields=id`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'multipart/related; boundary=' + boundary },
+            body: multipart,
+        });
+        return name;
+    }
+
+    /**
      * Pulling is the dangerous direction — it replaces what is on this machine
      * — so it goes through the same confirmation Import does, and says what is
      * in both copies before anyone agrees to anything.
@@ -289,6 +355,83 @@
     }
 
     /* ------------------------------------------------------------------ *
+     * Sending it up on its own
+     * ------------------------------------------------------------------ *
+     * Off by default, and it has to be: this file's whole promise is that
+     * nothing leaves the browser unless someone presses a button. A switch
+     * makes that a choice rather than a change made on everyone's behalf.
+     *
+     * Two rules keep it from being obnoxious once it is on:
+     *
+     *   It never opens a sign-in window. A popup nobody asked for gets
+     *   blocked, and a popup that is not blocked is worse. If the token has
+     *   lapsed the auto-push simply stands down and the stamp goes stale,
+     *   which is exactly the signal that says "press the button".
+     *
+     *   It waits for the typing to stop. A push per keystroke would be a
+     *   hundred writes to Drive for one evening's entries.
+     */
+    const AUTO_KEY  = 'moneyflow.drive.auto';
+    const AUTO_WAIT = 60000;
+
+    let autoTimer = null;
+
+    const autoOn = () => {
+        try { return localStorage.getItem(AUTO_KEY) === 'on'; } catch (err) { return false; }
+    };
+
+    function setAuto(on) {
+        try { localStorage.setItem(AUTO_KEY, on ? 'on' : 'off'); } catch (err) { /* not vital */ }
+        paintAuto();
+        if (on) schedule(); else clearTimeout(autoTimer);
+    }
+
+    function paintAuto() {
+        const btn = $('driveAuto');
+        if (!btn) return;
+        const on = autoOn();
+        btn.classList.toggle('is-on', on);
+        btn.setAttribute('aria-pressed', String(on));
+        btn.title = on
+            ? 'Sending a copy to Drive about a minute after you stop editing. Click to stop.'
+            : 'Off — nothing goes to Drive unless you press "To Drive". Click to send it automatically.';
+    }
+
+    /** Called by app.js whenever a record changes. */
+    function schedule() {
+        if (!autoOn() || !configured()) return;
+        clearTimeout(autoTimer);
+        autoTimer = setTimeout(run, AUTO_WAIT);
+    }
+
+    async function run() {
+        if (!autoOn() || !configured()) return;
+        // Silent or not at all — see above.
+        if (!valid()) { showStamp(); return; }
+
+        try {
+            await writeFile(backupEnvelope());
+            remember();
+        } catch (err) {
+            // A failed automatic push is not worth a dialog in front of
+            // someone who did not ask for one. The stamp going stale is the
+            // honest signal, and pressing the button gives the real error.
+            showStamp();
+        }
+    }
+
+    /** How full this browser is, for the stamp's tooltip. */
+    function storageNote() {
+        if (typeof storeUsedBytes !== 'function') return '';
+        const used = storeUsedBytes();
+        const share = used / (5 * 1024 * 1024) * 100;
+        const line = 'This browser is holding ' + (used / 1024 / 1024).toFixed(2) +
+            ' MB of records — about ' + (share < 1 ? 'under 1' : Math.round(share)) +
+            '% of what it allows. You are warned here long before it matters.';
+        return String.fromCharCode(10, 10) + line;
+    }
+
+    /* ------------------------------------------------------------------ *
      * "Last saved" — the only status worth showing
      * ------------------------------------------------------------------ */
 
@@ -308,7 +451,7 @@
 
         if (!stamp) {
             el.textContent = 'Not in Drive yet';
-            el.title = 'Nothing has been sent to Drive from this browser.';
+            el.title = 'Nothing has been sent to Drive from this browser.' + storageNote();
             return;
         }
 
@@ -319,10 +462,34 @@
             : 'Saved to Drive ' + days + ' days ago';
         // Stale is worth noticing, and worth noticing quietly.
         el.classList.toggle('is-stale', days >= 7);
-        el.title = 'Last sent ' + then.toLocaleString();
+
+        // The storage figure has nowhere else sensible to live. It is not
+        // worth a line on screen until it matters — the alert bar handles
+        // that — but someone who wonders should be able to look without
+        // opening the console.
+        el.title = 'Last sent ' + then.toLocaleString() + storageNote();
     }
 
     /* ------------------------------------------------------------------ */
+
+    /* ------------------------------------------------------------------ *
+     * Coming back to an empty browser
+     * ------------------------------------------------------------------ *
+     * The moment a Drive copy actually earns its keep: this machine has no
+     * records, and there may well be a book sitting in the folder. Without
+     * this you would have to know to press "From Drive" — and someone whose
+     * browser has just been cleared is exactly the person who does not.
+     *
+     * It offers rather than does. A pull replaces what is here, and a silent
+     * one would be a network call and a sign-in nobody asked for — and a
+     * sign-in popup not started by a click gets blocked anyway.
+     */
+    function offerPull() {
+        const bar = $('driveOffer');
+        if (!bar) return;
+        if (!configured() || typeof storeIsEmpty !== 'function' || !storeIsEmpty()) return;
+        bar.hidden = false;
+    }
 
     function start() {
         const up = $('drivePush');
@@ -331,7 +498,42 @@
         const down = $('drivePull');
         if (down) down.addEventListener('click', () => pull(down));
 
+        const auto = $('driveAuto');
+        if (auto) auto.addEventListener('click', () => setAuto(!autoOn()));
+
+        // The only way in from app.js. It is a no-op when the switch is off,
+        // so the record modules need to know nothing about any of this.
+        window.MFDriveTouch = schedule;
+
+        const keep = $('driveArchive');
+        if (keep) keep.addEventListener('click', () => archive(keep));
+
+        const keepFromAlert = $('storeAlertArchive');
+        if (keepFromAlert) {
+            keepFromAlert.hidden = !configured();
+            keepFromAlert.addEventListener('click', () => archive(keepFromAlert));
+        }
+
+        const offer = $('driveOfferPull');
+        if (offer) {
+            offer.addEventListener('click', () => {
+                const bar = $('driveOffer');
+                if (bar) bar.hidden = true;
+                pull(offer);
+            });
+        }
+
+        const dismiss = $('driveOfferNo');
+        if (dismiss) {
+            dismiss.addEventListener('click', () => {
+                const bar = $('driveOffer');
+                if (bar) bar.hidden = true;
+            });
+        }
+
+        paintAuto();
         showStamp();
+        offerPull();
     }
 
     if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', start);
