@@ -12,6 +12,10 @@ Two buttons in the topbar, and a switch:
   It tells you what is in both copies and waits for you to agree.
 - **Auto** — off unless you turn it on. See below.
 
+For a copy that is *never* overwritten — a keepsake at the end of a year, say —
+use **Export** instead. It writes a dated file to your own computer, and
+nothing here can touch it afterwards.
+
 **With Auto off, nothing leaves this browser unless you press a button.** That
 is the default, and it is the state the app ships in.
 
@@ -40,23 +44,6 @@ going stale says it, and pressing the button gives you the real error.
 Turn it on if you would rather not think about backups. Leave it off if you
 would rather the app never spoke to the network on its own — both are
 reasonable, which is why it is a switch.
-
----
-
-## Archive — the copy that is never overwritten
-
-**To Drive** keeps *one* file and replaces it every time. That is what a backup
-should do — a backup you cannot trust to match is no backup — but it means the
-folder is a **mirror**, not a place history is kept. Delete an old bill here,
-and the next save deletes it there too.
-
-**Archive** writes a different kind of file: `moneyflow-archive-2026-08-20-1432.json`,
-created fresh and never written to again. Take one before pruning anything, and
-the records you remove are still in Drive with the date on them, whatever the
-live copy does afterwards.
-
-Archives pile up rather than replacing each other, which is the point. Tidy
-them yourself in Drive when there are more than you want.
 
 ---
 

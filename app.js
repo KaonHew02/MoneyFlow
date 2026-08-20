@@ -159,9 +159,9 @@ function paintStoreAlert() {
             // warning into something you can act on.
             text.textContent = 'MoneyFlow is using about ' + Math.round(share) + '% of the space this ' +
                 'browser allows (' + (used / 1024 / 1024).toFixed(1) + ' MB) — mostly ' +
-                big.join(', ') + '. Nothing is deleted for you. Archive a dated copy first — the ' +
-                'ordinary Drive file is overwritten on every save, so deleting here would delete ' +
-                'there too — then remove what you no longer need from those tabs.';
+                big.join(', ') + '. Nothing is deleted for you: Export a copy to a file first — the ' +
+                'Drive copy is overwritten on every save, so deleting here would delete there too — ' +
+                'then remove what you no longer need from those tabs.';
         }
         return;
     }

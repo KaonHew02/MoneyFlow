@@ -249,72 +249,6 @@
     }
 
     /**
-     * --------------------------------------------------------------------
-     * Archiving
-     * --------------------------------------------------------------------
-     * The live file is a **mirror**: every push overwrites it, so deleting an
-     * old bill here deletes it there on the next push. That is right for a
-     * backup — a backup you cannot trust to match is no backup — but it means
-     * the folder cannot also be where history goes to be kept.
-     *
-     * So an archive is a different thing: a dated file, created fresh and
-     * **never written to again**. Take one before pruning, and the records you
-     * remove are still in Drive, in a file with the date on it, whatever the
-     * live copy does afterwards.
-     */
-    async function archive(btn) {
-        if (!configured()) return notConfigured();
-
-        try {
-            flashButton(btn, '<i class="bi bi-arrow-repeat"></i><span>Archiving…</span>');
-            await authorize(false);
-            const name = await writeArchive(backupEnvelope());
-            flashButton(btn, '<i class="bi bi-check-lg"></i><span>Archived</span>');
-            backupSay('Archived to Drive',
-                'Written as ' + name + '. Nothing will ever overwrite it — the ordinary "To Drive" '
-                + 'copy is separate and keeps being replaced. You can safely delete records here '
-                + 'now; this file still holds them.');
-        } catch (err) {
-            backupSay('Could not archive to Drive', err.message);
-        }
-    }
-
-    /** Always creates. Never looks for an existing file, which is the point. */
-    async function writeArchive(envelope) {
-        const now = new Date();
-        const two = (n) => (n < 10 ? '0' : '') + n;
-        const name = 'moneyflow-archive-'
-            + now.getFullYear() + '-' + two(now.getMonth() + 1) + '-' + two(now.getDate())
-            + '-' + two(now.getHours()) + two(now.getMinutes()) + '.json';
-
-        const body = JSON.stringify(envelope, null, 2);
-        const boundary = 'moneyflow-' + Math.random().toString(36).slice(2);
-        const metadata = { name, parents: [cfg.folderId], mimeType: 'application/json' };
-
-        // Built from parts and joined with CRLF. multipart/related wants CRLF
-        // specifically, and a bare newline gets the whole request rejected.
-        const CRLF = String.fromCharCode(13, 10);
-        const multipart = [
-            '--' + boundary,
-            'Content-Type: application/json; charset=UTF-8',
-            '',
-            JSON.stringify(metadata),
-            '--' + boundary,
-            'Content-Type: application/json',
-            '',
-            body,
-            '--' + boundary + '--',
-        ].join(CRLF);
-
-        await call(`${UPLOAD}/files?uploadType=multipart&fields=id`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'multipart/related; boundary=' + boundary },
-            body: multipart,
-        });
-        return name;
-    }
-
-    /**
      * Pulling is the dangerous direction — it replaces what is on this machine
      * — so it goes through the same confirmation Import does, and says what is
      * in both copies before anyone agrees to anything.
@@ -504,15 +438,6 @@
         // The only way in from app.js. It is a no-op when the switch is off,
         // so the record modules need to know nothing about any of this.
         window.MFDriveTouch = schedule;
-
-        const keep = $('driveArchive');
-        if (keep) keep.addEventListener('click', () => archive(keep));
-
-        const keepFromAlert = $('storeAlertArchive');
-        if (keepFromAlert) {
-            keepFromAlert.hidden = !configured();
-            keepFromAlert.addEventListener('click', () => archive(keepFromAlert));
-        }
 
         const offer = $('driveOfferPull');
         if (offer) {
