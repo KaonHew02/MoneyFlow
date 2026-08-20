@@ -35,6 +35,10 @@ button. Two rules keep it out of the way:
   automatic push quietly stands down and the stamp goes stale — which is the
   signal to press **To Drive** yourself. A popup nobody asked for gets blocked,
   and one that is not blocked is worse.
+- **It cannot make the first push itself.** Signing in to Google has to be
+  something you asked for, so on a browser that has never pushed, Auto stands
+  down every time. The stamp says **"Auto is waiting on you"** in red when that
+  is what is happening — press **To Drive** once and it takes over from there.
 - **It waits for the typing to stop.** One evening's entries is one upload, not
   a hundred.
 

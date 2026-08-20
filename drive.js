@@ -317,6 +317,9 @@
     function setAuto(on) {
         try { localStorage.setItem(AUTO_KEY, on ? 'on' : 'off'); } catch (err) { /* not vital */ }
         paintAuto();
+        // The stamp's wording depends on the switch — "Auto is waiting on you"
+        // is only true while it is on — so it is repainted with it.
+        showStamp();
         if (on) schedule(); else clearTimeout(autoTimer);
     }
 
@@ -384,8 +387,22 @@
         try { stamp = localStorage.getItem(STAMP_KEY); } catch (err) { stamp = null; }
 
         if (!stamp) {
-            el.textContent = 'Not in Drive yet';
-            el.title = 'Nothing has been sent to Drive from this browser.' + storageNote();
+            // Auto cannot start itself. It never opens a Google sign-in window
+            // — a popup nobody asked for gets blocked — so on a browser that
+            // has never pushed, it stands down every time and does so in
+            // silence. Left as a neutral "Not in Drive yet", that reads like a
+            // fact rather than the switch quietly doing nothing.
+            const waiting = autoOn() && configured();
+            // An instruction, not a riddle. "Auto is waiting on you" was read
+            // as a status and left the reader asking whether they had to do
+            // anything — which is the one thing the label exists to answer.
+            el.textContent = waiting ? 'Press To Drive to start Auto' : 'Not in Drive yet';
+            el.classList.toggle('is-stale', waiting);
+            el.title = (waiting
+                ? 'Auto is on, but Google will only sign you in when you ask it to — so the '
+                  + 'very first copy has to be one you send. Press "To Drive" once; after that '
+                  + 'Auto keeps it up to date on its own.'
+                : 'Nothing has been sent to Drive from this browser.') + storageNote();
             return;
         }
 
