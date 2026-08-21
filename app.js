@@ -894,9 +894,12 @@ function paintSettle(bill) {
                         ? '<strong>' + escapeHtml(who) + '</strong> owes you'
                         : '<strong>' + escapeHtml(who) + '</strong> owes ' + escapeHtml(payerName);
 
-                // Only money coming *back* needs an account: a debt of your
-                // own is paid by the share you already recorded as an expense.
+                // Two directions, both needing an account. Money coming back
+                // to you moves between two of your own pockets — a transfer.
+                // Money you hand over is your share leaving for good — an
+                // expense, recorded on the day you actually pay it.
                 const owedToMe = iPaid && debt.index !== 0;
+                const iOwe = debt.index === 0 && !bill.bill.entryId;
                 const held = b.settled[debt.person.id];
                 const landed = held && held.account ? accountById(held.account) : null;
 
@@ -905,12 +908,16 @@ function paintSettle(bill) {
                     '<b>' + money(fromSen(debt.amount)) + '</b>' +
                     (debt.settled
                         ? '<span class="settle-done"><i class="bi bi-check-circle-fill"></i> Settled' +
-                              (landed ? ' into ' + escapeHtml(accountName(landed.id)) : '') + '</span>' +
+                              // "into" for money arriving, "from" for money leaving.
+                              (landed ? (debt.index === 0 ? ' from ' : ' into ') +
+                                  escapeHtml(accountName(landed.id)) : '') + '</span>' +
                           '<button type="button" class="ghost-btn is-small" data-unsettle="' + debt.person.id + '">Undo</button>'
-                        : (owedToMe
-                            ? '<label class="settle-into-field"><span>Paid back into</span>' +
-                              '<select class="settle-into" aria-label="Which account they paid you back into">' +
-                              settleAccountOptions(billPaidFromAccount(b)) + '</select></label>'
+                        : (owedToMe || iOwe
+                            ? '<label class="settle-into-field"><span>' +
+                              (iOwe ? 'Paid from' : 'Paid back into') + '</span>' +
+                              '<select class="settle-into" aria-label="' +
+                              (iOwe ? 'Which account you paid them from' : 'Which account they paid you back into') +
+                              '">' + settleAccountOptions(iOwe ? '' : billPaidFromAccount(b)) + '</select></label>'
                             : '') +
                           '<button type="button" class="ghost-btn is-small" data-settle="' + debt.person.id + '">' +
                           '<i class="bi bi-check-lg"></i> Mark settled</button>');
@@ -946,8 +953,13 @@ function paintExpenseLink(bill) {
         commitBill();
     }
 
+    // Whose money left the table. When somebody else paid, none of it was
+    // yours yet: you owe them, and the money leaves your account on the day
+    // you hand it over — which is the tick down in Settle up, not this card.
+    const iPaid = bill.payer === 0;
+
     const linked = !!entry;
-    body.hidden = linked || !saved || bill.mySen <= 0;
+    body.hidden = linked || !saved || bill.mySen <= 0 || !iPaid;
     state.hidden = !linked;
 
     if (linked) {
@@ -958,13 +970,20 @@ function paintExpenseLink(bill) {
     }
 
     if (hint) {
+        const payerName = personName(bill.bill.people[bill.payer], bill.payer);
+
         hint.textContent = !saved
             ? 'Save the bill first — the entry it creates is linked back to it, so it can be undone from here.'
             : bill.mySen <= 0
                 ? 'Your share is nothing, so there is no expense to record.'
                 : linked
                     ? 'Removing this deletes that entry from Expenses. There is only ever one copy — the bill points at it rather than keeping its own.'
-                    : 'Your share only. The rest of the bill was never your money, so recording all of it would tell every total in the app that you spent far more than you did.';
+                    : !iPaid
+                        ? payerName + ' paid, so none of your money has moved yet. Tick your own line under ' +
+                          'Settle up when you pay them back and pick the account it came out of — the expense ' +
+                          'is recorded then, on the day it actually left.'
+                        : 'Your share only. The rest of the bill was never your money, so recording all of it ' +
+                          'would tell every total in the app that you spent far more than you did.';
     }
 }
 
@@ -1187,13 +1206,23 @@ function onSettleClick(event) {
 
         const sums = splitCompute(bill);
         const debt = sums.debts.find((d) => d.person.id === id);
+        const mine = debt && debt.index === 0;
 
-        const entryId = debt && into ? settleWriteEntry(bill, debt, into) : '';
-        bill.settled[id] = { account: into, entryId, date: todayIso() };
+        // Your own line: this is the moment your money leaves, so this is the
+        // moment the expense is written — from the account you actually used.
+        if (mine && into && !bill.entryId) {
+            const entryId = settleWriteShare(bill, debt, into);
+            bill.settled[id] = { account: into, entryId, date: todayIso() };
+            splitHint('Recorded ' + money(fromSen(debt.amount)) + ' from ' + accountName(into) +
+                ' under Expenses — your share, on the day you paid it.');
+        } else {
+            const entryId = debt && into && !mine ? settleWriteEntry(bill, debt, into) : '';
+            bill.settled[id] = { account: into, entryId, date: todayIso() };
 
-        if (entryId) {
-            splitHint(money(fromSen(debt.amount)) + ' moved to ' + accountName(into) +
-                ' — a transfer, so it changes the two balances and no total.');
+            if (entryId) {
+                splitHint(money(fromSen(debt.amount)) + ' moved to ' + accountName(into) +
+                    ' — a transfer, so it changes the two balances and no total.');
+            }
         }
     } else {
         // Un-ticking takes back what the tick wrote. Leaving the transfer
@@ -1201,6 +1230,8 @@ function onSettleClick(event) {
         const held = bill.settled[id];
         if (held && held.entryId) {
             ledgerState.entries = ledgerState.entries.filter((e) => e.id !== held.entryId);
+            // If that was the bill's own expense, the bill stops claiming it.
+            if (bill.entryId === held.entryId) { bill.entryId = ''; bill.account = ''; }
             saveLedger();
         }
         delete bill.settled[id];
@@ -1498,6 +1529,40 @@ const billPaidFromAccount = (bill) => {
     const open = openAccounts();
     return open.length ? open[0].id : '';
 };
+
+/**
+ * Your share, leaving your account on the day you hand it over. Somebody else
+ * put the money down at the table; this is the moment it becomes yours to
+ * have spent, which is why it is written here rather than when the bill was
+ * typed in.
+ */
+function settleWriteShare(bill, debt, fromAccount) {
+    if (!accountById(fromAccount) || debt.amount <= 0) return '';
+
+    const stamp = todayIso();
+    const entry = {
+        id: ledgerId('e'),
+        seq: ++ledgerSeq,
+        type: 'expense',
+        amount: String(fromSen(debt.amount)),
+        currency: BASE_CURRENCY,
+        base: '', rate: '',
+        date: stamp,
+        category: ($('splitExpCategory') || {}).value || '',
+        sub: '',
+        account: fromAccount, toAccount: '',
+        note: (bill.title.trim() || 'Bill split') + ' — my share',
+        created: stamp, updated: stamp,
+    };
+
+    ledgerState.entries.push(entry);
+    ledgerState.month = monthOf(entry.date);
+    saveLedger();
+
+    bill.entryId = entry.id;
+    bill.account = fromAccount;
+    return entry.id;
+}
 
 /** The transfer that puts a repayment where it actually landed. */
 function settleWriteEntry(bill, debt, toAccount) {
