@@ -1116,6 +1116,20 @@ input[type="date"]:hover::-webkit-calendar-picker-indicator { opacity: .85; }
 .settle-row .settle-who { flex: 1 1 auto; min-width: 0; font-size: 13.5px; color: var(--ink-2); }
 .settle-row .settle-who strong { font-weight: 700; color: var(--ink); }
 
+/* Where the money came back to. It sits between the figure and the tick
+   because that is the order the sentence is read in: John owes you RM15,
+   paid back into Touch 'n Go, done. */
+.settle-into-field {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    flex: 0 1 auto;
+    min-width: 0;
+}
+
+.settle-into-field > span { font-size: 12px; color: var(--ink-3); white-space: nowrap; }
+.settle-into { width: 158px; padding: 7px 10px; font-size: 12.5px; }
+
 .settle-row > b {
     flex: 0 0 auto;
     font-size: 15px;
@@ -2898,6 +2912,8 @@ input[type="date"]:hover::-webkit-calendar-picker-indicator { opacity: .85; }
 
     .settle-row { flex-wrap: wrap; gap: 8px 12px; }
     .settle-row .settle-who { flex: 1 1 100%; }
+    .settle-into-field { flex: 1 1 100%; }
+    .settle-into { flex: 1 1 auto; width: auto; }
     .settle-row > b { margin-right: auto; }
 
     .split-expense-body { flex-direction: column; align-items: stretch; }

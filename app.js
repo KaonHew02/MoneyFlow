@@ -286,6 +286,7 @@ function newBill() {
         service: '0', tax: '0', discount: '', discountUnit: 'pct', round: false,
         itemDiscounts: false, offUnit: 'pct',
         settled: {},
+        account: '',
         entryId: '',
         created: '', updated: '',
     };
@@ -893,13 +894,25 @@ function paintSettle(bill) {
                         ? '<strong>' + escapeHtml(who) + '</strong> owes you'
                         : '<strong>' + escapeHtml(who) + '</strong> owes ' + escapeHtml(payerName);
 
+                // Only money coming *back* needs an account: a debt of your
+                // own is paid by the share you already recorded as an expense.
+                const owedToMe = iPaid && debt.index !== 0;
+                const held = b.settled[debt.person.id];
+                const landed = held && held.account ? accountById(held.account) : null;
+
                 row.innerHTML =
                     '<span class="settle-who">' + sentence + '</span>' +
                     '<b>' + money(fromSen(debt.amount)) + '</b>' +
                     (debt.settled
-                        ? '<span class="settle-done"><i class="bi bi-check-circle-fill"></i> Settled</span>' +
+                        ? '<span class="settle-done"><i class="bi bi-check-circle-fill"></i> Settled' +
+                              (landed ? ' into ' + escapeHtml(accountName(landed.id)) : '') + '</span>' +
                           '<button type="button" class="ghost-btn is-small" data-unsettle="' + debt.person.id + '">Undo</button>'
-                        : '<button type="button" class="ghost-btn is-small" data-settle="' + debt.person.id + '">' +
+                        : (owedToMe
+                            ? '<label class="settle-into-field"><span>Paid back into</span>' +
+                              '<select class="settle-into" aria-label="Which account they paid you back into">' +
+                              settleAccountOptions(billPaidFromAccount(b)) + '</select></label>'
+                            : '') +
+                          '<button type="button" class="ghost-btn is-small" data-settle="' + debt.person.id + '">' +
                           '<i class="bi bi-check-lg"></i> Mark settled</button>');
                 list.appendChild(row);
             });
@@ -1144,6 +1157,21 @@ function onSplitEdit(event) {
 }
 
 /** Settling, and unsettling. Both are facts, so both go straight to disk. */
+/**
+ * Accounts a repayment can land in. The one the bill was paid from is offered
+ * first and says so — money coming back where it left needs no entry at all,
+ * and that is worth being the easy answer.
+ */
+function settleAccountOptions(fromId) {
+    return openAccounts().map((account, index) => {
+        const name = account.name.trim() || 'Account ' + (index + 1);
+        return '<option value="' + escapeHtml(account.id) + '"' +
+            (account.id === fromId ? ' selected' : '') + '>' +
+            escapeHtml(name) + (account.id === fromId ? ' (where you paid from)' : '') +
+            '</option>';
+    }).join('');
+}
+
 function onSettleClick(event) {
     const btn = event.target.closest('button[data-settle], button[data-unsettle]');
     if (!btn) return;
@@ -1152,12 +1180,37 @@ function onSettleClick(event) {
     const bill = draft();
     const id = btn.dataset.settle || btn.dataset.unsettle;
 
-    if (btn.dataset.settle) bill.settled[id] = true;
-    else delete bill.settled[id];
+    if (btn.dataset.settle) {
+        const row = btn.closest('.settle-row');
+        const select = row && row.querySelector('.settle-into');
+        const into = select ? select.value : '';
+
+        const sums = splitCompute(bill);
+        const debt = sums.debts.find((d) => d.person.id === id);
+
+        const entryId = debt && into ? settleWriteEntry(bill, debt, into) : '';
+        bill.settled[id] = { account: into, entryId, date: todayIso() };
+
+        if (entryId) {
+            splitHint(money(fromSen(debt.amount)) + ' moved to ' + accountName(into) +
+                ' — a transfer, so it changes the two balances and no total.');
+        }
+    } else {
+        // Un-ticking takes back what the tick wrote. Leaving the transfer
+        // behind would quietly overstate the account it landed in.
+        const held = bill.settled[id];
+        if (held && held.entryId) {
+            ledgerState.entries = ledgerState.entries.filter((e) => e.id !== held.entryId);
+            saveLedger();
+        }
+        delete bill.settled[id];
+    }
 
     commitBill();
     saveSplit();
     renderSplit();
+    renderLedger();
+    renderDash();
 }
 
 /**
@@ -1254,6 +1307,7 @@ function splitCopyBill(id) {
     copy.seq = 0;
     copy.date = todayIso();
     copy.settled = {};
+    copy.account = '';
     copy.entryId = '';
     copy.created = '';
     // New ids all the way down, or the copy and the original share rows.
@@ -1403,6 +1457,10 @@ function splitRecordShare() {
     saveLedger();
 
     bill.entryId = entry.id;
+    // Kept on the bill as well as on the entry: when somebody pays you back
+    // into a different account, this is the account the money has to come
+    // *from* for the two balances to end up right.
+    bill.account = account;
     commitBill();
     saveSplit();
 
@@ -1410,6 +1468,62 @@ function splitRecordShare() {
     renderSplit();
     renderLedger();
     renderDash();
+}
+
+/**
+ * --------------------------------------------------------------------
+ * Being paid back
+ * --------------------------------------------------------------------
+ * You paid RM60 out of Maybank and three people hand you RM45 back into Touch
+ * 'n Go. Only your own RM15 is an expense — the app has always been right
+ * about that — but the two *balances* are wrong until the ledger is told that
+ * RM45 of what left Maybank arrived somewhere else.
+ *
+ * That is a transfer, and a transfer is exactly the right shape: it is
+ * neither income nor spending, it touches no total, and it moves the two
+ * balances by the same amount. The money was never really theirs to give you;
+ * it passed through your account on its way back.
+ *
+ * When they pay you back into the same account you paid from, nothing has to
+ * be written at all — the money came back where it left.
+ */
+const billPaidFromAccount = (bill) => {
+    const entry = bill.entryId && ledgerState.entries.find((e) => e.id === bill.entryId);
+    if (entry && accountById(entry.account)) return entry.account;
+    if (accountById(bill.account)) return bill.account;
+
+    const picked = ($('splitExpAccount') || {}).value || '';
+    if (accountById(picked)) return picked;
+
+    const open = openAccounts();
+    return open.length ? open[0].id : '';
+};
+
+/** The transfer that puts a repayment where it actually landed. */
+function settleWriteEntry(bill, debt, toAccount) {
+    const fromAccount = billPaidFromAccount(bill);
+    if (!fromAccount || !toAccount || fromAccount === toAccount) return '';
+
+    const stamp = todayIso();
+    const entry = {
+        id: ledgerId('e'),
+        seq: ++ledgerSeq,
+        type: 'transfer',
+        amount: String(fromSen(debt.amount)),
+        currency: BASE_CURRENCY,
+        base: '', rate: '',
+        date: stamp,
+        category: '', sub: '',
+        account: fromAccount, toAccount,
+        note: (bill.title.trim() || 'Bill split') + ' — ' +
+            (personName(debt.person, debt.index) || 'someone') + ' paid back',
+        created: stamp, updated: stamp,
+    };
+
+    ledgerState.entries.push(entry);
+    ledgerState.month = monthOf(entry.date);
+    saveLedger();
+    return entry.id;
 }
 
 function splitRemoveShare() {
@@ -1555,8 +1669,21 @@ function loadSplit() {
             people.forEach((p) => { if (!p.items.length) p.items.push(newItem()); });
 
             const known = new Set(people.map((p) => p.id));
+            // A tick used to be `true` and nothing more. Now it remembers the
+            // account the money came back into and the transfer that moved it,
+            // so an older bill reads as settled with neither.
             const settled = {};
-            Object.keys(b.settled || {}).forEach((id) => { if (known.has(id)) settled[id] = true; });
+            Object.keys(b.settled || {}).forEach((id) => {
+                if (!known.has(id)) return;
+                const held = b.settled[id];
+                settled[id] = (held && typeof held === 'object')
+                    ? {
+                        account: String(held.account || ''),
+                        entryId: String(held.entryId || ''),
+                        date: /^\d{4}-\d{2}-\d{2}$/.test(held.date || '') ? String(held.date) : '',
+                    }
+                    : { account: '', entryId: '', date: '' };
+            });
 
             return {
                 id: String(b.id),
@@ -1578,6 +1705,7 @@ function loadSplit() {
                 offUnit: b.offUnit === 'rm' ? 'rm' : 'pct',
                 settled,
                 entryId: String(b.entryId || ''),
+                account: String(b.account || ''),
                 created: String(b.created || b.date || ''),
                 updated: String(b.updated || b.date || ''),
             };
