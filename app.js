@@ -950,6 +950,14 @@ function paintExpenseLink(bill) {
     const mode = (($('splitExpMode') || {}).dataset || {}).value === 'share' ? 'share' : 'full';
     set('splitExpAmount', money(fromSen(mode === 'share' ? bill.mySen : bill.grandSen)));
 
+    // The button said "my share" whichever way the switch was set, which is
+    // the one place this could quietly do something other than what it says.
+    const add = $('splitExpAdd');
+    if (add) {
+        add.innerHTML = '<i class="bi bi-plus-lg"></i> ' +
+            (mode === 'share' ? 'Record my share' : 'Record the whole bill');
+    }
+
     if (!body || !state) return;
 
     // A bill can lose its entry the ordinary way — deleted from the Expenses
