@@ -2194,10 +2194,14 @@ input[type="date"]:hover::-webkit-calendar-picker-indicator { opacity: .85; }
     white-space: nowrap;
 }
 
-/* Money in, money out, money that only changed pocket. */
+/* Money in, money out, money that only changed pocket, money that came back. */
 .is-in   { color: var(--jade); }
 .is-out  { color: var(--red); }
 .is-move { color: var(--indigo); }
+
+/* Money back is arriving, so it is not red — but it is not earnings either,
+   so it does not borrow the jade that income owns. */
+.is-back { color: var(--amber); }
 
 /* Assets / owing / altogether, above the account list */
 .acct-summary {

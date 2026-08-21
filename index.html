@@ -410,6 +410,10 @@
                                     <button type="button" data-val="expense" class="is-on">Spent</button>
                                     <button type="button" data-val="income">Received</button>
                                     <button type="button" data-val="transfer">Moved</button>
+                                    <!-- Money coming back off something already recorded as spent:
+                                         a refund, a cancelled order, a friend paying you back for
+                                         a bill you put through in full. -->
+                                    <button type="button" data-val="refund">Money back</button>
                                 </div>
                             </div>
 
@@ -475,6 +479,7 @@
                             <div class="field" id="ledgerFieldCategory">
                                 <label for="ledgerCategory">Category</label>
                                 <select id="ledgerCategory"></select>
+                                <p class="hint" id="ledgerCategoryHint" hidden>&mdash;</p>
                             </div>
 
                             <div class="field" id="ledgerFieldSub" hidden>
@@ -902,6 +907,17 @@
                             <span class="split-expense-state" id="splitExpState" hidden></span>
                         </div>
                         <div class="split-expense-body" id="splitExpBody">
+                            <!-- Two honest ways to keep this, and the one you pick decides what a
+                                 repayment is later: your share alone, and money coming back is a
+                                 transfer between your own accounts; or the whole bill, matching
+                                 your bank statement, and a repayment comes back off it. -->
+                            <div class="field">
+                                <label for="splitExpMode">Record</label>
+                                <div class="seg is-compact" id="splitExpMode" data-value="full">
+                                    <button type="button" data-val="full" class="is-on">The whole bill</button>
+                                    <button type="button" data-val="share">My share only</button>
+                                </div>
+                            </div>
                             <div class="field">
                                 <label for="splitExpCategory">Category</label>
                                 <select id="splitExpCategory"></select>

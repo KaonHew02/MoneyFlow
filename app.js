@@ -287,6 +287,11 @@ function newBill() {
         itemDiscounts: false, offUnit: 'pct',
         settled: {},
         account: '',
+        // 'full' — the whole bill went into Expenses, the way the bank
+        //          statement reads it, and a repayment comes back off it.
+        // 'share' — only your own share went in, and a repayment is money
+        //          moving between two of your own accounts.
+        recorded: 'full',
         entryId: '',
         created: '', updated: '',
     };
@@ -942,7 +947,8 @@ function paintExpenseLink(bill) {
     const entry = bill.bill.entryId
         && ledgerState.entries.find((e) => e.id === bill.bill.entryId);
 
-    set('splitExpAmount', money(fromSen(bill.mySen)));
+    const mode = (($('splitExpMode') || {}).dataset || {}).value === 'share' ? 'share' : 'full';
+    set('splitExpAmount', money(fromSen(mode === 'share' ? bill.mySen : bill.grandSen)));
 
     if (!body || !state) return;
 
@@ -1220,8 +1226,11 @@ function onSettleClick(event) {
             bill.settled[id] = { account: into, entryId, date: todayIso() };
 
             if (entryId) {
-                splitHint(money(fromSen(debt.amount)) + ' moved to ' + accountName(into) +
-                    ' — a transfer, so it changes the two balances and no total.');
+                splitHint(bill.recorded === 'share'
+                    ? money(fromSen(debt.amount)) + ' moved to ' + accountName(into) +
+                      ' — a transfer, so it changes the two balances and no total.'
+                    : money(fromSen(debt.amount)) + ' back into ' + accountName(into) +
+                      ' — taken off what the bill cost you, not counted as income.');
             }
         }
     } else {
@@ -1468,18 +1477,25 @@ function splitRecordShare() {
     const account  = ($('splitExpAccount') || {}).value || '';
     if (!account) { splitHint('Add an account under Expenses first — an expense has to come from somewhere.'); return; }
 
+    // Whole bill or own share. Whole bill is what left the account, so it is
+    // what a bank statement shows; the rest comes back off it as people pay.
+    const mode = (($('splitExpMode') || {}).dataset || {}).value === 'share' ? 'share' : 'full';
+    bill.recorded = mode;
+    const senToRecord = mode === 'share' ? sums.mySen : sums.grandSen;
+
     const stamp = todayIso();
     const entry = {
         id: ledgerId('e'),
         seq: ++ledgerSeq,
         type: 'expense',
-        amount: String(fromSen(sums.mySen)),
+        amount: String(fromSen(senToRecord)),
         currency: BASE_CURRENCY,
         base: '', rate: '',
         date: bill.date,
         category, sub: '',
         account, toAccount: '',
-        note: (bill.title.trim() || 'Bill split') + ' — my share',
+        note: (bill.title.trim() || 'Bill split') +
+            (mode === 'share' ? ' — my share' : ' — the whole bill'),
         created: stamp, updated: stamp,
     };
 
@@ -1495,7 +1511,10 @@ function splitRecordShare() {
     commitBill();
     saveSplit();
 
-    splitHint('Recorded ' + money(fromSen(sums.mySen)) + ' under Expenses — your share only.');
+    splitHint(mode === 'share'
+        ? 'Recorded ' + money(fromSen(sums.mySen)) + ' under Expenses — your share only.'
+        : 'Recorded ' + money(fromSen(sums.grandSen)) + ' under Expenses — the whole bill. ' +
+          'Each repayment comes back off it as they pay you.');
     renderSplit();
     renderLedger();
     renderDash();
@@ -1564,26 +1583,51 @@ function settleWriteShare(bill, debt, fromAccount) {
     return entry.id;
 }
 
-/** The transfer that puts a repayment where it actually landed. */
+/**
+ * A repayment, in whichever shape the bill was recorded.
+ *
+ *   the whole bill  → money back: it raises the account it lands in and takes
+ *                     its amount off the category the bill was filed under,
+ *                     so what you spent settles down to what you consumed.
+ *   your share only → a transfer: the money you fronted leaving the account it
+ *                     really left, and arriving where they actually paid you.
+ */
 function settleWriteEntry(bill, debt, toAccount) {
-    const fromAccount = billPaidFromAccount(bill);
-    if (!fromAccount || !toAccount || fromAccount === toAccount) return '';
+    if (!toAccount || !accountById(toAccount)) return '';
 
     const stamp = todayIso();
-    const entry = {
+    const who = personName(debt.person, debt.index) || 'someone';
+    const note = (bill.title.trim() || 'Bill split') + ' — ' + who + ' paid back';
+
+    const common = {
         id: ledgerId('e'),
         seq: ++ledgerSeq,
-        type: 'transfer',
         amount: String(fromSen(debt.amount)),
         currency: BASE_CURRENCY,
         base: '', rate: '',
         date: stamp,
-        category: '', sub: '',
-        account: fromAccount, toAccount,
-        note: (bill.title.trim() || 'Bill split') + ' — ' +
-            (personName(debt.person, debt.index) || 'someone') + ' paid back',
+        note,
         created: stamp, updated: stamp,
     };
+
+    let entry;
+    if (bill.recorded === 'share') {
+        const fromAccount = billPaidFromAccount(bill);
+        // Same account both ends means the money came back where it left, and
+        // nothing has to be written at all.
+        if (!fromAccount || fromAccount === toAccount) return '';
+        entry = { ...common, type: 'transfer', category: '', sub: '', account: fromAccount, toAccount };
+    } else {
+        const linked = bill.entryId && ledgerState.entries.find((e) => e.id === bill.entryId);
+        entry = {
+            ...common,
+            type: 'refund',
+            // Filed where the bill was, so it comes off the right category.
+            category: (linked && linked.category) || ($('splitExpCategory') || {}).value || '',
+            sub: '',
+            account: toAccount, toAccount: '',
+        };
+    }
 
     ledgerState.entries.push(entry);
     ledgerState.month = monthOf(entry.date);
@@ -1771,6 +1815,10 @@ function loadSplit() {
                 settled,
                 entryId: String(b.entryId || ''),
                 account: String(b.account || ''),
+                // Bills written before there were two ways only ever held a
+                // share, so one with an entry already against it keeps that
+                // reading rather than being re-interpreted underneath itself.
+                recorded: b.recorded === 'share' || (!b.recorded && b.entryId) ? 'share' : 'full',
                 created: String(b.created || b.date || ''),
                 updated: String(b.updated || b.date || ''),
             };
@@ -2165,11 +2213,11 @@ function shiftPlan(plan, delta) {
 function budgetUsedIn(from, to) {
     const used = {};
     ledgerState.entries.forEach((entry) => {
-        if (entry.type !== 'expense') return;
+        if (!isSpend(entry)) return;
         if (entry.date < from || entry.date > to) return;
         const cat = categoryOf(entry);
         if (!cat) return;
-        used[cat.id] = (used[cat.id] || 0) + entrySen(entry);
+        used[cat.id] = (used[cat.id] || 0) + spendSen(entry);
     });
     return used;
 }
@@ -5819,10 +5867,10 @@ const contribBaseSen = (c) => Math.max(0, toSen(parseFloat(c.base) || 0));
  * rows are not editable here, because the record is over there.
  */
 const linkedEntries = (inv) => (inv.source
-    ? ledgerState.entries.filter((e) => e.type === 'expense' && e.category === inv.source)
+    ? ledgerState.entries.filter((e) => isSpend(e) && e.category === inv.source)
     : []);
 
-const linkedSen = (inv) => linkedEntries(inv).reduce((sum, e) => sum + entrySen(e), 0);
+const linkedSen = (inv) => linkedEntries(inv).reduce((sum, e) => sum + spendSen(e), 0);
 
 /**
  * --------------------------------------------------------------------
@@ -6014,11 +6062,11 @@ function growthProjection(startSen, monthlyRm, ratePct, years) {
 function growLedgerSavedIn(from, to) {
     return ledgerState.entries
         .filter((e) => {
-            if (e.type !== 'expense' || e.date < from || e.date > to) return false;
+            if (!isSpend(e) || e.date < from || e.date > to) return false;
             const cat = categoryOf(e);
             return cat && cat.bucket === 'save';
         })
-        .reduce((sum, e) => sum + entrySen(e), 0);
+        .reduce((sum, e) => sum + spendSen(e), 0);
 }
 
 const growGoalsSavedIn = (from, to) => goalState.list.reduce((sum, goal) =>
@@ -7695,7 +7743,9 @@ function accountBalances() {
         const amount = entrySen(entry);
         if (!amount) return;
 
-        if (entry.type === 'income') {
+        if (entry.type === 'income' || entry.type === 'refund') {
+            // Both put money into an account. What they mean by it differs,
+            // and that difference is spent in the totals, not here.
             if (entry.account in balances) balances[entry.account] += amount;
         } else if (entry.type === 'expense') {
             if (entry.account in balances) balances[entry.account] -= amount;
@@ -8627,6 +8677,31 @@ const entrySen = (entry) => {
     return Math.max(0, toSen(parseFloat(entry.amount) || 0));
 };
 
+/**
+ * --------------------------------------------------------------------
+ * Money back
+ * --------------------------------------------------------------------
+ * A fourth kind of entry, and the one the other three could not say.
+ *
+ * You pay RM71.20 for a lunch three people share, and record all of it,
+ * because that is what left your account and what the bank statement says.
+ * Then they pay you back. That money is not income — nobody paid you for
+ * anything — and it is not a transfer, because it came from someone else's
+ * pocket into yours. It is the expense partly coming back.
+ *
+ * So a refund raises the account it lands in *and* takes its amount back off
+ * the category it is filed under. After all three have paid, the lunch reads
+ * as the RM17.80 you actually ate, in the month you ate it, and your income
+ * never mentions it. A shop return and a cancelled order are the same shape.
+ *
+ * Everywhere spending is added up, it is added up with `spendSen`, which is
+ * an expense as a plus and a refund as a minus. Nothing else has to know.
+ */
+const isSpend = (entry) => entry.type === 'expense' || entry.type === 'refund';
+
+/** Spending, signed: what was spent, less what came back. */
+const spendSen = (entry) => (entry.type === 'refund' ? -entrySen(entry) : entrySen(entry));
+
 /** What was handed over, in the currency it was handed over in. */
 const entryFaceValue = (entry) =>
     currencySymbol(entry.currency) + ' ' + fmt(parseFloat(entry.amount) || 0);
@@ -8639,14 +8714,23 @@ function ledgerEntriesFor(monthKey) {
 }
 
 function ledgerTotals(entries) {
-    let incomeSen = 0, expenseSen = 0, movedSen = 0;
+    let incomeSen = 0, expenseSen = 0, movedSen = 0, backSen = 0;
     entries.forEach((entry) => {
         const amount = entrySen(entry);
         if (entry.type === 'income') incomeSen += amount;
         else if (entry.type === 'expense') expenseSen += amount;
+        else if (entry.type === 'refund') backSen += amount;
         else movedSen += amount;
     });
-    return { incomeSen, expenseSen, movedSen, netSen: incomeSen - expenseSen };
+
+    // Spending is what went out less what came back. Reported that way it is
+    // the figure a reader can check against what they actually consumed.
+    return {
+        incomeSen, movedSen, backSen,
+        grossExpenseSen: expenseSen,
+        expenseSen: expenseSen - backSen,
+        netSen: incomeSen - (expenseSen - backSen),
+    };
 }
 
 function ledgerCompute() {
@@ -8655,9 +8739,9 @@ function ledgerCompute() {
     const totals  = ledgerTotals(entries);
 
     const byCategory = {};
-    entries.filter((entry) => entry.type === 'expense').forEach((entry) => {
+    entries.filter(isSpend).forEach((entry) => {
         const cat = categoryOf(entry);
-        byCategory[cat.id] = (byCategory[cat.id] || 0) + entrySen(entry);
+        byCategory[cat.id] = (byCategory[cat.id] || 0) + spendSen(entry);
     });
 
     const categories = Object.entries(byCategory)
@@ -8746,8 +8830,11 @@ function paintLedgerList(book) {
             row.className = 'led-entry' + (entryNeedsRate(entry) ? ' needs-rate' : '');
             row.dataset.entry = entry.id;
 
-            const sign = entry.type === 'income' ? '+ ' : entry.type === 'expense' ? '− ' : '';
-            const tone = entry.type === 'income' ? 'is-in' : entry.type === 'expense' ? 'is-out' : 'is-move';
+            const sign = entry.type === 'income' || entry.type === 'refund' ? '+ '
+                : entry.type === 'expense' ? '− ' : '';
+            const tone = entry.type === 'income' ? 'is-in'
+                : entry.type === 'refund' ? 'is-back'
+                : entry.type === 'expense' ? 'is-out' : 'is-move';
 
             row.innerHTML =
                 '<span class="led-icon led-' + entry.type + '"><i class="bi ' +
@@ -9208,11 +9295,25 @@ function syncLedgerForm() {
     const type = ledgerFormType();
     const transfer = type === 'transfer';
 
+    // Money back keeps its category: that is the whole point of it — the
+    // amount comes off whatever it was spent on in the first place.
     if ($('ledgerFieldCategory')) $('ledgerFieldCategory').hidden = transfer;
     if ($('ledgerFieldSub'))      $('ledgerFieldSub').hidden = transfer;
     if ($('ledgerFieldTo'))       $('ledgerFieldTo').hidden = !transfer;
 
-    set('ledgerAccountLabel', transfer ? 'Out of' : type === 'income' ? 'Received into' : 'Payment method');
+    set('ledgerAccountLabel',
+        transfer ? 'Out of'
+        : type === 'income' ? 'Received into'
+        : type === 'refund' ? 'Back into'
+        : 'Payment method');
+
+    const hint = $('ledgerCategoryHint');
+    if (hint) {
+        hint.hidden = type !== 'refund';
+        hint.textContent = 'File it under whatever it is coming back off — the amount is taken off ' +
+            'that category, so what you spent there reads as what you actually kept spending.';
+    }
+
     buildCategoryOptions();
 }
 
@@ -9477,7 +9578,7 @@ function loadLedger() {
         .map((e, index) => ({
             id: String(e.id),
             seq: Number(e.seq) || index + 1,
-            type: ['expense', 'income', 'transfer'].includes(e.type) ? e.type : 'expense',
+            type: ['expense', 'income', 'transfer', 'refund'].includes(e.type) ? e.type : 'expense',
             amount: String(e.amount || '0'),
             // Everything below arrived after the first entries were written,
             // so every one of them has to read as absent rather than wrong.
@@ -9823,8 +9924,8 @@ function dashCompute() {
 function dashBreakdown(entries, dim) {
     const rows = new Map();
 
-    entries.filter((entry) => entry.type === 'expense').forEach((entry) => {
-        const sen = entrySen(entry);
+    entries.filter(isSpend).forEach((entry) => {
+        const sen = spendSen(entry);
         if (!sen) return;
 
         let key, label, tone;
@@ -9937,7 +10038,7 @@ function dashTrend(grain, endIso) {
 
     buckets.forEach((bucket) => {
         bucket.sen = ledgerState.entries.reduce((sum, entry) =>
-            (entry.type === 'expense' && entry.date >= bucket.from && entry.date <= bucket.to)
+            (isSpend(entry) && entry.date >= bucket.from && entry.date <= bucket.to)
                 ? sum + entrySen(entry) : sum, 0);
     });
 
@@ -10014,9 +10115,9 @@ function dashSideTotals(period) {
     const totals  = ledgerTotals(entries);
 
     const byCategory = {};
-    entries.filter((entry) => entry.type === 'expense').forEach((entry) => {
+    entries.filter(isSpend).forEach((entry) => {
         const cat = categoryOf(entry);
-        byCategory[cat.id] = (byCategory[cat.id] || 0) + entrySen(entry);
+        byCategory[cat.id] = (byCategory[cat.id] || 0) + spendSen(entry);
     });
 
     return {
@@ -10448,7 +10549,7 @@ function paintDashHistory(book) {
     // did to the book: a transfer is a minus on one side and a plus on the other.
     const effect = (entry) => {
         const sen = entrySen(entry);
-        if (entry.type === 'income')  return sen;
+        if (entry.type === 'income' || entry.type === 'refund') return sen;
         if (entry.type === 'expense') return -sen;
         return entry.toAccount === account.id ? sen : -sen;
     };
@@ -11879,6 +11980,16 @@ function startApp() {
             if (!btn) return;
             if (btn.dataset.openPlan) commitOpenPlan(btn.dataset.openPlan);
             else commitDropPlan(btn.dataset.dropPlan);
+        });
+    }
+
+    const splitExpMode = $('splitExpMode');
+    if (splitExpMode) {
+        splitExpMode.addEventListener('click', (event) => {
+            const btn = event.target.closest('button[data-val]');
+            if (!btn) return;
+            setSegment(splitExpMode, btn.dataset.val);
+            renderSplit();
         });
     }
 
