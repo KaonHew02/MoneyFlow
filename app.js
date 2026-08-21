@@ -6530,9 +6530,14 @@ function paintGrowRate(book) {
           ' · ' + book.range.label);
 
     set('growSaved', money(fromSen(book.saved.totalSen)));
-    set('growSavedFoot', book.range.label + (book.range.months > 1
-        ? ' · ' + money(fromSen(Math.round(book.saved.totalSen / book.range.months))) + ' a month'
-        : ''));
+
+    // A tile reading RM 0.00 above a bare month name says nothing about why.
+    // Empty, it names the three things it counts; full, it stays out of the way.
+    set('growSavedFoot', book.saved.totalSen
+        ? book.range.label + (book.range.months > 1
+            ? ' · ' + money(fromSen(Math.round(book.saved.totalSen / book.range.months))) + ' a month'
+            : '')
+        : 'Savings entries, goal top-ups and contributions — none in ' + book.range.label);
 
     set('growWorth', money(fromSen(book.valueSen)));
     set('growWorthFoot', book.live.length
@@ -6660,6 +6665,17 @@ function paintGrowTrend(book) {
     set('growTrendNote', months
         ? money(fromSen(savedSen)) + ' over ' + months + (months === 1 ? ' month' : ' months')
         : 'Nothing yet');
+
+    // Twelve rows of dashes is not a chart of nothing, it is twelve rows of
+    // dashes. Until there is a month with something in it, say so once.
+    const anyIncome = book.trend.some((t) => t.incomeSen > 0);
+    if (!months && !anyIncome) {
+        paintEmpty(host, 'Nothing to chart yet',
+            'This draws what you kept against what came in, month by month. It fills itself in ' +
+            'as you record income in Expenses and set money aside.', 'bi-bar-chart');
+        return;
+    }
+    clearEmpty(host);
 
     book.trend.forEach((row) => {
         const rate = row.incomeSen > 0 ? row.savedSen / row.incomeSen * 100 : 0;
