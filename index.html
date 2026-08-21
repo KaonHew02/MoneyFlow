@@ -177,8 +177,8 @@
                             </button>
                         </div>
                     </div>
-                    <div class="kpi-grid" id="dashKpis"></div>
-                    <p class="hint">Three figures wait on modules that are not built yet &mdash; investments (Grow), instalments and upcoming payments (Commit). They show a dash rather than RM&nbsp;0.00, because zero would be a claim about your money.</p>
+                    <div class="kpi-bands" id="dashKpis"></div>
+                    <p class="hint">A figure with nothing behind it yet shows a dash rather than RM&nbsp;0.00, because zero would be a claim about your money. <b>Where you stand</b> is all-time; <b>This period</b> follows the dates above.</p>
                 </section>
 
                 <!-- Four cards that each fit half the width, paired tall-with-short so the two columns finish at roughly the same place. -->
@@ -596,7 +596,47 @@
                             <button type="button" class="ghost-btn" id="ledgerAddAccount">
                                 <i class="bi bi-plus-lg"></i> Add account
                             </button>
+                            <button type="button" class="ghost-btn" id="ledgerEditTypes"
+                                    aria-expanded="false" aria-controls="ledgerTypeEdit">
+                                <i class="bi bi-collection"></i> Kinds
+                            </button>
+                            <button type="button" class="ghost-btn" id="ledgerEditPurposes"
+                                    aria-expanded="false" aria-controls="ledgerPurposeEdit">
+                                <i class="bi bi-bookmark"></i> Purposes
+                            </button>
                             <span class="hint">Opening balance is what each account held before your first entry here. Every entry moves the balance from there.</span>
+                        </div>
+
+                        <!-- What sort of place the money sits in. The balance panels group
+                             by this, so a kind with accounts behind it stays put until they
+                             are moved &mdash; renaming one is always safe. -->
+                        <div id="ledgerTypeEdit" hidden>
+                            <div class="purpose-head">
+                                <h3>Kinds of account</h3>
+                                <span class="hint">What the balance panels group by. Renaming one is safe &mdash; accounts follow the kind, not its wording. A kind with accounts behind it cannot be removed until they are moved.</span>
+                            </div>
+                            <div class="purpose-list" id="ledgerTypes"></div>
+                            <div class="form-foot is-quiet">
+                                <button type="button" class="ghost-btn" id="ledgerAddType">
+                                    <i class="bi bi-plus-lg"></i> Add kind
+                                </button>
+                            </div>
+                        </div>
+
+                        <!-- One list, shared by every account row: what an account is for.
+                             It is the reader's own wording, so it is theirs to change &mdash;
+                             and any account's purpose picker opens this. -->
+                        <div id="ledgerPurposeEdit" hidden>
+                            <div class="purpose-head">
+                                <h3>Purposes</h3>
+                                <span class="hint">Renaming one carries every account that holds it. Removing one leaves those accounts with no stated purpose &mdash; nothing else is touched.</span>
+                            </div>
+                            <div class="purpose-list" id="ledgerPurposes"></div>
+                            <div class="form-foot is-quiet">
+                                <button type="button" class="ghost-btn" id="ledgerAddPurpose">
+                                    <i class="bi bi-plus-lg"></i> Add purpose
+                                </button>
+                            </div>
                         </div>
                     </div>
                 </section>
@@ -1882,11 +1922,21 @@
                         <h2 id="growFormTitle">New investment</h2>
                         <div class="card-actions">
                             <span class="plan-state" id="growState" data-state="draft">Draft</span>
+                            <button type="button" class="ghost-btn" id="growEditTypes"
+                                    aria-expanded="false" aria-controls="growTypeEdit">
+                                <i class="bi bi-collection"></i> Types
+                            </button>
                             <button type="button" class="ghost-btn" data-reset="grow">
                                 <i class="bi bi-arrow-counterclockwise"></i> Reset
                             </button>
                         </div>
                     </div>
+
+                    <!-- The fields are general; what belongs in them is not. This says
+                         what to fill in for the kind of thing being recorded, because
+                         "I do not know what to put here" is a fair response to a form
+                         that will not say. -->
+                    <div class="guide" id="growGuide"></div>
 
                     <div class="field-grid">
                         <div class="field">
@@ -1905,7 +1955,22 @@
                         </div>
 
                         <div class="field">
-                            <label for="growValue">Worth now <span class="per">leave empty for what went in</span></label>
+                            <label for="growOpening">Opening balance <span class="per">what it already held</span></label>
+                            <div class="money-input">
+                                <span class="affix">RM</span>
+                                <input type="number" id="growOpening" min="0" step="100" placeholder="0.00" inputmode="decimal">
+                            </div>
+                            <p class="hint">Nobody starts tracking the day they opened an EPF account. This counts as money put in &mdash; but not as money saved this month, so it never touches your savings rate.</p>
+                        </div>
+
+                        <div class="field">
+                            <label for="growSource">Fed from <span class="per">a category in Expenses</span></label>
+                            <select id="growSource"></select>
+                            <p class="hint">Pick the category you file the top-ups under and they are read straight from Expenses &mdash; no need to type them twice. Leave it on &ldquo;Nothing&rdquo; to log them here instead.</p>
+                        </div>
+
+                        <div class="field">
+                            <label for="growValue">Worth now <span class="per">today's balance, from your statement</span></label>
                             <div class="money-input">
                                 <span class="affix">RM</span>
                                 <input type="number" id="growValue" min="0" step="100" placeholder="0.00" inputmode="decimal">
@@ -1924,10 +1989,31 @@
                         </div>
                     </div>
 
+                    <!-- The kinds of holding are the reader's list too: ASNB and EPF are
+                         only what a browser starts with, and what someone puts money into
+                         is not ours to enumerate. Renaming is always safe — a holding
+                         points at the kind, not at its wording. -->
+                    <div id="growTypeEdit" hidden>
+                        <div class="purpose-head">
+                            <h3>Kinds of investment</h3>
+                            <span class="hint">What the list groups by. Renaming one is safe &mdash; holdings follow the kind, not its wording. A kind with holdings behind it cannot be removed until they are moved. Click an icon for another one.</span>
+                        </div>
+                        <div class="purpose-list" id="growTypes"></div>
+                        <div class="form-foot is-quiet">
+                            <button type="button" class="ghost-btn" id="growAddType">
+                                <i class="bi bi-plus-lg"></i> Add kind
+                            </button>
+                        </div>
+                    </div>
+
                     <div class="tally">
                         <div class="tally-cell">
                             <span>Put in</span>
                             <b id="growTallyIn">RM 0.00</b>
+                        </div>
+                        <div class="tally-cell">
+                            <span>Paid out</span>
+                            <b id="growTallyEarned">RM 0.00</b>
                         </div>
                         <div class="tally-cell">
                             <span>Worth now</span>
@@ -1942,6 +2028,44 @@
                             <b id="growTallyReturn">&mdash;</b>
                         </div>
                     </div>
+
+                    <!-- What it grows to if the topping up carries on. A projection, so it
+                         only ever fills the current value when the button is pressed. -->
+                    <details class="fold" id="growProjFold">
+                        <summary>
+                            <span><i class="bi bi-graph-up-arrow"></i> Growth projection</span>
+                            <b id="growProjSummary">&mdash;</b>
+                        </summary>
+                        <div class="field-grid">
+                            <div class="field">
+                                <label for="growProjMonthly">Top up <span class="per">a month</span></label>
+                                <div class="money-input">
+                                    <span class="affix">RM</span>
+                                    <input type="number" id="growProjMonthly" min="0" step="50" placeholder="0" inputmode="decimal">
+                                </div>
+                            </div>
+                            <div class="field">
+                                <label for="growProjRate">Rate <span class="per">a year</span></label>
+                                <div class="money-input">
+                                    <span class="affix">%</span>
+                                    <input type="number" id="growProjRate" min="0" max="100" step="0.05" placeholder="5.75" inputmode="decimal">
+                                </div>
+                            </div>
+                            <div class="field">
+                                <label for="growProjYears">For</label>
+                                <div class="money-input">
+                                    <span class="affix">yr</span>
+                                    <input type="number" id="growProjYears" min="1" max="60" step="1" placeholder="10" inputmode="numeric">
+                                </div>
+                            </div>
+                            <div class="field is-wide">
+                                <p class="hint" id="growProjText">&mdash;</p>
+                                <button type="button" class="ghost-btn" id="growProjApply">
+                                    <i class="bi bi-arrow-down-circle"></i> Use as the current value
+                                </button>
+                            </div>
+                        </div>
+                    </details>
 
                     <details class="fold" id="growFdFold" hidden>
                         <summary>
@@ -2016,6 +2140,37 @@
                     <p class="hint" id="growCHint">&mdash;</p>
 
                     <div class="goal-log-list" id="growCList"></div>
+                </section>
+
+                <!-- What the holding paid you, as against what you paid into it.
+                     An ASNB dividend or an EPF crediting is not saving: filing it
+                     as a contribution would say you put it there and hide the
+                     return behind it. It is credited into the holding, so logging
+                     one raises Worth now by the same amount. -->
+                <section class="card" id="growEarnCard">
+                    <div class="card-head">
+                        <h2 id="growEarnTitle">Dividends &amp; interest</h2>
+                        <span class="card-note" id="growEarnNote">&mdash;</span>
+                    </div>
+
+                    <div class="grow-add is-earn" id="growEarnAdd">
+                        <input type="date" id="growEDate" aria-label="Date paid">
+                        <div class="money-input money-input-sm">
+                            <span class="affix">RM</span>
+                            <input type="number" id="growEFigure" min="0" step="50" placeholder="0" inputmode="decimal" aria-label="Amount paid">
+                        </div>
+                        <div class="money-input money-input-sm is-suffix">
+                            <span class="affix">%</span>
+                            <input type="number" id="growERate" min="0" max="100" step="0.05" placeholder="Rate" inputmode="decimal" aria-label="Declared rate">
+                        </div>
+                        <input type="text" id="growENote" placeholder="Note (optional)" aria-label="Note" maxlength="60">
+                        <button type="button" class="ghost-btn" id="growEAdd">
+                            <i class="bi bi-plus-lg"></i> Add
+                        </button>
+                    </div>
+                    <p class="hint" id="growEHint">&mdash;</p>
+
+                    <div class="goal-log-list" id="growEList"></div>
                 </section>
 
             </div>

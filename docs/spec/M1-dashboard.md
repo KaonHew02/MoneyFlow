@@ -103,7 +103,21 @@ become a second version of the truth.
 |---|---|
 | Total balance | every account's opening balance plus every entry, all time |
 | Total income / expenses / net cash flow | ledger, period-scoped, transfers excluded |
-| Total savings | balance of accounts in the `savings` group |
+| Total savings | accounts whose **purpose** reads savings or investment, **plus** what has been put into open holdings (opening balance + contributions) |
+| Investment gain | what those holdings have earned on top: worth now − put in |
+
+An emergency fund is deliberately **not** in Total savings. It is money standing
+by to be spent, so counting it made the total rise and fall with an expense the
+reader was braced for anyway. Total savings is what is being *kept*.
+
+**The two tiles add up rather than overlap.** Money set aside is savings
+wherever it is sitting — in an account kept for it or paid into a holding — and
+what the holding earned on top is the return, not more saving. Nothing is
+counted twice: paying into a holding took the money out of the account it came
+from. The one way to double it is to keep an ASNB *account* in Expenses **and**
+an ASNB holding in Grow for the same money; a holding is not linked to an
+account, on purpose.
+
 | Credit card outstanding | what is owed on `credit` accounts; with none on the books, Card Payoff's balance stands in and the tile says so |
 | Budget remaining | Budget Planner's total plan − expenses in the period |
 | **Investment value** | — **pending M7 Grow** |

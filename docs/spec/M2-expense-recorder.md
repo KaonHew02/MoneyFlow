@@ -69,6 +69,13 @@ Status.
 
 Types: Bank · Cash · E-Wallet · Credit Card · Other.
 
+Both lists are the reader's: types and purposes can be added, renamed and
+removed on the Accounts card. Those five types and the starting purposes are
+only what a fresh browser begins with. A type that accounts are filed under
+cannot be removed until they are moved — accounts are grouped by type, and
+there has to be at least one. A purpose is only a note, so removing one
+leaves the accounts that held it with no stated purpose and nothing else.
+
 ## 12. Account balance logic
 
     CIMB Bank     purpose: Salary

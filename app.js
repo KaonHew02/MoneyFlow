@@ -3083,6 +3083,10 @@ function buildGoals() {
         host.appendChild(card);
         buildGoalLog(goal);
     });
+
+    // Goals is the one module that builds date boxes of its own, so the cards
+    // it has just made get the same treatment the page got at startup.
+    enhanceDateInputs(host);
 }
 
 function buildGoalLog(goal) {
@@ -5499,7 +5503,15 @@ function migrateCardV1(saved) {
  */
 const GROW_KEY = 'moneyflow.grow.v1';
 
-const INVESTMENT_TYPES = [
+/* What a browser starts with. The list is the reader's after that: kinds are
+   added, renamed and removed on the investment form, and the live list is
+   saved with the holdings. A holding points at the kind's id, never at its
+   wording, so renaming one touches nothing else.
+
+   'fd' is the one id the app knows by name — it is what opens the fixed
+   deposit projection. Renaming it keeps that; removing it only takes away a
+   wording nothing was using. */
+const DEFAULT_INVESTMENT_TYPES = [
     { id: 'asb',   label: 'ASB / ASNB',   icon: 'bi-flower1' },
     { id: 'epf',   label: 'EPF / KWSP',   icon: 'bi-bank' },
     { id: 'fd',    label: 'Fixed deposit', icon: 'bi-safe' },
@@ -5510,21 +5522,43 @@ const INVESTMENT_TYPES = [
     { id: 'other', label: 'Something else', icon: 'bi-three-dots' },
 ];
 
-const investmentType = (id) => INVESTMENT_TYPES.find((t) => t.id === id) || INVESTMENT_TYPES[INVESTMENT_TYPES.length - 1];
+/* The last option in the Type picker: a way into the editor, never a kind. */
+const INV_TYPE_EDIT = '__edit_inv_types__';
+
+/* A kind the reader adds needs a face. Clicking it walks this list, which is
+   short on purpose — enough to tell one row from another at a glance, not a
+   whole icon library to browse. */
+const INVESTMENT_ICONS = [
+    'bi-piggy-bank', 'bi-flower1', 'bi-bank', 'bi-safe', 'bi-graph-up', 'bi-boxes',
+    'bi-pie-chart', 'bi-gem', 'bi-cash-coin', 'bi-house', 'bi-shield-check', 'bi-three-dots',
+];
+
+const investmentType = (id) =>
+    growState.types.find((t) => t.id === id) ||
+    growState.types[growState.types.length - 1] ||
+    DEFAULT_INVESTMENT_TYPES[DEFAULT_INVESTMENT_TYPES.length - 1];
+
+/** What a new holding is, until it is told otherwise. */
+const defaultInvestmentTypeId = () => (growState.types[0] || {}).id || 'asb';
 
 let growState = {
     investments: [], draft: null, editing: null, seq: 0, filter: 'open',
+    types: DEFAULT_INVESTMENT_TYPES.map((t) => ({ ...t })),
     target: { value: '', unit: 'pct' },
 };
 
 const newInvestment = () => ({
     id: '', seq: 0,
-    name: '', type: 'asb',
+    name: '', type: defaultInvestmentTypeId(),
     opened: todayIso(),
+    opening: '',
+    source: '',
     value: '', valueDate: todayIso(),
     note: '', closed: false,
     fd: { rate: '', months: '' },
+    grow: { monthly: '', rate: '', years: '' },
     contributions: [],
+    earnings: [],
 });
 
 const growDraft = () => growState.draft || (growState.draft = newInvestment());
@@ -5580,11 +5614,77 @@ const contribBaseSen = (c) => Math.max(0, toSen(parseFloat(c.base) || 0));
 
 /**
  * --------------------------------------------------------------------
+ * Money the ledger already recorded
+ * --------------------------------------------------------------------
+ * The app's own rule is record once, analyze many times — and a monthly EPF
+ * top-up is already an entry in Expenses. Typing it here as well would be two
+ * versions of the same money, and they would drift the first time one was
+ * corrected.
+ *
+ * So a holding can name a spending category instead: every expense filed
+ * under it is money into this holding, read straight from the ledger. The
+ * rows are not editable here, because the record is over there.
+ */
+const linkedEntries = (inv) => (inv.source
+    ? ledgerState.entries.filter((e) => e.type === 'expense' && e.category === inv.source)
+    : []);
+
+const linkedSen = (inv) => linkedEntries(inv).reduce((sum, e) => sum + entrySen(e), 0);
+
+/**
+ * --------------------------------------------------------------------
+ * What a holding paid out
+ * --------------------------------------------------------------------
+ * An ASNB dividend and an EPF crediting are not money you put in — they are
+ * what the money did while it sat there. Filing one as a contribution would
+ * say you saved it, inflate what you put in, and hide the return behind it.
+ * So they are their own list: they never count towards savings, and they are
+ * already inside the profit, because a payout is credited into the holding
+ * and so raises what it is worth.
+ *
+ * The declared rate is kept beside the ringgit because that is how these are
+ * announced and remembered — "5.75% for 2024" — but nothing is worked out
+ * from it. The amount is the record; the rate is a note.
+ */
+const earningSen = (e) => Math.max(0, toSen(parseFloat(e.figure) || 0));
+
+const investmentEarnedSen = (inv) =>
+    (inv.earnings || []).reduce((sum, e) => sum + earningSen(e), 0);
+
+/** Payouts by calendar year, newest first — the way a dividend is reviewed. */
+function earningYears(inv) {
+    const years = new Map();
+    (inv.earnings || []).forEach((e) => {
+        const year = String(e.date).slice(0, 4);
+        if (!years.has(year)) years.set(year, { year, rows: [], totalSen: 0 });
+        const held = years.get(year);
+        held.rows.push(e);
+        held.totalSen += earningSen(e);
+    });
+
+    return [...years.values()]
+        .sort((a, b) => (a.year < b.year ? 1 : -1))
+        .map((y) => ({ ...y, rows: y.rows.slice().sort((a, b) => (a.date === b.date
+            ? (a.id < b.id ? 1 : -1)
+            : (a.date < b.date ? 1 : -1))) }));
+}
+
+/**
+ * --------------------------------------------------------------------
  * One investment
  * --------------------------------------------------------------------
  */
 function investmentFigures(inv) {
-    const investedSen = inv.contributions.reduce((sum, c) => sum + contribSen(c), 0);
+    // Nobody starts tracking on the day they opened an EPF account. What was
+    // already in it is money put in — it is just not money put in *this*
+    // month, so it never reaches the savings figures, which only ever read
+    // contributions. Without it, a holding with a balance and no history
+    // reads as pure profit: RM 50,000 put in as "worth now" against RM 0 in.
+    const openingSen = Math.max(0, toSen(parseFloat(inv.opening) || 0));
+    const manualSen = inv.contributions.reduce((sum, c) => sum + contribSen(c), 0);
+    const fromLedgerSen = linkedSen(inv);
+    const contributedSen = manualSen + fromLedgerSen;
+    const investedSen = openingSen + contributedSen;
 
     // An empty "worth now" means it is worth what went in — which is true of a
     // fixed deposit on day one, and the least misleading thing to assume.
@@ -5594,7 +5694,8 @@ function investmentFigures(inv) {
     const profitSen = valueSen - investedSen;
 
     return {
-        inv, investedSen, valueSen, profitSen,
+        inv, investedSen, openingSen, contributedSen, manualSen, fromLedgerSen, valueSen, profitSen,
+        earnedSen: investmentEarnedSen(inv),
         valued: typedValue !== '',
         returnPct: investedSen > 0 ? profitSen / investedSen * 100 : 0,
         live: !inv.closed,
@@ -5628,6 +5729,88 @@ function fdProjection(principalSen, ratePct, months) {
 }
 
 /**
+ * Every ringgit that has gone into a holding, in date order — what it was
+ * opened with, what has been paid in since, and what it has been paid.
+ */
+function investmentInflows(inv) {
+    const rows = [];
+
+    const openingSen = Math.max(0, toSen(parseFloat(inv.opening) || 0));
+    if (openingSen) rows.push({ date: inv.opened || todayIso(), sen: openingSen });
+
+    inv.contributions.forEach((c) => rows.push({ date: c.date, sen: contribSen(c) }));
+    linkedEntries(inv).forEach((e) => rows.push({ date: e.date, sen: entrySen(e) }));
+    (inv.earnings || []).forEach((e) => rows.push({ date: e.date, sen: earningSen(e) }));
+
+    return rows.sort((a, b) => (a.date < b.date ? -1 : a.date > b.date ? 1 : 0));
+}
+
+/**
+ * What a declared rate comes to in ringgit.
+ *
+ * EPF and ASNB pay on the balance as it stood *through* the year, not on the
+ * balance at the end of it — money paid in during November has earned two
+ * months of dividend, not twelve. So this walks the year a month at a time
+ * and takes a twelfth of the rate on the balance standing in each one.
+ *
+ * It is an arithmetic answer to "what does 5.75% come to", not a statement.
+ * The figure it offers can be typed over.
+ */
+function dividendFromRate(inv, iso, ratePct) {
+    const rate = Math.max(0, parseFloat(ratePct) || 0) / 100;
+    const year = Number(String(iso || '').slice(0, 4));
+    if (!rate || !year) return null;
+
+    const rows = investmentInflows(inv);
+    let balance = rows.filter((r) => r.date < isoOf(year, 1, 1)).reduce((sum, r) => sum + r.sen, 0);
+    let sen = 0;
+
+    for (let m = 1; m <= 12; m++) {
+        const from = monthFirst(year, m);
+        const to   = monthLast(year, m);
+        balance += rows.filter((r) => r.date >= from && r.date <= to).reduce((sum, r) => sum + r.sen, 0);
+        sen += balance * rate / 12;
+    }
+
+    return { sen: Math.round(sen), year, closingSen: balance, ratePct: Math.max(0, parseFloat(ratePct) || 0) };
+}
+
+/**
+ * What a regular saver grows to.
+ *
+ * EPF and ASNB declare a rate once a year against the balance held, so this
+ * compounds annually rather than monthly. Money paid in during the year has
+ * only been there for part of it, so the year's top-ups are counted at half —
+ * the standard approximation, and near enough for a figure whose real rate is
+ * not announced until December.
+ *
+ * It is a projection. It fills the current value only when the button is
+ * pressed, so what sits on the record stays something the reader chose.
+ */
+function growthProjection(startSen, monthlyRm, ratePct, years) {
+    const monthlySen = Math.max(0, toSen(parseFloat(monthlyRm) || 0));
+    const rate = Math.max(0, parseFloat(ratePct) || 0) / 100;
+    const term = Math.max(0, Math.floor(parseFloat(years) || 0));
+    if (!term || (!startSen && !monthlySen)) return null;
+
+    let balance = startSen;
+    let paidInSen = 0;
+
+    for (let y = 0; y < term; y++) {
+        const inYear = monthlySen * 12;
+        balance += inYear + Math.round((balance + inYear / 2) * rate);
+        paidInSen += inYear;
+    }
+
+    return {
+        startSen, monthlySen, paidInSen, years: term,
+        ratePct: Math.max(0, parseFloat(ratePct) || 0),
+        endSen: balance,
+        growthSen: balance - startSen - paidInSen,
+    };
+}
+
+/**
  * --------------------------------------------------------------------
  * The savings half
  * --------------------------------------------------------------------
@@ -5650,10 +5833,39 @@ const growGoalsSavedIn = (from, to) => goalState.list.reduce((sum, goal) =>
         .filter((c) => c.date >= from && c.date <= to)
         .reduce((s, c) => s + Math.max(0, toSen(parseFloat(c.amount) || 0)), 0), 0);
 
-const growInvestedIn = (from, to) => growState.investments.reduce((sum, inv) =>
-    sum + inv.contributions
-        .filter((c) => c.date >= from && c.date <= to)
-        .reduce((s, c) => s + contribSen(c), 0), 0);
+/**
+ * What went into investments in a period — and only once.
+ *
+ * A contribution typed here is this module's own record, so it is added. An
+ * entry the holding takes from the ledger is not: if it is filed under a
+ * savings category, `growLedgerSavedIn` has already counted it, and adding it
+ * again would say the money was put away twice. Filed anywhere else the
+ * ledger has *not* counted it as saving, so it is added here — which is what
+ * keeps the total exact either way.
+ *
+ * Entries are counted once across all holdings, in case two of them are ever
+ * fed by the same category.
+ */
+function growInvestedIn(from, to) {
+    let sen = 0;
+    const seen = new Set();
+
+    growState.investments.forEach((inv) => {
+        sen += inv.contributions
+            .filter((c) => c.date >= from && c.date <= to)
+            .reduce((s, c) => s + contribSen(c), 0);
+
+        linkedEntries(inv)
+            .filter((e) => e.date >= from && e.date <= to && !seen.has(e.id))
+            .forEach((e) => {
+                seen.add(e.id);
+                const cat = categoryOf(e);
+                if (!cat || cat.bucket !== 'save') sen += entrySen(e);
+            });
+    });
+
+    return sen;
+}
 
 function growSavedIn(from, to) {
     const ledgerSen = growLedgerSavedIn(from, to);
@@ -5722,6 +5934,23 @@ const growTotalValueSen = () => growState.investments
     .reduce((sum, i) => sum + investmentFigures(i).valueSen, 0);
 
 /**
+ * The two halves of what is in an investment: the part you put there, and the
+ * part it made. They are kept apart because the Dashboard reports them as two
+ * tiles that add up rather than as two overlapping totals — money you set
+ * aside is savings, and what it earned on top is the return.
+ *
+ *     put in  = opening balance + every contribution
+ *     gain    = worth now − put in, which is the dividends and the growth
+ */
+const growTotalInvestedSen = () => growState.investments
+    .filter((i) => !i.closed)
+    .reduce((sum, i) => sum + investmentFigures(i).investedSen, 0);
+
+const growTotalGainSen = () => growState.investments
+    .filter((i) => !i.closed)
+    .reduce((sum, i) => sum + investmentFigures(i).profitSen, 0);
+
+/**
  * --------------------------------------------------------------------
  * Form in, form out
  * --------------------------------------------------------------------
@@ -5729,14 +5958,22 @@ const growTotalValueSen = () => growState.investments
 function readGrowForm() {
     const inv = growDraft();
     inv.name      = ($('growName')      || {}).value || '';
-    inv.type      = ($('growType')      || {}).value || 'asb';
+    const picked  = ($('growType') || {}).value || '';
+    if (picked && picked !== INV_TYPE_EDIT) inv.type = picked;
     inv.opened    = ($('growOpened')    || {}).value || inv.opened;
+    inv.opening   = ($('growOpening')    || {}).value || '';
+    inv.source    = ($('growSource')      || {}).value || '';
     inv.value     = ($('growValue')     || {}).value || '';
     inv.valueDate = ($('growValueDate') || {}).value || '';
     inv.note      = ($('growNote')      || {}).value || '';
     inv.fd = {
         rate:   ($('growFdRate')   || {}).value || '',
         months: ($('growFdMonths') || {}).value || '',
+    };
+    inv.grow = {
+        monthly: ($('growProjMonthly') || {}).value || '',
+        rate:    ($('growProjRate')    || {}).value || '',
+        years:   ($('growProjYears')   || {}).value || '',
     };
 
     growState.target = {
@@ -5751,26 +5988,278 @@ function fillGrowForm() {
     if ($('growName'))      $('growName').value      = inv.name;
     if ($('growType'))      $('growType').value      = inv.type;
     if ($('growOpened'))    $('growOpened').value    = inv.opened;
+    if ($('growOpening'))   $('growOpening').value   = inv.opening;
+    buildGrowSources();
+    if ($('growSource'))    $('growSource').value    = inv.source;
     if ($('growValue'))     $('growValue').value     = inv.value;
     if ($('growValueDate')) $('growValueDate').value = inv.valueDate;
     if ($('growNote'))      $('growNote').value      = inv.note;
     if ($('growFdRate'))    $('growFdRate').value    = inv.fd.rate;
     if ($('growFdMonths'))  $('growFdMonths').value  = inv.fd.months;
+    if ($('growProjMonthly')) $('growProjMonthly').value = inv.grow.monthly;
+    if ($('growProjRate'))    $('growProjRate').value    = inv.grow.rate;
+    if ($('growProjYears'))   $('growProjYears').value   = inv.grow.years;
 
     if ($('growTarget')) $('growTarget').value = growState.target.value;
     if ($('growTargetUnit')) setSegment($('growTargetUnit'), growState.target.unit);
     if ($('growCDate')) $('growCDate').value = todayIso();
+    if ($('growEDate')) $('growEDate').value = todayIso();
 }
 
 function buildGrowTypes() {
     const select = $('growType');
-    if (!select || select.options.length) return;
-    INVESTMENT_TYPES.forEach((t) => {
+    if (!select) return;
+
+    // Rebuilt rather than built once: the list is editable now, and a picker
+    // that was filled at startup would still be offering a kind that is gone.
+    const chosen = select.value && select.value !== INV_TYPE_EDIT ? select.value : '';
+    select.innerHTML = '';
+
+    growState.types.filter((t) => t.label.trim()).forEach((t) => {
         const option = document.createElement('option');
         option.value = t.id;
+        // The wording is user-typed, so it is set as text rather than markup.
         option.textContent = t.label;
         select.appendChild(option);
     });
+
+    const edit = document.createElement('option');
+    edit.value = INV_TYPE_EDIT;
+    edit.textContent = 'Edit types\u2026';
+    select.appendChild(edit);
+
+    if (chosen && growState.types.some((t) => t.id === chosen)) select.value = chosen;
+}
+
+/**
+ * --------------------------------------------------------------------
+ * Kinds of investment
+ * --------------------------------------------------------------------
+ * The same bargain the Accounts card's kinds get, for the same reasons. A
+ * holding is always one of these, so the list can never be emptied and a kind
+ * with holdings behind it is not removed out from under them. Renaming is
+ * free: a holding points at the id.
+ */
+const invTypeById = (id) => growState.types.find((t) => t.id === id) || null;
+
+function buildInvTypeRows() {
+    const host = $('growTypes');
+    if (!host) return;
+    host.innerHTML = '';
+
+    growState.types.forEach((type, index) => {
+        const held = growState.investments.filter((i) => i.type === type.id).length;
+
+        const row = document.createElement('div');
+        row.className = 'purpose-row is-icon';
+        row.dataset.type = type.id;
+        row.innerHTML =
+            '<button type="button" class="type-icon" data-cycle-icon title="Click for another icon" ' +
+                'aria-label="Change the icon"><i class="bi ' + escapeHtml(type.icon) + '"></i></button>' +
+            '<input type="text" class="inv-type-name" placeholder="Kind ' + (index + 1) +
+                '" aria-label="Name of this kind of investment">' +
+            '<small>' + (held ? held + (held === 1 ? ' holding' : ' holdings') : 'unused') + '</small>' +
+            '<button type="button" class="split-x" data-drop-inv-type aria-label="Remove kind">' +
+                '<i class="bi bi-x-lg"></i></button>';
+
+        // Assigned rather than interpolated — the wording is user-typed.
+        row.querySelector('.inv-type-name').value = type.label;
+        host.appendChild(row);
+    });
+}
+
+/** Everything that shows a kind, after the list has moved under it. */
+function afterInvTypeChange() {
+    const inv = growDraft();
+    buildGrowTypes();
+    if ($('growType')) $('growType').value = investmentType(inv.type).id;
+    buildInvTypeRows();
+    saveGrow();
+    renderGrow();
+    renderDash();
+}
+
+function invTypeEditor(open) {
+    const panel = $('growTypeEdit');
+    if (!panel) return;
+    const show = open === undefined ? panel.hidden : open;
+
+    panel.hidden = !show;
+    const button = $('growEditTypes');
+    if (button) button.setAttribute('aria-expanded', String(show));
+    if (show) buildInvTypeRows();
+}
+
+function addInvType() {
+    readGrowForm();
+    growState.types.push({ id: 'it' + (++growState.seq), label: '', icon: 'bi-piggy-bank' });
+    buildInvTypeRows();
+
+    const fresh = document.querySelector('#growTypes .purpose-row:last-child .inv-type-name');
+    if (fresh) {
+        fresh.focus({ preventScroll: true });
+        fresh.scrollIntoView({ block: 'center', behavior: 'smooth' });
+    }
+}
+
+function renameInvType(input) {
+    const row  = input.closest('.purpose-row');
+    const type = invTypeById(row.dataset.type);
+    if (!type) return;
+
+    const name = input.value.trim();
+
+    if (!name) {
+        // Never named: the Add was abandoned. Named once: emptying the box is
+        // not how a kind is removed.
+        if (!type.label) {
+            growState.types = growState.types.filter((t) => t.id !== type.id);
+            buildInvTypeRows();
+            return;
+        }
+        input.value = type.label;
+        growHint('A kind needs a name — use the ✕ to remove one.');
+        return;
+    }
+
+    if (growState.types.some((t) => t.id !== type.id && t.label.toLowerCase() === name.toLowerCase())) {
+        input.value = type.label;
+        growHint('There is already a kind called “' + name + '”.');
+        return;
+    }
+
+    if (name === type.label) { input.value = name; return; }
+
+    readGrowForm();
+    type.label = name;
+    afterInvTypeChange();
+}
+
+function cycleInvTypeIcon(row) {
+    const type = invTypeById(row.dataset.type);
+    if (!type) return;
+
+    const at = INVESTMENT_ICONS.indexOf(type.icon);
+    type.icon = INVESTMENT_ICONS[(at + 1) % INVESTMENT_ICONS.length];
+
+    // The row is not rebuilt: a name half-typed beside it would go with it.
+    const icon = row.querySelector('.type-icon i');
+    if (icon) icon.className = 'bi ' + type.icon;
+    saveGrow();
+    renderGrow();
+}
+
+/**
+ * A kind with holdings filed under it does not go: removing it would move
+ * their figures into a kind the reader never chose. It stays until they are
+ * moved, and the row says so rather than failing quietly.
+ */
+function dropInvType(row) {
+    const type = invTypeById(row.dataset.type);
+    if (!type) return;
+
+    readGrowForm();
+    const held = growState.investments.filter((i) => i.type === type.id).length;
+
+    if (held || growState.types.length <= 1) {
+        row.classList.add('is-locked');
+        setTimeout(() => row.classList.remove('is-locked'), 1400);
+        growHint(held
+            ? held + (held === 1 ? ' holding is' : ' holdings are') + ' that kind — move ' +
+              (held === 1 ? 'it' : 'them') + ' to another kind first.'
+            : 'Keep at least one kind — an investment has to be something.');
+        return;
+    }
+
+    growState.types = growState.types.filter((t) => t.id !== type.id);
+    afterInvTypeChange();
+    growHint('“' + type.label + '” is gone.');
+}
+
+/** The last option in the Type picker asks for the editor, not for a kind. */
+function onInvTypePick() {
+    const select = $('growType');
+    if (!select || select.value !== INV_TYPE_EDIT) return;
+
+    select.value = investmentType(growDraft().type).id;
+    invTypeEditor(true);
+
+    const panel = $('growTypeEdit');
+    if (panel) panel.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+}
+
+/**
+ * What to fill in, for the kind of thing being recorded. A form of general
+ * fields cannot say what an EPF account wants in them; this can.
+ */
+function growGuideLines(type) {
+    if (type === 'fd') {
+        return [
+            ['Started', 'the day you placed it'],
+            ['Opening balance', 'what you placed'],
+            ['Worth now', 'leave it empty — the projection below works out the maturity'],
+            ['Fixed deposit projection', 'the rate and how many months, then press the button'],
+        ];
+    }
+
+    if (type === 'epf' || type === 'asb') {
+        const who = type === 'epf' ? 'EPF' : 'ASNB';
+        return [
+            ['Opening balance', 'what your latest ' + who + ' statement says, with Started as the date it is from'],
+            ['Fed from', 'the Expenses category you file top-ups under — they are then read from there, ' +
+                'so you never type them twice'],
+            ['Worth now', 'update it whenever a statement arrives; it is the only figure the app cannot work out'],
+            ['Dividends & interest', 'when ' + who + ' announce the rate, put the rate in and leave the amount ' +
+                'empty — the ringgit is worked out from the balance you held that year'],
+        ];
+    }
+
+    return [
+        ['Opening balance', 'what it already held the day you started tracking it'],
+        ['Worth now', "today's balance, from wherever you can read it. Empty means worth exactly what went in"],
+        ['Contributions', 'every top-up — or name a category under Fed from and they come from Expenses'],
+        ['Dividends & interest', 'anything it paid you, which is counted as return rather than as saving'],
+    ];
+}
+
+function paintGrowGuide(inv) {
+    const host = $('growGuide');
+    if (!host) return;
+
+    const type = investmentType(inv.type);
+    host.innerHTML =
+        '<h3><i class="bi bi-lightbulb"></i> What to fill in for ' + escapeHtml(type.label) + '</h3>' +
+        '<ul>' + growGuideLines(inv.type).map(([field, what]) =>
+            '<li><b>' + escapeHtml(field) + '</b> — ' + escapeHtml(what) + '</li>').join('') + '</ul>';
+}
+
+/**
+ * The categories a holding can be fed from. Spending categories only — money
+ * going into an investment leaves an account, so it is an expense in the
+ * ledger's terms even though it is not spending in anyone else's.
+ */
+function buildGrowSources() {
+    const select = $('growSource');
+    if (!select) return;
+    const chosen = select.value;
+
+    select.innerHTML = '';
+    const none = document.createElement('option');
+    none.value = '';
+    none.textContent = 'Nothing — I log contributions here';
+    select.appendChild(none);
+
+    categoryState.list
+        .filter((cat) => cat.bucket !== 'income')
+        .forEach((cat, index) => {
+            const option = document.createElement('option');
+            option.value = cat.id;
+            // Labels are user-typed, so they are set as text rather than markup.
+            option.textContent = categoryLabel(cat, index) + ' · ' + CATEGORY_BUCKETS[cat.bucket];
+            select.appendChild(option);
+        });
+
+    if (chosen && categoryState.list.some((c) => c.id === chosen)) select.value = chosen;
 }
 
 const growHint = (text) => {
@@ -5905,12 +6394,110 @@ function growAddContribution() {
     growHint('Added ' + money(fromSen(contribSen(contribution))) + ' to ' + investmentName(inv) + '.');
 }
 
+/* There was a "repeat last month" here. It went: a contribution is a
+   different figure most months — a bonus month, a rate change, whatever was
+   left over — so a copy of last month's was one more thing to correct before
+   it could be right. Each one is typed. */
+
 function growDropContribution(id) {
     const inv = growDraft();
     inv.contributions = inv.contributions.filter((c) => c.id !== id);
     saveGrow();
     renderGrow();
     renderDash();
+}
+
+/**
+ * --------------------------------------------------------------------
+ * Dividends and interest
+ * --------------------------------------------------------------------
+ */
+/** Worth-now, moved by something the reader did rather than typed by hand. */
+function growSetValue(inv, sen, when) {
+    inv.value = String(fromSen(Math.max(0, sen)));
+    if (when && (!inv.valueDate || when > inv.valueDate)) inv.valueDate = when;
+
+    if ($('growValue'))     $('growValue').value     = inv.value;
+    if ($('growValueDate')) $('growValueDate').value = inv.valueDate;
+}
+
+function growAddEarning() {
+    readGrowForm();
+    const inv = growDraft();
+    if (!inv.id) { growHint('Save the investment first — a dividend has to be paid into something.'); return; }
+
+    const when = ($('growEDate') || {}).value || todayIso();
+    const rate = String(($('growERate') || {}).value || '');
+    let figure = ($('growEFigure') || {}).value || '';
+
+    // A rate on its own is enough: the amount it comes to is worked out from
+    // the balance held through that year. Typing an amount overrides it —
+    // when the statement arrives, the statement wins.
+    if (!(parseFloat(figure) > 0)) {
+        const worked = dividendFromRate(inv, when, rate);
+        if (!worked || !worked.sen) {
+            if ($('growEFigure')) $('growEFigure').focus();
+            return;
+        }
+        figure = String(fromSen(worked.sen));
+    }
+
+    const earning = {
+        id: 'ie' + (++growState.seq),
+        date: when,
+        figure: String(figure),
+        rate,
+        note: (($('growENote') || {}).value || '').trim(),
+    };
+
+    inv.earnings.push(earning);
+
+    // A payout is credited into the holding, so what it is worth goes up by
+    // exactly that much. The figure stays yours to correct against a
+    // statement — this only saves doing the addition by hand.
+    const before = investmentFigures(inv).valueSen;
+    growSetValue(inv, before + earningSen(earning), earning.date);
+
+    saveGrow();
+    ['growEFigure', 'growERate', 'growENote'].forEach((id) => { if ($(id)) $(id).value = ''; });
+    renderGrow();
+    renderDash();
+
+    growHint('Logged ' + money(fromSen(earningSen(earning))) + ' from ' + investmentName(inv) +
+        ' — worth-now is up to ' + money(fromSen(before + earningSen(earning))) + '.');
+}
+
+function growDropEarning(id) {
+    readGrowForm();
+    const inv = growDraft();
+    const gone = (inv.earnings || []).find((e) => e.id === id);
+    if (!gone) return;
+
+    inv.earnings = inv.earnings.filter((e) => e.id !== id);
+
+    // It was added to what the holding is worth when it was logged, so it
+    // comes back off. Leaving it would overstate the holding quietly, which
+    // is the worst way to be wrong about money.
+    growSetValue(inv, investmentFigures(inv).valueSen - earningSen(gone), '');
+
+    saveGrow();
+    renderGrow();
+    renderDash();
+}
+
+function growApplyProjection() {
+    readGrowForm();
+    const inv = growDraft();
+    const f = investmentFigures(inv);
+    const proj = growthProjection(f.valueSen, inv.grow.monthly, inv.grow.rate, inv.grow.years);
+    if (!proj) { growHint('Put in a rate and how many years first, and something to grow.'); return; }
+
+    growSetValue(inv, proj.endSen, addMonthsClamped(todayIso(), proj.years * 12));
+    saveGrow();
+    renderGrow();
+    renderDash();
+    growHint('Worth-now set to the projected ' + money(fromSen(proj.endSen)) + ' in ' + proj.years +
+        (proj.years === 1 ? ' year' : ' years') + ' — a projection, not a statement.');
 }
 
 function growApplyFd() {
@@ -6182,6 +6769,7 @@ function paintGrowForm(book) {
     }
 
     set('growTallyIn', money(fromSen(f.investedSen)));
+    set('growTallyEarned', money(fromSen(f.earnedSen)));
     set('growTallyWorth', money(fromSen(f.valueSen)));
     set('growTallyProfit', (f.profitSen < 0 ? '− ' : '') + money(Math.abs(fromSen(f.profitSen))));
     const profit = $('growTallyProfit');
@@ -6189,9 +6777,33 @@ function paintGrowForm(book) {
     set('growTallyReturn', f.investedSen ? pct(f.returnPct, 2) : '—');
 
     set('growValueHint', f.valued
-        ? 'This app cannot see a unit trust price or an EPF dividend, so this figure is yours to update.'
+        ? (f.earnedSen
+            ? 'Yours to update — ' + money(fromSen(f.earnedSen)) + ' of it was added by the payouts logged below.'
+            : 'This app cannot see a unit trust price or an EPF dividend, so this figure is yours to update.')
         : 'Empty, so it is being read as worth exactly what went in — ' +
           money(fromSen(f.investedSen)) + '.');
+
+    paintGrowGuide(inv);
+
+    // --- the growth fold: every kind but a fixed deposit, which has its own ---
+    const grow = $('growProjFold');
+    if (grow) grow.hidden = inv.type === 'fd';
+    if (inv.type !== 'fd') {
+        const proj = growthProjection(f.valueSen, inv.grow.monthly, inv.grow.rate, inv.grow.years);
+        set('growProjSummary', proj
+            ? money(fromSen(proj.endSen)) + ' in ' + proj.years + (proj.years === 1 ? ' year' : ' years')
+            : 'Monthly, rate and years');
+        set('growProjText', !proj
+            ? 'What it grows to if you keep topping it up. A rate and how many years, and a monthly ' +
+              'top-up if you make one — EPF at 11% of salary, ASB at whatever you put in.'
+            : money(fromSen(proj.startSen)) + ' now' +
+              (proj.monthlySen ? ' plus ' + money(fromSen(proj.monthlySen)) + ' a month' : '') +
+              ' at ' + fmt(proj.ratePct, 2) + '% comes to ' + money(fromSen(proj.endSen)) + ' after ' +
+              proj.years + (proj.years === 1 ? ' year' : ' years') + ' — ' +
+              money(fromSen(proj.paidInSen)) + ' of that put in by you and ' +
+              money(fromSen(proj.growthSen)) + ' earned. The rate is applied once a year, with each ' +
+              'year\u2019s top-ups counted at half, because they were only there for part of it.');
+    }
 
     // --- the fixed deposit fold ---
     const fold = $('growFdFold');
@@ -6217,13 +6829,20 @@ function paintGrowContributions(book) {
     const add = $('growContribAdd');
     if (!host) return;
 
+    const card = $('growContribCard');
+    if (card) card.hidden = !inv.id;
+
     set('growContribTitle', inv.id ? 'Contributions — ' + investmentName(inv) : 'Contributions');
     if (add) add.hidden = !inv.id;
 
+    const linked = linkedEntries(inv);
+    const rows = inv.contributions.length + linked.length;
+
     set('growContribNote', inv.id
-        ? inv.contributions.length +
-          (inv.contributions.length === 1 ? ' contribution · ' : ' contributions · ') +
-          money(fromSen(f.investedSen))
+        ? rows + (rows === 1 ? ' contribution · ' : ' contributions · ') +
+          money(fromSen(f.contributedSen)) +
+          (f.fromLedgerSen ? ' · ' + money(fromSen(f.fromLedgerSen)) + ' from Expenses' : '') +
+          (f.openingSen ? ' · opened with ' + money(fromSen(f.openingSen)) : '')
         : 'Save an investment to log what goes into it');
 
     // The unit switch, and what a percentage would be a percentage of.
@@ -6256,33 +6875,134 @@ function paintGrowContributions(book) {
     host.innerHTML = '';
     if (!inv.id) return;
 
-    if (!inv.contributions.length) {
+    if (!inv.contributions.length && !linked.length) {
         host.innerHTML = '<p class="goal-log-empty">Nothing in yet. Every contribution here counts towards ' +
-            'your savings for the month it is dated.</p>';
+            'your savings for the month it is dated' +
+            (inv.source ? ', and anything you file under that category in Expenses shows up here.' : '.') +
+            '</p>';
         return;
     }
 
-    inv.contributions
-        .slice()
-        .sort((a, b) => (a.date === b.date ? (a.id < b.id ? 1 : -1) : (a.date < b.date ? 1 : -1)))
-        .forEach((c) => {
-            const sen = contribSen(c);
+    // One list, both sources, newest first — where a row came from is a tag on
+    // it rather than a second card to look in.
+    const all = inv.contributions
+        .map((c) => ({ date: c.date, key: c.id, sen: contribSen(c), row: c, ledger: null }))
+        .concat(linked.map((e) => ({ date: e.date, key: e.id, sen: entrySen(e), row: null, ledger: e })))
+        .sort((a, b) => (a.date === b.date ? (a.key < b.key ? 1 : -1) : (a.date < b.date ? 1 : -1)));
+
+    all.forEach((item) => {
+        const row = document.createElement('div');
+        row.className = 'goal-c';
+
+        if (item.ledger) {
+            const note = (item.ledger.note || '').trim();
+            row.classList.add('is-linked');
+            row.innerHTML =
+                '<span class="goal-c-when">' + dayLabel(item.date) + '</span>' +
+                '<span class="goal-c-what">' + (note ? escapeHtml(note) : '<i>No note</i>') +
+                    ' <em class="from-tag">Expenses</em></span>' +
+                '<b>' + money(fromSen(item.sen)) + '</b>' +
+                // No ✕: the record is in Expenses, and a button here that
+                // deleted an entry over there would be a trap.
+                '<span></span>';
+            host.appendChild(row);
+            return;
+        }
+
+        const c = item.row;
+        row.dataset.contribution = c.id;
+        row.innerHTML =
+            '<span class="goal-c-when">' + dayLabel(c.date) + '</span>' +
+            '<span class="goal-c-what">' +
+                (c.unit === 'pct'
+                    ? fmt(parseFloat(c.figure) || 0, 0) + '% of ' + money(fromSen(contribBaseSen(c)))
+                    : (c.note ? escapeHtml(c.note) : '<i>No note</i>')) +
+                (c.unit === 'pct' && c.note ? ' · ' + escapeHtml(c.note) : '') +
+            '</span>' +
+            '<b>' + money(fromSen(item.sen)) + '</b>' +
+            '<button type="button" class="split-x" data-drop-contrib aria-label="Remove contribution">' +
+                '<i class="bi bi-x-lg"></i></button>';
+        host.appendChild(row);
+    });
+}
+
+/**
+ * The payout card. Grouped by year, because a dividend is an annual event and
+ * "what did this pay me in 2025" is the whole question.
+ */
+function paintGrowEarnings(book) {
+    const f = book.draft;
+    const inv = f.inv;
+    const host = $('growEList');
+    const add = $('growEarnAdd');
+    if (!host) return;
+
+    const card = $('growEarnCard');
+    if (card) card.hidden = !inv.id;
+
+    set('growEarnTitle', inv.id ? 'Dividends & interest — ' + investmentName(inv) : 'Dividends & interest');
+    if (add) add.hidden = !inv.id;
+
+    const years = earningYears(inv);
+    set('growEarnNote', inv.id
+        ? (inv.earnings.length
+            ? inv.earnings.length + (inv.earnings.length === 1 ? ' payout · ' : ' payouts · ') +
+              money(fromSen(f.earnedSen)) + ' · ' + years[0].year + ' ' + money(fromSen(years[0].totalSen))
+            : 'Nothing paid out yet')
+        : 'Save an investment to log what it pays you');
+
+    const when = ($('growEDate') || {}).value || todayIso();
+    const rate = ($('growERate') || {}).value || '';
+    const typed = parseFloat(($('growEFigure') || {}).value || '') || 0;
+    const worked = inv.id ? dividendFromRate(inv, when, rate) : null;
+
+    set('growEHint', !inv.id
+        ? 'Nothing can be logged against a draft — save the investment first.'
+        : worked && worked.sen && !typed
+            ? fmt(worked.ratePct, 2) + '% on the balance held through ' + worked.year + ' works out to ' +
+              money(fromSen(worked.sen)) + ' — press Add to log that, or type your own amount over it. ' +
+              'A rate is paid on the balance as it stood each month, so money paid in during the year ' +
+              'earns only the part of it that it was there for.'
+            : typed && worked && worked.sen
+                ? 'Logging ' + money(fromSen(toSen(typed))) + '. The rate would have worked out to ' +
+                  money(fromSen(worked.sen)) + ' — yours wins, because a statement beats arithmetic.'
+                : 'What the holding paid you. It never counts towards your savings for the month, and ' +
+                  'logging one raises Worth now by the same amount. Put in the rate on its own and the ' +
+                  'ringgit is worked out from the balance you held through that year.');
+
+    host.innerHTML = '';
+    if (!inv.id) return;
+
+    if (!inv.earnings.length) {
+        host.innerHTML = '<p class="goal-log-empty">Nothing yet. An ASNB dividend, an EPF crediting, ' +
+            'FD interest at maturity — whatever the holding paid you, dated the day it was paid.</p>';
+        return;
+    }
+
+    years.forEach((year) => {
+        const head = document.createElement('div');
+        head.className = 'grow-year';
+        head.innerHTML = '<span>' + escapeHtml(year.year) + '</span><b>' +
+            money(fromSen(year.totalSen)) + '</b>';
+        host.appendChild(head);
+
+        year.rows.forEach((e) => {
+            const rate = parseFloat(e.rate) || 0;
             const row = document.createElement('div');
             row.className = 'goal-c';
-            row.dataset.contribution = c.id;
+            row.dataset.earning = e.id;
             row.innerHTML =
-                '<span class="goal-c-when">' + dayLabel(c.date) + '</span>' +
+                '<span class="goal-c-when">' + dayLabel(e.date) + '</span>' +
                 '<span class="goal-c-what">' +
-                    (c.unit === 'pct'
-                        ? fmt(parseFloat(c.figure) || 0, 0) + '% of ' + money(fromSen(contribBaseSen(c)))
-                        : (c.note ? escapeHtml(c.note) : '<i>No note</i>')) +
-                    (c.unit === 'pct' && c.note ? ' · ' + escapeHtml(c.note) : '') +
+                    (rate ? fmt(rate, 2) + '%' + (e.note ? ' · ' : '') : '') +
+                    (e.note ? escapeHtml(e.note) : (rate ? '' : '<i>No note</i>')) +
                 '</span>' +
-                '<b>' + money(fromSen(sen)) + '</b>' +
-                '<button type="button" class="split-x" data-drop-contrib aria-label="Remove contribution">' +
+                '<b>' + money(fromSen(earningSen(e))) + '</b>' +
+                '<button type="button" class="split-x" data-drop-earning aria-label="Remove payout">' +
                     '<i class="bi bi-x-lg"></i></button>';
             host.appendChild(row);
         });
+    });
 }
 
 function paintGrow(book) {
@@ -6292,6 +7012,7 @@ function paintGrow(book) {
     paintGrowList(book);
     paintGrowForm(book);
     paintGrowContributions(book);
+    paintGrowEarnings(book);
 }
 
 function growSummaryText() {
@@ -6320,7 +7041,8 @@ function growSummaryText() {
             lines.push('  ' + investmentName(f.inv) + ' (' + f.type.label + '): ' +
                 money(fromSen(f.investedSen)) + ' → ' + money(fromSen(f.valueSen)) +
                 (f.investedSen ? ' · ' + (f.profitSen >= 0 ? '+' : '−') +
-                    money(Math.abs(fromSen(f.profitSen))) + ' · ' + pct(f.returnPct, 2) : ''));
+                    money(Math.abs(fromSen(f.profitSen))) + ' · ' + pct(f.returnPct, 2) : '') +
+                (f.earnedSen ? ' · paid out ' + money(fromSen(f.earnedSen)) : ''));
         });
     }
 
@@ -6344,6 +7066,7 @@ function saveGrow() {
             seq: growState.seq,
             filter: growState.filter,
             editing: growState.editing,
+            types: growState.types.filter((t) => t.label.trim()),
             period: (($('growPeriod') || {}).dataset || {}).value || 'month',
             target: growState.target,
             investments: growState.investments,
@@ -6363,6 +7086,18 @@ function loadGrow() {
         unit: (saved.target && saved.target.unit) === 'rm' ? 'rm' : 'pct',
     };
 
+    // The kinds are read first: a holding is checked against them, and one
+    // pointing at a kind that is no longer there has to land somewhere real.
+    growState.types = (Array.isArray(saved.types) ? saved.types : DEFAULT_INVESTMENT_TYPES)
+        .filter((t) => t && t.id && String(t.label || '').trim())
+        .map((t) => ({
+            id: String(t.id),
+            label: String(t.label).trim(),
+            icon: /^bi-[a-z0-9-]+$/.test(String(t.icon || '')) ? String(t.icon) : 'bi-piggy-bank',
+        }))
+        .filter((t, i, list) => list.findIndex((x) => x.id === t.id) === i);
+    if (!growState.types.length) growState.types = DEFAULT_INVESTMENT_TYPES.map((t) => ({ ...t }));
+
     growState.investments = (Array.isArray(saved.investments) ? saved.investments : [])
         .filter((i) => i && i.id)
         .map((i) => ({
@@ -6371,6 +7106,9 @@ function loadGrow() {
             name: String(i.name || ''),
             type: investmentType(i.type).id,
             opened: /^\d{4}-\d{2}-\d{2}$/.test(i.opened || '') ? i.opened : todayIso(),
+            opening: String(i.opening || ''),
+            // A category that has since been deleted is no link at all.
+            source: categoryById(String(i.source || '')) ? String(i.source) : '',
             value: String(i.value || ''),
             valueDate: /^\d{4}-\d{2}-\d{2}$/.test(i.valueDate || '') ? i.valueDate : '',
             note: String(i.note || ''),
@@ -6378,6 +7116,11 @@ function loadGrow() {
             fd: {
                 rate: String((i.fd && i.fd.rate) || ''),
                 months: String((i.fd && i.fd.months) || ''),
+            },
+            grow: {
+                monthly: String((i.grow && i.grow.monthly) || ''),
+                rate: String((i.grow && i.grow.rate) || ''),
+                years: String((i.grow && i.grow.years) || ''),
             },
             contributions: (Array.isArray(i.contributions) ? i.contributions : [])
                 .filter((c) => c && c.id && /^\d{4}-\d{2}-\d{2}$/.test(c.date || ''))
@@ -6387,6 +7130,16 @@ function loadGrow() {
                     figure: String(c.figure || ''),
                     base: String(c.base || ''),
                     note: String(c.note || ''),
+                })),
+            // Payouts arrived after the first holdings were written, so an
+            // older record has none and reads as none rather than as broken.
+            earnings: (Array.isArray(i.earnings) ? i.earnings : [])
+                .filter((e) => e && e.id && /^\d{4}-\d{2}-\d{2}$/.test(e.date || ''))
+                .map((e) => ({
+                    id: String(e.id), date: e.date,
+                    figure: String(e.figure || ''),
+                    rate: String(e.rate || ''),
+                    note: String(e.note || ''),
                 })),
         }));
 
@@ -6433,17 +7186,36 @@ const LEDGER_KEY = 'moneyflow.ledger.v1';
  * retires an account without deleting its history: a closed account keeps
  * every entry against it and stops appearing in the pickers.
  */
-const ACCOUNT_TYPES = {
-    bank:    'Bank',
-    cash:    'Cash',
-    ewallet: 'E-wallet',
-    credit:  'Credit card',
-    other:   'Other',
-};
+/* What a browser starts with. The kinds are the reader's too — they are added,
+   renamed and removed on the Accounts card, and the live list is saved with the
+   ledger. Each keeps an id of its own: an account points at the id, so renaming
+   a kind never touches an account, and the balance panels keep their grouping.
+
+   'credit' is the one id the app knows by name: a credit account carrying a
+   negative balance is what the dashboard reads as money owed on a card. It can
+   be renamed like any other, and removing it only takes away the wording. */
+const DEFAULT_TYPES = [
+    { id: 'bank',    label: 'Bank' },
+    { id: 'cash',    label: 'Cash' },
+    { id: 'ewallet', label: 'E-wallet' },
+    { id: 'credit',  label: 'Credit card' },
+    { id: 'other',   label: 'Other' },
+];
+
+/* The way into the kinds editor, from any account's kind picker. */
+const TYPE_EDIT = '__edit_types__';
 
 /* Savings was a type of its own before accounts had a purpose. It is a purpose,
-   not a kind of institution, so it moves — and old data is migrated on load. */
-const ACCOUNT_PURPOSES = ['', 'Salary', 'Savings', 'Daily expenses', 'Bills', 'Emergency fund', 'Investment'];
+   not a kind of institution, so it moves — and old data is migrated on load.
+
+   These are only what a browser starts with. The list belongs to the reader:
+   purposes are added, renamed and removed on the Accounts card, and the live
+   list is saved with the ledger. */
+const DEFAULT_PURPOSES = ['Salary', 'Savings', 'Daily expenses', 'Bills', 'Emergency fund', 'Investment'];
+
+/* The last option in every purpose picker. It is a way into the editor rather
+   than a purpose, so it is never read back as one. */
+const PURPOSE_EDIT = '__edit_purposes__';
 
 const ACCOUNT_STATUSES = { active: 'Active', closed: 'Closed' };
 
@@ -6645,7 +7417,7 @@ const DAY_NAMES = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
 let ledgerSeq = 0;
 const ledgerId = (prefix) => prefix + (++ledgerSeq);
 
-let ledgerState = { entries: [], accounts: [], month: '', editing: null };
+let ledgerState = { entries: [], accounts: [], types: [], purposes: [], month: '', editing: null };
 
 /**
  * --------------------------------------------------------------------
@@ -6734,8 +7506,12 @@ function readLedgerAccounts() {
         if (!account) return;
         account.name     = row.querySelector('.bgt-label').value;
         account.opening  = row.querySelector('.bgt-amount').value;
-        account.type     = row.querySelector('.acct-type').value;
-        account.purpose  = row.querySelector('.acct-purpose').value;
+        const type       = row.querySelector('.acct-type').value;
+        if (type !== TYPE_EDIT) account.type = type;
+        // The picker's last option opens the editor instead of naming a
+        // purpose, so it never becomes one.
+        const purpose = row.querySelector('.acct-purpose').value;
+        if (purpose !== PURPOSE_EDIT) account.purpose = purpose;
         account.currency = row.querySelector('.acct-currency').value;
         account.status   = row.querySelector('.acct-status').value;
     });
@@ -6761,7 +7537,7 @@ function buildLedgerAccounts() {
             '<span class="bgt-icon"><i class="bi bi-wallet2"></i></span>' +
             '<div class="bgt-meta"><input type="text" class="bgt-label"></div>' +
             '<select class="bgt-bucket acct-type" aria-label="Kind of account">' +
-                options(ACCOUNT_TYPES, account.type) + '</select>' +
+                typeOptions(account.type) + '</select>' +
             '<div class="money-input money-input-sm"><span class="affix">' +
                 escapeHtml(currencySymbol(account.currency)) + '</span>' +
                 '<input type="number" class="bgt-amount" step="10" placeholder="0" inputmode="decimal"></div>' +
@@ -6770,7 +7546,7 @@ function buildLedgerAccounts() {
 
             '<div class="acct-more">' +
                 '<select class="acct-purpose" aria-label="What the account is for">' +
-                    plainOptions(ACCOUNT_PURPOSES, account.purpose, 'No stated purpose') + '</select>' +
+                    purposeOptions(account.purpose) + '</select>' +
                 '<select class="acct-currency" aria-label="Currency">' +
                     plainOptions(CURRENCIES, account.currency, BASE_CURRENCY) + '</select>' +
                 '<select class="acct-status" aria-label="Status">' +
@@ -6785,6 +7561,350 @@ function buildLedgerAccounts() {
 
         host.appendChild(row);
     });
+}
+
+/**
+ * --------------------------------------------------------------------
+ * Kinds of account
+ * --------------------------------------------------------------------
+ * A kind is what sort of place the money sits in, and it is what the balance
+ * panels group by. Unlike a purpose it is not a note: every account is one, so
+ * the list can never be emptied, and a kind that accounts are filed under is
+ * not removed out from under them — the same bargain a category with entries
+ * behind it gets.
+ *
+ * Renaming is free, though: an account points at the kind's id, never at its
+ * wording, so a rename is a rename and nothing more.
+ */
+const typeById = (id) => ledgerState.types.find((t) => t.id === id) || null;
+
+/** The wording for a kind, and something honest when the kind is gone. */
+const typeLabel = (id) => {
+    const type = typeById(id);
+    if (type) return type.label;
+    return ledgerState.types.length ? ledgerState.types[0].label : 'Bank';
+};
+
+/** What a new account is, until it is told otherwise. */
+const defaultTypeId = () => (ledgerState.types[0] || {}).id || 'bank';
+
+function typeOptions(chosen) {
+    const list = ledgerState.types.filter((t) => t.label.trim());
+
+    return list.map((type) =>
+        '<option value="' + escapeHtml(type.id) + '"' + (type.id === chosen ? ' selected' : '') + '>' +
+        escapeHtml(type.label) + '</option>').join('') +
+        '<option value="' + TYPE_EDIT + '">Edit kinds\u2026</option>';
+}
+
+/** One row per kind, with how many accounts stand behind it. */
+function buildTypeRows() {
+    const host = $('ledgerTypes');
+    if (!host) return;
+    host.innerHTML = '';
+
+    ledgerState.types.forEach((type, index) => {
+        const held = ledgerState.accounts.filter((a) => a.type === type.id).length;
+
+        const row = document.createElement('div');
+        row.className = 'purpose-row';
+        row.dataset.type = type.id;
+        row.innerHTML =
+            '<input type="text" class="type-name" placeholder="Kind ' + (index + 1) +
+                '" aria-label="Name of this kind of account">' +
+            '<small>' + (held ? held + (held === 1 ? ' account' : ' accounts') : 'unused') + '</small>' +
+            '<button type="button" class="split-x" data-drop-type aria-label="Remove kind">' +
+                '<i class="bi bi-x-lg"></i></button>';
+
+        // Assigned rather than interpolated — the wording is user-typed.
+        row.querySelector('.type-name').value = type.label;
+        host.appendChild(row);
+    });
+}
+
+/** Everything that shows a kind, after the list has moved under it. */
+function afterTypeChange() {
+    buildLedgerAccounts();
+    buildCategoryManager();
+    buildTypeRows();
+    renderLedger();
+}
+
+/** Open, close, or toggle the kinds editor. A kind left unnamed keeps its old
+ *  wording, so there is nothing to tidy on the way out. */
+function typeEditor(open) {
+    const panel = $('ledgerTypeEdit');
+    if (!panel) return;
+    const show = open === undefined ? panel.hidden : open;
+
+    panel.hidden = !show;
+    const button = $('ledgerEditTypes');
+    if (button) button.setAttribute('aria-expanded', String(show));
+    if (show) buildTypeRows();
+}
+
+function addType() {
+    readLedgerAccounts();
+    ledgerState.types.push({ id: ledgerId('t'), label: '' });
+    buildTypeRows();
+
+    const fresh = document.querySelector('#ledgerTypes .purpose-row:last-child .type-name');
+    if (fresh) {
+        fresh.focus({ preventScroll: true });
+        fresh.scrollIntoView({ block: 'center', behavior: 'smooth' });
+    }
+}
+
+/**
+ * A kind with no wording cannot be picked, so a blank name is either an
+ * abandoned Add — which goes — or an edit that has to be put back.
+ */
+function renameType(input) {
+    const row  = input.closest('.purpose-row');
+    const type = typeById(row.dataset.type);
+    if (!type) return;
+
+    const name = input.value.trim();
+
+    if (!name) {
+        if (!type.label) {
+            ledgerState.types = ledgerState.types.filter((t) => t.id !== type.id);
+            buildTypeRows();
+            return;
+        }
+        input.value = type.label;
+        ledgerHint('A kind needs a name — use the ✕ to remove one.');
+        return;
+    }
+
+    if (ledgerState.types.some((t) => t.id !== type.id && t.label.toLowerCase() === name.toLowerCase())) {
+        input.value = type.label;
+        ledgerHint('There is already a kind called “' + name + '”.');
+        return;
+    }
+
+    if (name === type.label) { input.value = name; return; }
+
+    readLedgerAccounts();
+    type.label = name;
+    afterTypeChange();
+}
+
+/**
+ * Accounts are filed under a kind, so removing one with accounts behind it
+ * would move balances into a group the reader never chose. It stays until
+ * those accounts are moved, and the row says so rather than failing quietly.
+ */
+function dropType(row) {
+    const type = typeById(row.dataset.type);
+    if (!type) return;
+
+    readLedgerAccounts();
+    const held = ledgerState.accounts.filter((a) => a.type === type.id).length;
+
+    if (held || ledgerState.types.length <= 1) {
+        row.classList.add('is-locked');
+        setTimeout(() => row.classList.remove('is-locked'), 1400);
+        ledgerHint(held
+            ? held + (held === 1 ? ' account is' : ' accounts are') +
+              ' that kind — move ' + (held === 1 ? 'it' : 'them') + ' to another kind first.'
+            : 'Keep at least one kind — an account has to be something.');
+        return;
+    }
+
+    ledgerState.types = ledgerState.types.filter((t) => t.id !== type.id);
+    afterTypeChange();
+    ledgerHint('“' + type.label + '” is gone.');
+}
+
+/** The last option in a kind picker asks for the editor, not for a kind. */
+function onAccountTypePick(event) {
+    const select = event.target.closest('.acct-type');
+    if (!select || select.value !== TYPE_EDIT) return;
+
+    const account = accountById(select.closest('.bgt-row').dataset.cat);
+    select.value = account ? account.type : defaultTypeId();
+
+    typeEditor(true);
+    const panel = $('ledgerTypeEdit');
+    if (panel) panel.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+}
+
+/**
+ * --------------------------------------------------------------------
+ * Purposes
+ * --------------------------------------------------------------------
+ * A purpose is the reader's own word for what an account is for, so the list
+ * is theirs to add to, rename and shorten. It is a label on an account and
+ * nothing else — no entry points at one — so renaming a purpose only has to
+ * carry the accounts holding it, and removing one only has to let them go.
+ * That is why this list can be edited freely where a category cannot.
+ */
+const purposeList = () => ledgerState.purposes.filter(Boolean);
+
+/** The blank, the reader's list, and the way into the editor. */
+function purposeOptions(chosen) {
+    const list = purposeList();
+    // A purpose an account still carries but the list has lost would drop the
+    // row back to blank without a word. It stays on the row until cleared.
+    if (chosen && !list.includes(chosen)) list.push(chosen);
+
+    return ['', ...list].map((value) =>
+        '<option value="' + escapeHtml(value) + '"' + (value === chosen ? ' selected' : '') + '>' +
+        escapeHtml(value || 'No stated purpose') + '</option>').join('') +
+        '<option value="' + PURPOSE_EDIT + '">Edit purposes\u2026</option>';
+}
+
+/** One row per purpose, with what it is holding — the count is the warning. */
+function buildPurposeRows() {
+    const host = $('ledgerPurposes');
+    if (!host) return;
+    host.innerHTML = '';
+
+    if (!ledgerState.purposes.length) {
+        host.innerHTML = '<p class="combo-none">No purposes yet. An account can go without one \u2014 ' +
+            'add a purpose when there is something worth saying about what it is for.</p>';
+        return;
+    }
+
+    ledgerState.purposes.forEach((purpose, index) => {
+        const held = purpose
+            ? ledgerState.accounts.filter((a) => a.purpose === purpose).length
+            : 0;
+
+        const row = document.createElement('div');
+        row.className = 'purpose-row';
+        row.dataset.index = String(index);
+        row.innerHTML =
+            '<input type="text" class="purpose-name" placeholder="Purpose ' + (index + 1) +
+                '" aria-label="Purpose name">' +
+            '<small>' + (held ? held + (held === 1 ? ' account' : ' accounts') : 'unused') + '</small>' +
+            '<button type="button" class="split-x" data-drop-purpose aria-label="Remove purpose">' +
+                '<i class="bi bi-x-lg"></i></button>';
+
+        // Assigned rather than interpolated — the name is user-typed.
+        row.querySelector('.purpose-name').value = purpose;
+        host.appendChild(row);
+    });
+}
+
+/** Everything that shows a purpose, after the list has moved under it. */
+function afterPurposeChange() {
+    buildLedgerAccounts();
+    buildCategoryManager();
+    buildPurposeRows();
+    renderLedger();
+}
+
+/**
+ * Open, close, or toggle the editor. Closing drops rows that were added and
+ * never named: a blank purpose is an abandoned Add, not a nameless purpose.
+ */
+function purposeEditor(open) {
+    const panel = $('ledgerPurposeEdit');
+    if (!panel) return;
+    const show = open === undefined ? panel.hidden : open;
+
+    if (!show && ledgerState.purposes.length !== purposeList().length) {
+        ledgerState.purposes = purposeList();
+        afterPurposeChange();
+    }
+
+    panel.hidden = !show;
+    const button = $('ledgerEditPurposes');
+    if (button) button.setAttribute('aria-expanded', String(show));
+    if (show) buildPurposeRows();
+}
+
+function addPurpose() {
+    readLedgerAccounts();
+    ledgerState.purposes.push('');
+    buildPurposeRows();
+
+    const fresh = document.querySelector('#ledgerPurposes .purpose-row:last-child .purpose-name');
+    if (fresh) {
+        fresh.focus({ preventScroll: true });
+        fresh.scrollIntoView({ block: 'center', behavior: 'smooth' });
+    }
+}
+
+/**
+ * Renaming carries every account holding the old word across — that is the
+ * whole point of a shared list. Two purposes with one name would be two rows
+ * the picker cannot tell apart, so the second one is refused rather than
+ * quietly merged.
+ */
+function renamePurpose(input) {
+    const row   = input.closest('.purpose-row');
+    const index = Number(row.dataset.index);
+    const was   = ledgerState.purposes[index];
+    if (was === undefined) return;
+
+    const name = input.value.trim();
+
+    if (!name) {
+        // Never named: the Add was abandoned. Named once: emptying the box is
+        // not how a purpose is removed, and the ✕ is right there.
+        if (!was) { ledgerState.purposes.splice(index, 1); buildPurposeRows(); return; }
+        input.value = was;
+        ledgerHint('A purpose needs a name — use the ✕ to remove one.');
+        return;
+    }
+
+    if (name.toLowerCase() === PURPOSE_EDIT) { input.value = was; return; }
+
+    if (ledgerState.purposes.some((p, i) => i !== index && p.toLowerCase() === name.toLowerCase())) {
+        input.value = was;
+        ledgerHint('There is already a purpose called “' + name + '”.');
+        return;
+    }
+
+    if (name === was) { input.value = name; return; }
+
+    readLedgerAccounts();
+    if (was) ledgerState.accounts.forEach((a) => { if (a.purpose === was) a.purpose = name; });
+    ledgerState.purposes[index] = name;
+    afterPurposeChange();
+}
+
+/**
+ * Removing a purpose takes it off the accounts carrying it. Nothing else
+ * points at a purpose, so nothing is lost but the note — and the accounts
+ * that lost it are told out loud rather than changed quietly.
+ */
+function dropPurpose(row) {
+    const index = Number(row.dataset.index);
+    const name  = ledgerState.purposes[index];
+    if (name === undefined) return;
+
+    readLedgerAccounts();
+    const held = name ? ledgerState.accounts.filter((a) => a.purpose === name) : [];
+    held.forEach((account) => { account.purpose = ''; });
+    ledgerState.purposes.splice(index, 1);
+    afterPurposeChange();
+
+    if (name) {
+        ledgerHint(held.length
+            ? '“' + name + '” is gone — ' + held.length +
+              (held.length === 1 ? ' account is' : ' accounts are') + ' back to no stated purpose.'
+            : '“' + name + '” is gone.');
+    }
+}
+
+/**
+ * Picking the last option in an account's purpose list is a request to edit
+ * the list, so the picker is put back where it was and the editor opens.
+ */
+function onAccountPurposePick(event) {
+    const select = event.target.closest('.acct-purpose');
+    if (!select || select.value !== PURPOSE_EDIT) return;
+
+    const account = accountById(select.closest('.bgt-row').dataset.cat);
+    select.value = account ? account.purpose : '';
+
+    purposeEditor(true);
+    const panel = $('ledgerPurposeEdit');
+    if (panel) panel.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
 }
 
 /**
@@ -6951,7 +8071,7 @@ function accountRowHtml(account, index, useCount) {
             '<div class="cat-id">' +
                 '<input type="text" class="cat-name" value="' + escapeHtml(account.name) +
                     '" placeholder="Account ' + (index + 1) + '" aria-label="Payment method name">' +
-                '<small>' + escapeHtml(ACCOUNT_TYPES[account.type] || 'Bank') +
+                '<small>' + escapeHtml(typeLabel(account.type)) +
                     (account.purpose ? ' \u00b7 ' + escapeHtml(account.purpose) : '') +
                     ' \u00b7 ' + signedMoney(balance) +
                     ' \u00b7 ' + (useCount ? useCount + (useCount === 1 ? ' entry' : ' entries')
@@ -7050,7 +8170,7 @@ function addCategory() {
 
     if (side === 'method') {
         ledgerState.accounts.push({
-            id: ledgerId('a'), name: '', type: 'bank', purpose: '',
+            id: ledgerId('a'), name: '', type: defaultTypeId(), purpose: '',
             currency: BASE_CURRENCY, opening: '', status: 'active',
         });
         buildLedgerAccounts();
@@ -7548,7 +8668,7 @@ function paintLedgerBalances(book) {
     set('ledgerWorthNote', ledgerState.accounts.length +
         (ledgerState.accounts.length === 1 ? ' account' : ' accounts'));
 
-    Object.entries(ACCOUNT_TYPES).forEach(([key, label]) => {
+    ledgerState.types.forEach(({ id: key, label }) => {
         const inGroup = ledgerState.accounts.filter((a) => a.type === key);
         if (!inGroup.length) return;
 
@@ -8082,6 +9202,8 @@ function saveLedger() {
         storeWrite(LEDGER_KEY, JSON.stringify({
             seq: ledgerSeq,
             month: ledgerState.month,
+            types: ledgerState.types.filter((t) => t.label.trim()),
+            purposes: purposeList(),
             accounts: ledgerState.accounts,
             entries: ledgerState.entries,
         }));
@@ -8096,6 +9218,14 @@ function loadLedger() {
     ledgerSeq = Number(saved.seq) || 0;
     ledgerState.month = /^\d{4}-\d{2}$/.test(saved.month || '') ? saved.month : monthOf(todayIso());
 
+    // The kinds are read first: an account is checked against them, and one
+    // pointing at a kind that is no longer there has to land somewhere real.
+    ledgerState.types = (Array.isArray(saved.types) ? saved.types : DEFAULT_TYPES)
+        .filter((t) => t && t.id && String(t.label || '').trim())
+        .map((t) => ({ id: String(t.id), label: String(t.label).trim() }))
+        .filter((t, i, list) => list.findIndex((x) => x.id === t.id) === i);
+    if (!ledgerState.types.length) ledgerState.types = DEFAULT_TYPES.map((t) => ({ ...t }));
+
     ledgerState.accounts = (Array.isArray(saved.accounts) ? saved.accounts : [])
         .filter((a) => a && a.id)
         .map((a) => {
@@ -8106,9 +9236,9 @@ function loadLedger() {
             return {
                 id: String(a.id),
                 name: String(a.name || ''),
-                type: ACCOUNT_TYPES[a.type] ? a.type
-                    : legacy === 'savings' ? 'bank'
-                    : ACCOUNT_TYPES[legacy] ? legacy : 'bank',
+                type: typeById(a.type) ? a.type
+                    : legacy === 'savings' ? (typeById('bank') ? 'bank' : defaultTypeId())
+                    : typeById(legacy) ? legacy : defaultTypeId(),
                 purpose: String(a.purpose || (legacy === 'savings' ? 'Savings' : '')),
                 currency: CURRENCIES.includes(a.currency) ? a.currency : BASE_CURRENCY,
                 opening: String(a.opening || ''),
@@ -8116,6 +9246,21 @@ function loadLedger() {
             };
         });
     if (!ledgerState.accounts.length) seedAccounts();
+
+    // The purpose list only started being saved after the first books were
+    // written, so an older one falls back to the starting list. Either way it
+    // ends up holding every purpose the accounts already carry: a purpose on
+    // an account that is missing from the list is a picker that cannot show
+    // what the row it sits on says.
+    ledgerState.purposes = [];
+    (Array.isArray(saved.purposes) ? saved.purposes : DEFAULT_PURPOSES)
+        .concat(ledgerState.accounts.map((a) => a.purpose))
+        .forEach((raw) => {
+            const name = String(raw || '').trim();
+            if (name && !ledgerState.purposes.some((p) => p.toLowerCase() === name.toLowerCase())) {
+                ledgerState.purposes.push(name);
+            }
+        });
 
     const known = new Set(ledgerState.accounts.map((a) => a.id));
     ledgerState.entries = (Array.isArray(saved.entries) ? saved.entries : [])
@@ -8394,7 +9539,13 @@ function dashCompute() {
     ledgerState.accounts.forEach((account) => {
         const balance = balances[account.id] || 0;
         if (balance >= 0) assetsSen += balance; else owingSen -= balance;
-        if (/savings|emergency|investment/i.test(account.purpose || '')) savingsSen += balance;
+        // An emergency fund is not savings in the sense this tile means it: it
+        // is money standing by to be spent, and counting it made the figure
+        // rise and fall with an expense the reader was braced for anyway. So
+        // this is what is being *kept* — put away to grow, not to be reached
+        // for. Purposes are the reader's own wording, so it reads the word
+        // rather than the row: anything called savings or investment counts.
+        if (/savings|investment/i.test(account.purpose || '')) savingsSen += balance;
         if (account.type === 'credit') {
             creditCount++;
             if (balance < 0) creditOwingSen -= balance;
@@ -8427,7 +9578,16 @@ function dashCompute() {
         movedSen:   totals.movedSen,
         netSen:     totals.netSen,
 
-        assetsSen, owingSen, savingsSen,
+        // Money set aside is money set aside wherever it is sitting: in an
+        // account kept for it, or paid into a holding. What the holdings have
+        // *earned* is deliberately not here — that is the other tile, and the
+        // two are meant to add up rather than overlap. Nothing is counted
+        // twice, because paying into a holding took the money out of the
+        // account it came from.
+        savingsSen: savingsSen + growTotalInvestedSen(),
+        assetsSen, owingSen,
+        cashSavingsSen: savingsSen,
+        investedSen: growTotalInvestedSen(),
         totalSen: assetsSen - owingSen,
         accountCount: ledgerState.accounts.length,
 
@@ -8439,6 +9599,7 @@ function dashCompute() {
 
         instalmentSen, commitDue,
         investmentSen: growTotalValueSen(),
+        investGainSen: growTotalGainSen(),
     };
 }
 
@@ -8841,22 +10002,26 @@ function paintDashKpis(book) {
 
     const kpis = [
         {
+            band: 'stand',
             label: 'Total balance', icon: 'bi-wallet2', badge: 'jade',
             value: signedMoney(book.totalSen),
             tone: book.totalSen < 0 ? 'is-minus' : '',
             foot: 'Every account, all time',
         },
         {
+            band: 'period',
             label: 'Total income', icon: 'bi-arrow-down-left-circle', badge: 'jade',
             value: money(fromSen(book.incomeSen)), tone: book.incomeSen ? 'is-plus' : '',
             foot: book.range.label.toLowerCase(),
         },
         {
+            band: 'period',
             label: 'Total expenses', icon: 'bi-arrow-up-right-circle', badge: 'red',
             value: money(fromSen(book.expenseSen)), tone: book.expenseSen ? 'is-minus' : '',
             foot: book.range.label.toLowerCase(),
         },
         {
+            band: 'period',
             label: 'Net cash flow', icon: 'bi-arrow-left-right', badge: 'indigo',
             value: signedMoney(book.netSen),
             tone: book.netSen < 0 ? 'is-minus' : book.netSen > 0 ? 'is-plus' : '',
@@ -8865,28 +10030,39 @@ function paintDashKpis(book) {
                 : 'Income − expenses',
         },
         {
+            band: 'stand',
             label: 'Total savings', icon: 'bi-piggy-bank', badge: 'indigo',
             value: money(fromSen(book.savingsSen)),
-            foot: 'Accounts kept for savings',
+            foot: book.investedSen
+                ? money(fromSen(book.cashSavingsSen)) + ' in accounts · ' +
+                  money(fromSen(book.investedSen)) + ' put into investments'
+                : 'Accounts kept for saving or investing',
         },
         {
-            label: 'Investment value', icon: 'bi-graph-up-arrow', badge: 'indigo',
-            value: book.investmentSen ? money(fromSen(book.investmentSen)) : '—',
+            band: 'stand',
+            label: 'Investment gain', icon: 'bi-graph-up-arrow', badge: 'indigo',
+            value: book.investmentSen ? signedMoney(book.investGainSen) : '—',
+            tone: book.investGainSen < 0 ? 'is-minus' : book.investGainSen > 0 ? 'is-plus' : '',
             pending: !book.investmentSen,
-            foot: book.investmentSen
-                ? 'What your open investments are worth'
-                : 'Nothing recorded — add one under Grow',
+            foot: !book.investmentSen
+                ? 'Nothing in Grow yet'
+                : book.investGainSen
+                    ? 'Dividends and growth on ' + money(fromSen(book.investedSen)) +
+                      ' · worth ' + money(fromSen(book.investmentSen))
+                    : 'Worth what went in so far — ' + money(fromSen(book.investmentSen)),
         },
         {
+            band: 'owe',
             label: 'Outstanding instalments', icon: 'bi-calendar2-check', badge: 'indigo',
             value: book.instalmentSen ? money(fromSen(book.instalmentSen)) : '—',
             tone: book.instalmentSen ? 'is-minus' : '',
             pending: !book.instalmentSen,
             foot: book.instalmentSen
                 ? 'Still to pay across every live plan'
-                : 'Nothing on instalment — add one under Instalments',
+                : 'Nothing on instalment',
         },
         {
+            band: 'owe',
             label: 'Credit card outstanding', icon: 'bi-credit-card-2-front', badge: 'amber',
             value: money(fromSen(book.creditSen)),
             tone: book.creditSen ? 'is-minus' : '',
@@ -8895,26 +10071,56 @@ function paintDashKpis(book) {
                 : 'No credit account recorded',
         },
         {
+            band: 'owe',
             label: 'Upcoming payments', icon: 'bi-hourglass-split', badge: 'amber',
             value: book.commitDue.count ? money(fromSen(book.commitDue.sen)) : '—',
             pending: !book.commitDue.count,
             foot: book.commitDue.count
                 ? book.commitDue.count + (book.commitDue.count === 1 ? ' payment due ' : ' payments due ') +
                   'this period · next ' + dayShort(book.commitDue.soonest)
-                : 'Nothing falls due in this period',
+                : 'Nothing due this period',
         },
         {
+            band: 'period',
             label: 'Budget remaining', icon: 'bi-clipboard-check', badge: 'amber',
             value: book.plannedSen ? signedMoney(book.budgetLeftSen) : '—',
             tone: !book.plannedSen ? '' : book.budgetLeftSen < 0 ? 'is-minus' : 'is-plus',
             pending: !book.plannedSen,
             foot: !book.plannedSen
-                ? 'No plan covers these dates — set one in the Planner'
+                ? 'No plan covers these dates'
                 : 'of ' + money(fromSen(book.plannedSen)) + ' planned',
         },
     ];
 
-    kpis.forEach((kpi) => host.appendChild(kpiTile(kpi)));
+    // Three questions, asked separately: what you have, what moved this
+    // period, and what is owed. Nine tiles in one grid answered all three at
+    // once and none of them clearly.
+    const bands = [
+        { id: 'stand',  title: 'Where you stand', note: 'All time' },
+        { id: 'period', title: 'This period',     note: book.range.label },
+        { id: 'owe',    title: 'What you owe',    note: '' },
+    ];
+
+    bands.forEach((band) => {
+        const rows = kpis.filter((kpi) => kpi.band === band.id);
+        if (!rows.length) return;
+
+        const wrap = document.createElement('div');
+        wrap.className = 'kpi-band';
+
+        const head = document.createElement('div');
+        head.className = 'kpi-band-head';
+        head.innerHTML = '<h3>' + escapeHtml(band.title) + '</h3>' +
+            (band.note ? '<span>' + escapeHtml(band.note) + '</span>' : '');
+        wrap.appendChild(head);
+
+        const grid = document.createElement('div');
+        grid.className = 'kpi-grid';
+        rows.forEach((kpi) => grid.appendChild(kpiTile(kpi)));
+        wrap.appendChild(grid);
+
+        host.appendChild(wrap);
+    });
 }
 
 /** Income against expenses, with transfers named but kept out of both. */
@@ -8978,7 +10184,7 @@ function paintDashAccounts(book) {
         return;
     }
 
-    Object.entries(ACCOUNT_TYPES).forEach(([key, label]) => {
+    ledgerState.types.forEach(({ id: key, label }) => {
         const inGroup = ledgerState.accounts.filter((account) => account.type === key);
         if (!inGroup.length) return;
 
@@ -9326,7 +10532,11 @@ function dashSummaryText() {
         'Income            ' + money(fromSen(book.incomeSen)),
         'Expenses          ' + money(fromSen(book.expenseSen)),
         'Net cash flow     ' + signedMoney(book.netSen),
-        'Savings           ' + money(fromSen(book.savingsSen)),
+        'Savings           ' + money(fromSen(book.savingsSen)) +
+            (book.investedSen
+                ? ' (' + money(fromSen(book.cashSavingsSen)) + ' in accounts, ' +
+                  money(fromSen(book.investedSen)) + ' invested)'
+                : ''),
         'Card outstanding  ' + money(fromSen(book.creditSen)),
     ];
 
@@ -9903,12 +11113,174 @@ function setSegment(seg, value) {
  * store hydrates in this same tick and the app starts exactly as it always
  * did. See store.js.
  */
+/**
+ * ====================================================================
+ * DATE FIELDS — dd-mm-yyyy
+ * ====================================================================
+ * A native date input writes the date the way the *browser's* locale does:
+ * 01/07/2026 here, 7/1/2026 on a machine set to the United States. Two of
+ * those readings are a different day, and the app has no say in which one a
+ * reader gets — the format is not ours to set.
+ *
+ * So the box a reader sees is a text field that always says dd-mm-yyyy, and
+ * the real date input stays underneath it: invisible, out of the tab order,
+ * and asked for nothing but its calendar when the icon is clicked.
+ *
+ * The date input keeps its id, its classes and its ISO value, so every piece
+ * of code that reads or writes a date carries on as it was. Two things keep
+ * the pair in step:
+ *
+ *   the date input's `change`  — the calendar, or the browser autofilling
+ *   its `value` setter          — the app, setting a date in code
+ *
+ * The second is why the property is overridden per element: assigning to
+ * `.value` fires no event, and without it every `field.value = todayIso()`
+ * in the app would leave the visible box showing yesterday.
+ */
+const DATE_MASK = 'dd-mm-yyyy';
+
+const isoToDmy = (iso) => (/^\d{4}-\d{2}-\d{2}$/.test(iso || '')
+    ? iso.slice(8, 10) + '-' + iso.slice(5, 7) + '-' + iso.slice(0, 4)
+    : '');
+
+/**
+ * Typed dates, read generously: 1-7-26, 01/07/2026 and 01072026 are all the
+ * first of July. A day that does not exist — 31-02 — is not a date, and comes
+ * back empty rather than sliding into March.
+ */
+function dmyToIso(text) {
+    const raw   = String(text || '').trim();
+    const parts = raw.split(/[^\d]+/).filter(Boolean);
+    let day, month, year;
+
+    if (parts.length === 3) {
+        [day, month, year] = parts.map(Number);
+    } else {
+        const digits = raw.replace(/\D/g, '');
+        if (digits.length !== 8) return '';
+        day   = Number(digits.slice(0, 2));
+        month = Number(digits.slice(2, 4));
+        year  = Number(digits.slice(4));
+    }
+
+    if (!day || !month || !year) return '';
+    if (String(year).length <= 2) year += 2000;
+    if (month < 1 || month > 12 || year < 1000 || year > 9999) return '';
+    // Day 0 of the next month is the last day of this one.
+    if (day < 1 || day > new Date(year, month, 0).getDate()) return '';
+
+    return year + '-' + pad2(month) + '-' + pad2(day);
+}
+
+/** Dashes as the digits arrive, but only while typing at the end of the box —
+ *  inserting them under a caret sitting mid-date would move it. */
+function maskDate(input) {
+    if (input.selectionStart !== input.value.length) return;
+
+    const digits = input.value.replace(/\D/g, '').slice(0, 8);
+    let text = digits.slice(0, 2);
+    if (digits.length > 2) text += '-' + digits.slice(2, 4);
+    if (digits.length > 4) text += '-' + digits.slice(4);
+
+    // Only ever adds the separators the reader was about to type themselves.
+    if (text !== input.value) input.value = text;
+}
+
+const nativeValue = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value');
+
+function enhanceDateInput(iso) {
+    if (iso.dataset.dmy) return;
+    iso.dataset.dmy = '1';
+
+    const wrap = document.createElement('div');
+    wrap.className = 'date-field';
+    iso.parentNode.insertBefore(wrap, iso);
+    wrap.appendChild(iso);
+
+    const text = document.createElement('input');
+    text.type = 'text';
+    text.className = 'date-text';
+    text.inputMode = 'numeric';
+    text.autocomplete = 'off';
+    text.placeholder = DATE_MASK;
+    text.setAttribute('aria-label', (iso.getAttribute('aria-label') || 'Date') + ', ' + DATE_MASK);
+    wrap.appendChild(text);
+
+    const pick = document.createElement('button');
+    pick.type = 'button';
+    pick.className = 'date-pick';
+    pick.tabIndex = -1;
+    pick.setAttribute('aria-label', 'Open the calendar');
+    pick.innerHTML = '<i class="bi bi-calendar3"></i>';
+    wrap.appendChild(pick);
+
+    // The label still points at the date input by id, and a click on it still
+    // means "start typing here" — so the focus is passed along.
+    iso.tabIndex = -1;
+    iso.addEventListener('focus', () => text.focus());
+
+    const show = () => { text.value = isoToDmy(iso.value); };
+
+    Object.defineProperty(iso, 'value', {
+        configurable: true,
+        get() { return nativeValue.get.call(this); },
+        set(next) { nativeValue.set.call(this, next); show(); },
+    });
+
+    iso.addEventListener('change', show);
+    show();
+
+    /** Hand the app a real change, from the element it is listening to. */
+    const commit = () => {
+        const wanted = text.value.trim() ? dmyToIso(text.value) : '';
+
+        // Unreadable: not a date, so the field goes back to the one it holds
+        // rather than throwing it away on a typo.
+        if (text.value.trim() && !wanted) { show(); return; }
+
+        if (wanted === iso.value) { show(); return; }
+
+        iso.value = wanted;
+        iso.dispatchEvent(new Event('input',  { bubbles: true }));
+        iso.dispatchEvent(new Event('change', { bubbles: true }));
+    };
+
+    // The text box's own events stay in the box: half a typed date bubbling
+    // up to a list that rebuilds on input would pull the field out from under
+    // the caret. What the app hears is the date input, once, when it changes.
+    text.addEventListener('input', (event) => { event.stopPropagation(); maskDate(text); });
+    text.addEventListener('change', (event) => { event.stopPropagation(); commit(); });
+    text.addEventListener('blur', commit);
+
+    pick.addEventListener('mousedown', (event) => event.preventDefault());
+    pick.addEventListener('click', (event) => {
+        // Some of these fields sit inside a <label>, and a click anywhere in one
+        // activates the control it names — which here is the invisible date
+        // input. That is the one thing that must not happen on this button.
+        event.preventDefault();
+
+        if (typeof iso.showPicker === 'function') {
+            try { iso.showPicker(); return; } catch (err) { /* not allowed here: fall through */ }
+        }
+        text.focus();
+    });
+}
+
+/** Every date box on the page, including any a rebuild has just put there. */
+function enhanceDateInputs(root) {
+    (root || document).querySelectorAll('input[type="date"]').forEach(enhanceDateInput);
+}
+
 document.addEventListener('DOMContentLoaded', () => {
     if (MFStore.initSync(storeReport)) startApp();
     else MFStore.init(storeReport).then(startApp);
 });
 
 function startApp() {
+
+    // Before any of it: every date box on the page says dd-mm-yyyy, whatever
+    // the browser's own locale would have written.
+    enhanceDateInputs();
 
     // --- bill split: the saved bills first, then a blank form over them ---
     loadSplit();
@@ -10055,7 +11427,8 @@ function startApp() {
 
     // The target and the contribution row sit outside the form — one belongs
     // to the period, the other to the investment that happens to be open.
-    ['growTarget', 'growCDate', 'growCFigure', 'growCBase', 'growCNote'].forEach((id) => {
+    ['growTarget', 'growCDate', 'growCFigure', 'growCBase', 'growCNote',
+     'growEDate', 'growEFigure', 'growERate'].forEach((id) => {
         const el = $(id);
         if (!el) return;
         el.addEventListener('input', renderGrow);
@@ -10096,6 +11469,50 @@ function startApp() {
             const btn = event.target.closest('button[data-drop-contrib]');
             if (!btn) return;
             growDropContribution(btn.closest('.goal-c').dataset.contribution);
+        });
+    }
+
+    const growTypeSelect = $('growType');
+    if (growTypeSelect) growTypeSelect.addEventListener('change', onInvTypePick);
+
+    const growEditTypes = $('growEditTypes');
+    if (growEditTypes) growEditTypes.addEventListener('click', () => invTypeEditor());
+
+    const growAddTypeBtn = $('growAddType');
+    if (growAddTypeBtn) growAddTypeBtn.addEventListener('click', addInvType);
+
+    const growTypeRows = $('growTypes');
+    if (growTypeRows) {
+        growTypeRows.addEventListener('click', (event) => {
+            const row = event.target.closest('.purpose-row');
+            if (!row) return;
+            if (event.target.closest('[data-cycle-icon]')) { cycleInvTypeIcon(row); return; }
+            if (event.target.closest('[data-drop-inv-type]')) dropInvType(row);
+        });
+        growTypeRows.addEventListener('change', (event) => {
+            const input = event.target.closest('.inv-type-name');
+            if (input) renameInvType(input);
+        });
+        growTypeRows.addEventListener('keydown', (event) => {
+            if (event.key === 'Enter' && event.target.closest('.inv-type-name')) {
+                event.preventDefault();
+                event.target.blur();
+            }
+        });
+    }
+
+    const growProjApply = $('growProjApply');
+    if (growProjApply) growProjApply.addEventListener('click', growApplyProjection);
+
+    const growEAddBtn = $('growEAdd');
+    if (growEAddBtn) growEAddBtn.addEventListener('click', growAddEarning);
+
+    const growEListHost = $('growEList');
+    if (growEListHost) {
+        growEListHost.addEventListener('click', (event) => {
+            const btn = event.target.closest('button[data-drop-earning]');
+            if (!btn) return;
+            growDropEarning(btn.closest('.goal-c').dataset.earning);
         });
     }
 
@@ -10321,6 +11738,10 @@ function startApp() {
 
     const ledgerAccounts = $('ledgerAccounts');
     if (ledgerAccounts) {
+        // Ahead of the rebuild: the editor option is put back to the account's
+        // own purpose before anything reads the row.
+        ledgerAccounts.addEventListener('change', onAccountTypePick);
+        ledgerAccounts.addEventListener('change', onAccountPurposePick);
         ledgerAccounts.addEventListener('input', renderLedger);
         ledgerAccounts.addEventListener('change', renderLedger);
         ledgerAccounts.addEventListener('click', onLedgerAccountsClick);
@@ -10357,11 +11778,64 @@ function startApp() {
         addAccount.addEventListener('click', () => {
             accountEditor(true);
             readLedgerAccounts();
-            ledgerState.accounts.push({ id: ledgerId('a'), name: '', group: 'bank', opening: '' });
+            ledgerState.accounts.push({
+                id: ledgerId('a'), name: '', type: defaultTypeId(), purpose: '',
+                currency: BASE_CURRENCY, opening: '', status: 'active',
+            });
             buildLedgerAccounts();
             renderLedger();
             const last = document.querySelector('#ledgerAccounts .bgt-row:last-child .bgt-label');
             if (last) last.focus();
+        });
+    }
+
+    const editTypes = $('ledgerEditTypes');
+    if (editTypes) editTypes.addEventListener('click', () => typeEditor());
+
+    const addTypeBtn = $('ledgerAddType');
+    if (addTypeBtn) addTypeBtn.addEventListener('click', addType);
+
+    const typeRows = $('ledgerTypes');
+    if (typeRows) {
+        typeRows.addEventListener('click', (event) => {
+            const drop = event.target.closest('[data-drop-type]');
+            if (drop) dropType(drop.closest('.purpose-row'));
+        });
+        typeRows.addEventListener('change', (event) => {
+            const input = event.target.closest('.type-name');
+            if (input) renameType(input);
+        });
+        typeRows.addEventListener('keydown', (event) => {
+            if (event.key === 'Enter' && event.target.closest('.type-name')) {
+                event.preventDefault();
+                event.target.blur();
+            }
+        });
+    }
+
+    const editPurposes = $('ledgerEditPurposes');
+    if (editPurposes) editPurposes.addEventListener('click', () => purposeEditor());
+
+    const addPurposeBtn = $('ledgerAddPurpose');
+    if (addPurposeBtn) addPurposeBtn.addEventListener('click', addPurpose);
+
+    const purposeRows = $('ledgerPurposes');
+    if (purposeRows) {
+        purposeRows.addEventListener('click', (event) => {
+            const drop = event.target.closest('[data-drop-purpose]');
+            if (drop) dropPurpose(drop.closest('.purpose-row'));
+        });
+        // On change rather than on input: renaming rewrites every account
+        // holding the word, which is not a thing to do per keystroke.
+        purposeRows.addEventListener('change', (event) => {
+            const input = event.target.closest('.purpose-name');
+            if (input) renamePurpose(input);
+        });
+        purposeRows.addEventListener('keydown', (event) => {
+            if (event.key === 'Enter' && event.target.closest('.purpose-name')) {
+                event.preventDefault();
+                event.target.blur();
+            }
         });
     }
 

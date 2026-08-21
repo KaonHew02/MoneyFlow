@@ -1650,6 +1650,64 @@ input[type="date"]:hover::-webkit-calendar-picker-indicator { opacity: .85; }
 /* A closed account keeps its row and stops looking current. */
 .bgt-row.is-off { opacity: .58; }
 
+/* Purposes — one shared list, opened from any account's picker */
+#ledgerPurposeEdit, #ledgerTypeEdit, #growTypeEdit {
+    margin-top: 14px;
+    padding-top: 14px;
+    border-top: 1px solid var(--line);
+}
+
+.purpose-head {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: baseline;
+    gap: 4px 12px;
+    margin-bottom: 10px;
+}
+
+.purpose-head h3 { margin: 0; font-size: 13px; font-weight: 700; color: var(--ink); }
+.purpose-head .hint { flex: 1 1 260px; }
+
+.purpose-list { display: flex; flex-direction: column; gap: 6px; }
+
+.purpose-row {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto 30px;
+    align-items: center;
+    gap: 8px;
+}
+
+.purpose-row input { padding: 8px 11px; font-size: 13px; }
+
+/* A kind of investment carries a face as well as a name — it is what the
+   holdings table shows beside it, and the only way to tell two custom kinds
+   apart at a glance. */
+.purpose-row.is-icon { grid-template-columns: 34px minmax(0, 1fr) auto 30px; }
+
+.type-icon {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 34px;
+    height: 34px;
+    padding: 0;
+    border: 1px solid var(--line);
+    border-radius: 10px;
+    background: transparent;
+    font-size: 14px;
+    color: var(--ink-2);
+    cursor: pointer;
+    transition: border-color .16s ease, color .16s ease, background .16s ease;
+}
+
+.type-icon:hover { border-color: var(--jade); background: var(--jade-soft); color: var(--jade); }
+.purpose-row small { font-size: 11px; color: var(--ink-3); white-space: nowrap; }
+
+/* A kind that accounts are still filed under says no rather than taking them
+   with it — the same nudge a category with entries behind it gives. */
+.purpose-row.is-locked input { border-color: var(--red-line); background: var(--red-soft); }
+.purpose-row.is-locked { animation: nudge .3s ease; }
+
 /* ==========================================================================
    Stacked share bar + legend
    ========================================================================== */
@@ -2420,9 +2478,44 @@ input[type="date"]:hover::-webkit-calendar-picker-indicator { opacity: .85; }
     font-size: 12.5px;
 }
 
+/* A dividend is an annual event, so the payout list is read a year at a time
+   and each year carries its own total. */
+.grow-year {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    gap: 10px;
+    margin: 14px 2px 2px;
+    font-size: 11px;
+    font-weight: 700;
+    letter-spacing: .06em;
+    text-transform: uppercase;
+    color: var(--ink-3);
+}
+
+.grow-year:first-child { margin-top: 2px; }
+.grow-year b { font-size: 12.5px; letter-spacing: 0; color: var(--ink-2); font-variant-numeric: tabular-nums; }
+
 .goal-c-when { color: var(--ink-3); font-variant-numeric: tabular-nums; }
 .goal-c-what { color: var(--ink-2); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .goal-c-what i { color: var(--ink-4); }
+
+/* A contribution the ledger is keeping. It is shown, not owned: no ✕, and a
+   tag saying where to go to change it. */
+.goal-c.is-linked { background: var(--jade-soft); }
+
+.from-tag {
+    margin-left: 6px;
+    padding: 1px 6px;
+    border-radius: 999px;
+    background: var(--paper);
+    font-size: 10px;
+    font-weight: 700;
+    font-style: normal;
+    letter-spacing: .04em;
+    text-transform: uppercase;
+    color: var(--ink-3);
+}
 .goal-c b { font-variant-numeric: tabular-nums; }
 .goal-c .split-x { width: 26px; height: 26px; }
 
@@ -2643,6 +2736,9 @@ input[type="date"]:hover::-webkit-calendar-picker-indicator { opacity: .85; }
 }
 
 .grow-add[hidden] { display: none; }
+
+/* A payout row carries a rate where a contribution carries a unit switch. */
+.grow-add.is-earn { grid-template-columns: 138px 132px 118px minmax(0, 1fr) auto; }
 .grow-add input[type="date"],
 .grow-add input[type="text"] { padding: 8px 10px; font-size: 12.5px; }
 .grow-add .money-input-sm[hidden] { display: none; }
@@ -2650,6 +2746,7 @@ input[type="date"]:hover::-webkit-calendar-picker-indicator { opacity: .85; }
 
 @media (max-width: 900px) {
     .grow-add { grid-template-columns: 138px auto minmax(0, 1fr); }
+    .grow-add.is-earn { grid-template-columns: 138px minmax(0, 1fr); }
     .grow-add input[type="text"] { grid-column: 1 / -1; }
     .grow-add button { grid-column: 1 / -1; justify-content: center; }
 }
@@ -2657,7 +2754,7 @@ input[type="date"]:hover::-webkit-calendar-picker-indicator { opacity: .85; }
 @media (max-width: 560px) {
     .grow-month { grid-template-columns: 34px minmax(0, 1fr) 46px; }
     .grow-month b { grid-column: 2 / 3; text-align: left; font-size: 11.5px; }
-    .grow-add { grid-template-columns: minmax(0, 1fr); }
+    .grow-add, .grow-add.is-earn { grid-template-columns: minmax(0, 1fr); }
     .unit-input { flex-wrap: wrap; }
 }
 
@@ -3129,11 +3226,57 @@ input[type="date"]:hover::-webkit-calendar-picker-indicator { opacity: .85; }
 /* --------------------------------------------------------------------------
    KPI grid — ten figures, and three of them honestly empty.
    -------------------------------------------------------------------------- */
+/* Nine tiles in one grid answered three different questions at once and none
+   of them clearly. Each band asks one. */
+.kpi-bands { display: grid; gap: 18px; }
+
+.kpi-band-head {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    gap: 10px;
+    margin-bottom: 9px;
+}
+
+.kpi-band-head h3 {
+    margin: 0;
+    font-size: 11.5px;
+    font-weight: 700;
+    letter-spacing: .07em;
+    text-transform: uppercase;
+    color: var(--ink-3);
+}
+
+.kpi-band-head span { font-size: 11.5px; color: var(--ink-4); white-space: nowrap; }
+
 .kpi-grid {
     display: grid;
     grid-template-columns: repeat(auto-fit, minmax(178px, 1fr));
     gap: 10px;
 }
+
+/* Said once, where the reader is about to fill something in. */
+.guide {
+    margin-bottom: 20px;
+    padding: 14px 16px;
+    border: 1px solid var(--jade-line);
+    border-radius: var(--radius-sm);
+    background: var(--jade-soft);
+}
+
+.guide h3 {
+    display: flex;
+    align-items: center;
+    gap: 7px;
+    margin: 0 0 9px;
+    font-size: 12.5px;
+    font-weight: 700;
+    color: var(--ink);
+}
+
+.guide ul { display: grid; gap: 7px; margin: 0; padding: 0; list-style: none; }
+.guide li { font-size: 12.5px; line-height: 1.5; color: var(--ink-2); }
+.guide li b { font-weight: 650; color: var(--ink); }
 
 .kpi {
     display: grid;
@@ -3361,4 +3504,143 @@ input[type="date"]:hover::-webkit-calendar-picker-indicator { opacity: .85; }
     .dash-bar { grid-template-columns: minmax(72px, 1fr) 2fr auto; }
     .dash-bar small { display: none; }
     .trend { height: 210px; }
+}
+
+/* ==========================================================================
+   Date fields — dd-mm-yyyy in the box, the native calendar behind the icon
+   ==========================================================================
+   The real <input type="date"> is still there, filling the field and invisible
+   with it: it holds the value every other line of code reads, and it is what
+   the calendar opens from, so it has to stay rendered rather than hidden. */
+.date-field { position: relative; display: block; width: 100%; min-width: 0; }
+
+.date-field input[type="date"] {
+    position: absolute;
+    inset: 0;
+    width: 100%;
+    height: 100%;
+    padding: 0;
+    border: 0;
+    background: none;
+    opacity: 0;
+    pointer-events: none;
+}
+
+.date-field input.date-text { width: 100%; padding-right: 40px; font-variant-numeric: tabular-nums; }
+
+/* Said again here rather than inherited: the compact rules those cards set
+   reach the date input, which nobody can see any more — and they are written
+   tightly enough that the visible box has to match them to win. */
+.goal-field input.date-text,
+.goal-add input.date-text,
+.grow-add input.date-text { padding: 8px 40px 8px 10px; font-size: 12.5px; }
+
+.date-pick {
+    position: absolute;
+    top: 50%;
+    right: 5px;
+    transform: translateY(-50%);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 30px;
+    height: 30px;
+    padding: 0;
+    border: 0;
+    border-radius: var(--radius-sm);
+    background: none;
+    color: var(--ink-3);
+    cursor: pointer;
+    transition: color .16s ease, background .16s ease;
+}
+
+.date-pick:hover { background: var(--paper-2); color: var(--ink); }
+.date-pick i { font-size: 14px; }
+
+/* ==========================================================================
+   On a phone
+   ==========================================================================
+   The rules above already fold the layout into one column. This section is
+   the part that only matters once the screen is being touched rather than
+   pointed at: fields a phone will not zoom into, and buttons a thumb can
+   actually land on. Nothing here changes what is on the page — only how big
+   it is when there is no mouse.
+   ========================================================================== */
+@media (max-width: 700px) {
+
+    /* iOS Safari zooms the whole page in when it focuses a field whose text is
+       under 16px, and it does not zoom back out afterwards — the reader is left
+       scrolling sideways through a form they were only trying to type in. Every
+       box that can be typed into says 16px here, whatever it says on a desktop.
+       The padding is left alone, so the fields keep their proportions. */
+    input[type="number"], input[type="text"], input[type="date"],
+    input[type="email"], input[type="password"], input[type="search"],
+    select, textarea,
+    .money-input input, .money-input-sm input,
+    .cat-name, .cat-sub-name, .split-item-label,
+    .cat-look-row select, .acct-more select,
+    .purpose-row input,
+    .goal-field select, .goal-field input[type="date"],
+    .goal-field input.date-text,
+    .goal-add input[type="text"], .goal-add input.date-text,
+    .grow-add input[type="text"], .grow-add input.date-text,
+    .date-field input.date-text { font-size: 16px; }
+
+    /* A fingertip is about 9mm across; a 26px button is 7. The small round
+       controls — remove, month back and forward, the calendar — are sized to
+       be hit rather than pointed at, and the columns they sit in widen with
+       them so nothing is pushed off the row. */
+    .split-x { width: 36px; height: 36px; font-size: 13px; }
+    .cat-sub .split-x { width: 32px; height: 32px; }
+    .date-pick { width: 38px; height: 38px; right: 4px; }
+
+    .date-field input.date-text,
+    .goal-field input.date-text,
+    .goal-add input.date-text,
+    .grow-add input.date-text { padding-right: 46px; }
+
+    .purpose-row { grid-template-columns: minmax(0, 1fr) auto 36px; }
+    .purpose-row.is-icon { grid-template-columns: 36px minmax(0, 1fr) auto 36px; }
+    .type-icon { width: 36px; height: 36px; }
+    .split-item, .split-item.has-off { grid-template-columns: minmax(0, 1fr) 104px 36px; }
+    .bgt-row.is-custom { grid-template-columns: 38px minmax(0, 1fr) minmax(0, 1fr) 36px; }
+    .bgt-row.is-plan { grid-template-columns: 38px minmax(0, 1fr) 36px; }
+    .goal-c { grid-template-columns: minmax(0, 1fr) auto 36px; }
+
+    .month-nav button { width: 36px; height: 36px; font-size: 13px; }
+
+    /* The drawer handle is the one control every other screen is reached
+       through, and hiding its label left an icon the size of a full stop. */
+    .nav-toggle { min-width: 44px; min-height: 42px; padding: 10px 12px; }
+    .backup button { min-height: 40px; }
+
+    .ghost-btn { padding: 10px 14px; font-size: 13px; }
+    .seg button { padding: 11px 0; }
+    .seg.is-compact button { padding: 9px 12px; font-size: 12.5px; }
+    .cat-act { min-height: 40px; }
+
+    /* A foot carrying two or three of these — add, kinds, purposes — reads as
+       a row of equals rather than as one button and some leftovers. */
+    .form-foot .ghost-btn { flex: 1 1 auto; justify-content: center; }
+
+    /* Both of these put a date box in the first of two columns, and a date
+       box has a fixed amount to say: dd-mm-yyyy and a calendar. Below this
+       there is not room for that beside anything else. */
+    .goal-add { grid-template-columns: minmax(0, 1fr); }
+    .goal-add button { grid-column: auto; }
+
+    /* Tables are the one thing that still has to scroll sideways — five
+       columns of figures do not fold. Momentum makes that feel like a phone
+       rather than like a bug. */
+    .table-wrap { -webkit-overflow-scrolling: touch; }
+}
+
+/* On a narrow phone two tiles across leaves about 90px for the figure, and
+   "RM 2,000.00" does not fit in 90px — it wrapped, which is what made the
+   dashboard look broken rather than full. One across, and every figure reads
+   on one line. The bands keep the list from becoming a scroll. */
+@media (max-width: 460px) {
+    .kpi-grid { grid-template-columns: minmax(0, 1fr); }
+    .kpi { padding: 13px 14px; }
+    .kpi-band-head { margin-bottom: 7px; }
 }
