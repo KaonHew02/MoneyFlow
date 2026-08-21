@@ -1376,8 +1376,28 @@ function splitDropBill(id) {
     if (!bill) return;
 
     if (bill.entryId && ledgerState.entries.some((e) => e.id === bill.entryId)) {
-        splitHint('This bill has an expense recorded against it. Remove that first, under Settle up.');
-        if (splitState.editing !== bill.id) splitOpenBill(bill.id);
+        // Refusing at the bottom of the page while printing the reason at the
+        // top of it reads as the button being broken. So: open the bill, take
+        // the reader to the button that undoes the entry, and flash the row
+        // that would not go.
+        if (splitState.editing !== bill.id) {
+            splitState.editing = bill.id;
+            splitState.draft = bill;
+            paintSplitForm();
+        }
+        renderSplit();
+
+        splitHint('That bill has an expense in Expenses. Press Remove under Settle up first, then delete it.');
+
+        const btn = document.querySelector('#splitBills [data-drop-bill="' + bill.id + '"]');
+        const row = btn && btn.closest('tr');
+        if (row) {
+            row.classList.add('is-locked');
+            setTimeout(() => row.classList.remove('is-locked'), 1600);
+        }
+
+        const target = $('splitExpState') || $('splitSettleList');
+        if (target) target.scrollIntoView({ behavior: 'smooth', block: 'center' });
         return;
     }
 

@@ -1544,6 +1544,10 @@ input[type="date"]:hover::-webkit-calendar-picker-indicator { opacity: .85; }
 .cat-sub.is-locked .cat-sub-name { border-color: var(--red-line); background: var(--red-soft); }
 .cat-row.is-locked { border-color: var(--red-line); background: var(--red-soft); animation: nudge .3s ease; }
 
+/* A saved bill that will not delete yet says so where the click happened. */
+tr.is-locked > td { background: var(--red-soft); }
+tr.is-locked { animation: nudge .3s ease; }
+
 /* --- the tints a category may carry --- */
 .tone-jade   { background: var(--jade-soft);   color: var(--jade); }
 .tone-amber  { background: var(--amber-soft);  color: var(--amber); }
