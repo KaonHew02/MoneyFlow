@@ -1381,7 +1381,7 @@ function splitOpenBill(id) {
     paintSplitForm();
     renderSplit();
     const form = $('split-form');
-    if (form) form.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    if (form) reveal(form).scrollIntoView({ behavior: 'smooth', block: 'start' });
 }
 
 /** A copy of last month's dinner, with the debts wiped: same table, new night. */
@@ -1436,7 +1436,7 @@ function splitDropBill(id) {
         }
 
         const target = $('splitExpState') || $('splitSettleList');
-        if (target) target.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        if (target) reveal(target).scrollIntoView({ behavior: 'smooth', block: 'center' });
         return;
     }
 
@@ -2534,7 +2534,7 @@ function openSavedPlan(id) {
     persistPlan();
     renderBudget();
     const form = $('budget-form');
-    if (form) form.scrollIntoView({ block: 'start', behavior: 'smooth' });
+    if (form) reveal(form).scrollIntoView({ block: 'start', behavior: 'smooth' });
 }
 
 function dropSavedPlan(id) {
@@ -2711,7 +2711,7 @@ function addBudgetCategory() {
     afterCategoryChange(true);
 
     const fresh = document.querySelector('#budgetRows .bgt-row:last-child .bgt-name');
-    if (fresh) { fresh.focus({ preventScroll: true }); fresh.scrollIntoView({ block: 'center', behavior: 'smooth' }); }
+    if (fresh) { reveal(fresh).focus({ preventScroll: true }); reveal(fresh).scrollIntoView({ block: 'center', behavior: 'smooth' }); }
     planHint('New categories show up in the Expenses picker straight away — that is what lets spending count against them.');
 }
 
@@ -3541,7 +3541,7 @@ function addGoal() {
     renderGoals(true);
 
     const fresh = document.querySelector('#goalList .goal[data-goal="' + goal.id + '"] .goal-name');
-    if (fresh) { fresh.focus({ preventScroll: true }); fresh.scrollIntoView({ block: 'center', behavior: 'smooth' }); }
+    if (fresh) { reveal(fresh).focus({ preventScroll: true }); reveal(fresh).scrollIntoView({ block: 'center', behavior: 'smooth' }); }
 }
 
 function onGoalInput(event) {
@@ -4019,7 +4019,7 @@ function commitOpenPlan(id) {
     fillCommitForm();
     renderCommit();
     const form = $('commit-form');
-    if (form) form.scrollIntoView({ block: 'start', behavior: 'smooth' });
+    if (form) reveal(form).scrollIntoView({ block: 'start', behavior: 'smooth' });
 }
 
 function commitNewPlan() {
@@ -5080,7 +5080,7 @@ function cardOpenCard(id) {
     fillCardForm();
     renderCard();
     const form = $('card-form');
-    if (form) form.scrollIntoView({ block: 'start', behavior: 'smooth' });
+    if (form) reveal(form).scrollIntoView({ block: 'start', behavior: 'smooth' });
 }
 
 function cardNewCard() {
@@ -6405,7 +6405,7 @@ function addInvType() {
 
     const fresh = document.querySelector('#growTypes .purpose-row:last-child .inv-type-name');
     if (fresh) {
-        fresh.focus({ preventScroll: true });
+        reveal(fresh).focus({ preventScroll: true });
         fresh.scrollIntoView({ block: 'center', behavior: 'smooth' });
     }
 }
@@ -6493,7 +6493,7 @@ function onInvTypePick() {
     invTypeEditor(true);
 
     const panel = $('growTypeEdit');
-    if (panel) panel.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+    if (panel) reveal(panel).scrollIntoView({ block: 'nearest', behavior: 'smooth' });
 }
 
 /**
@@ -6614,7 +6614,7 @@ function growOpenInvestment(id) {
     fillGrowForm();
     renderGrow();
     const form = $('grow-form');
-    if (form) form.scrollIntoView({ block: 'start', behavior: 'smooth' });
+    if (form) reveal(form).scrollIntoView({ block: 'start', behavior: 'smooth' });
 }
 
 function growNewInvestment() {
@@ -7976,7 +7976,7 @@ function addType() {
 
     const fresh = document.querySelector('#ledgerTypes .purpose-row:last-child .type-name');
     if (fresh) {
-        fresh.focus({ preventScroll: true });
+        reveal(fresh).focus({ preventScroll: true });
         fresh.scrollIntoView({ block: 'center', behavior: 'smooth' });
     }
 }
@@ -8053,7 +8053,7 @@ function onAccountTypePick(event) {
 
     typeEditor(true);
     const panel = $('ledgerTypeEdit');
-    if (panel) panel.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+    if (panel) reveal(panel).scrollIntoView({ block: 'nearest', behavior: 'smooth' });
 }
 
 /**
@@ -8149,7 +8149,7 @@ function addPurpose() {
 
     const fresh = document.querySelector('#ledgerPurposes .purpose-row:last-child .purpose-name');
     if (fresh) {
-        fresh.focus({ preventScroll: true });
+        reveal(fresh).focus({ preventScroll: true });
         fresh.scrollIntoView({ block: 'center', behavior: 'smooth' });
     }
 }
@@ -8230,7 +8230,7 @@ function onAccountPurposePick(event) {
 
     purposeEditor(true);
     const panel = $('ledgerPurposeEdit');
-    if (panel) panel.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+    if (panel) reveal(panel).scrollIntoView({ block: 'nearest', behavior: 'smooth' });
 }
 
 /**
@@ -8503,7 +8503,7 @@ function addCategory() {
         buildCategoryManager();
         renderLedger();
         const fresh = document.querySelector('#categoryList .cat-row:last-child .cat-name');
-        if (fresh) { fresh.focus({ preventScroll: true }); fresh.scrollIntoView({ block: 'center', behavior: 'smooth' }); }
+        if (fresh) { reveal(fresh).focus({ preventScroll: true }); reveal(fresh).scrollIntoView({ block: 'center', behavior: 'smooth' }); }
         return;
     }
 
@@ -8520,7 +8520,7 @@ function addCategory() {
     afterCategoryChange(true);
 
     const input = document.querySelector('#categoryList .cat-row:last-child .cat-name');
-    if (input) { input.focus({ preventScroll: true }); input.scrollIntoView({ block: 'center', behavior: 'smooth' }); }
+    if (input) { reveal(input).focus({ preventScroll: true }); reveal(input).scrollIntoView({ block: 'center', behavior: 'smooth' }); }
 }
 
 function onCategoryClick(event) {
@@ -9354,7 +9354,7 @@ function openCurrencyPop(open) {
 
     // Bring the current choice into view rather than reopening at the top.
     const current = document.querySelector('#ledgerCurrencyList .combo-row.is-on');
-    if (current) current.scrollIntoView({ block: 'center' });
+    if (current) reveal(current).scrollIntoView({ block: 'center' });
 }
 
 /** A transfer swaps the category picker for a second account. */
@@ -11500,6 +11500,96 @@ async function paintStorage() {
     }
 }
 
+/**
+ * ====================================================================
+ * FOLDING A CARD AWAY
+ * ====================================================================
+ * Seven cards in a module is a long page, and most days a reader wants two
+ * of them. So every card gets a chevron in its heading, and a card folded
+ * away stays folded — the decision is about how somebody works, not about
+ * this visit, and a fold that reopens on reload is one nobody uses twice.
+ *
+ * Nothing starts folded. A card that opens closed is a card you have to
+ * discover, and the empty screen behind it looks like a bug.
+ *
+ * The state is keyed by where the card sits in its module rather than by its
+ * heading, because two headings here say "Where it went" and one of them
+ * changes its wording as you type. Moving a card in the markup therefore
+ * moves the fold with the position, which is a fair trade for never
+ * mismatching two cards that share a name.
+ */
+const FOLD_KEY = 'moneyflow.folds.v1';
+
+function foldsHeld() {
+    try { return new Set(JSON.parse(localStorage.getItem(FOLD_KEY) || '[]')); }
+    catch (err) { return new Set(); }
+}
+
+function rememberFolds(held) {
+    try { localStorage.setItem(FOLD_KEY, JSON.stringify(Array.from(held))); }
+    catch (err) { /* the fold is a convenience; losing it costs nothing */ }
+}
+
+/**
+ * Open whatever fold this element is buried under, and hand it back.
+ *
+ * Every "edit this entry" and "add an account" in the app ends by scrolling to
+ * the thing it just made ready. If the card holding it is folded away, that
+ * scroll lands on a heading and the click looks like it did nothing — so the
+ * fold gives way to the reader's own request. It is idempotent: an element
+ * already in view walks out of here untouched.
+ */
+function reveal(el) {
+    const card = el && el.closest ? el.closest('.card.is-folded') : null;
+    if (card) {
+        const btn = card.querySelector(':scope > .card-head > .card-fold');
+        if (btn) btn.click();
+    }
+    return el;
+}
+
+function wireFolds() {
+    const held = foldsHeld();
+
+    document.querySelectorAll('.module').forEach((mod) => {
+        mod.querySelectorAll('.card').forEach((card, index) => {
+            // `:scope >` matters: the Dashboard's account history panel carries
+            // a heading of its own inside a card, and it is not a card.
+            const head = card.querySelector(':scope > .card-head');
+            if (!head || card.classList.contains('is-bar')) return;
+
+            const key = mod.id + '/' + index;
+            const btn = document.createElement('button');
+            btn.type = 'button';
+            btn.className = 'card-fold';
+            btn.innerHTML = '<i class="bi bi-chevron-up"></i>';
+
+            head.classList.add('has-toggle');
+            head.appendChild(btn);
+
+            const paint = () => {
+                const folded = card.classList.contains('is-folded');
+                btn.setAttribute('aria-expanded', String(!folded));
+                btn.title = folded ? 'Open this card' : 'Fold this card away';
+            };
+
+            if (held.has(key)) card.classList.add('is-folded');
+            paint();
+
+            btn.addEventListener('click', () => {
+                const folded = card.classList.toggle('is-folded');
+
+                // Re-read rather than close over the set: two modules are wired
+                // in one pass and the panel is not the only thing writing here.
+                const now = foldsHeld();
+                if (folded) now.add(key); else now.delete(key);
+                rememberFolds(now);
+                paint();
+            });
+        });
+    });
+}
+
 function wireBackup() {
     const exportBtn = $('backupExport');
     if (exportBtn) exportBtn.addEventListener('click', () => backupExport(exportBtn));
@@ -12444,6 +12534,10 @@ function startApp() {
     }
 
     wireBackup();
+
+    // A chevron on every card heading, and whichever ones were folded away last
+    // time folded again. Before the modules paint, so nothing flashes open.
+    wireFolds();
 
     // What the last session left behind, before anything in this one writes.
     paintSaveStamp();

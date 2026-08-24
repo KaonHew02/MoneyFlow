@@ -560,6 +560,56 @@ body {
 }
 
 .card-head h2 { margin: 0; font-size: 16.5px; font-weight: 700; letter-spacing: -.015em; }
+
+/* ==========================================================================
+   Folding a card away
+
+   Nothing here is hidden by default: a card that opens closed is a card you
+   have to discover. This is for the reader who has decided a card is not
+   their business today — the Accounts panel while they are only filing
+   receipts — and it stays decided, because a fold that reopens on every
+   reload is a fold nobody uses twice.
+
+   The heading keeps its own line either way. A folded card is a title and a
+   rule, so the page reads as a list of what is here rather than a wall.
+   ========================================================================== */
+.card-head.has-toggle > h2 { margin-right: auto; }
+
+.card-fold {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    align-self: center;
+    flex: 0 0 auto;
+    width: 27px;
+    height: 27px;
+    padding: 0;
+    border: 0;
+    border-radius: 9px;
+    background: transparent;
+    color: var(--ink-4);
+    font-size: 13px;
+    cursor: pointer;
+    transition: color .16s ease, background .16s ease;
+}
+
+.card-fold:hover { background: var(--jade-soft); color: var(--jade); }
+.card-fold i { display: block; transition: transform .2s ease; }
+.card.is-folded .card-fold i { transform: rotate(180deg); }
+
+/* The rule under the heading is what separates it from a body. Folded, there
+   is no body, so the rule and the air below it go too. */
+.card.is-folded > .card-head {
+    margin-bottom: 0;
+    padding-bottom: 0;
+    border-bottom: 0;
+}
+
+.card.is-folded > *:not(.card-head) { display: none; }
+
+/* In the two-column deck a folded card would otherwise still be stretched to
+   the height of whatever is beside it, which is a fold that saves nothing. */
+.deck > .card.is-folded { align-self: start; }
 .card-actions { display: flex; align-items: center; gap: 14px; }
 .card-note { font-size: 12px; color: var(--ink-3); font-variant-numeric: tabular-nums; text-align: right; }
 .card-note b { font-weight: 700; color: var(--ink-2); }
@@ -1352,15 +1402,19 @@ input[type="date"]:hover::-webkit-calendar-picker-indicator { opacity: .85; }
    ========================================================================== */
 .cat-list { display: grid; gap: 9px; }
 
-/* Fifteen rows is a card taller than the screen, and it sits beside a card
-   that is not. The list scrolls inside itself so the card stays the size of
-   its neighbour and the page keeps one scrollbar that means something. */
+/* Fifteen rows is a card taller than the screen. The list scrolls inside
+   itself so the card stays a readable height and the page keeps one scrollbar
+   that means something. */
 .cat-list {
     max-height: 460px;
     overflow-y: auto;
     padding-right: 4px;
     scrollbar-width: thin;
 }
+
+/* Across the full width of the page the rows run in columns, so the same
+   460px of card holds two or three times as many of them. */
+.card.is-wide .cat-list { grid-template-columns: repeat(auto-fill, minmax(330px, 1fr)); }
 
 .cat-list::-webkit-scrollbar { width: 8px; }
 .cat-list::-webkit-scrollbar-thumb { background: var(--line-strong); border-radius: 999px; }

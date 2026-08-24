@@ -553,25 +553,6 @@
 
                 <section class="card">
                     <div class="card-head">
-                        <h2>Categories</h2>
-                        <div class="card-actions">
-                            <div class="seg is-compact" id="categorySide" data-value="spend">
-                                <button type="button" data-val="spend" class="is-on">Spending</button>
-                                <button type="button" data-val="income">Money in</button>
-                                <button type="button" data-val="method">Payment method</button>
-                            </div>
-                            <button type="button" class="ghost-btn" id="categoryAdd">
-                                <i class="bi bi-plus-lg"></i> Add category
-                            </button>
-                        </div>
-                    </div>
-                    <div class="cat-list" id="categoryList"></div>
-                    <p class="hint" id="categoryListHint">Rename anything here and the new name follows into every entry already filed under it &mdash; the record points at the category, not at its name. The bucket is what keeps the 50/30/20 reading honest, and it is the same list the Planner plans against, and you can add, rename or retire a category from either place. Anything with entries behind it cannot be deleted; retire it with the eye instead and its history stays intact.</p>
-                    <p class="hint" id="categoryMethodHint" hidden>A payment method is an account: choosing one is what moves its balance, which is why cash and a credit card cannot be the same entry. Opening balance, kind and currency live on the Accounts card below &mdash; this is for naming them.</p>
-                </section>
-
-                <section class="card is-wide">
-                    <div class="card-head">
                         <h2>Accounts</h2>
                         <div class="card-actions">
                             <span class="card-note" id="ledgerWorthNote">&mdash;</span>
@@ -649,6 +630,25 @@
                             </div>
                         </div>
                     </div>
+                </section>
+
+                <section class="card is-wide">
+                    <div class="card-head">
+                        <h2>Categories</h2>
+                        <div class="card-actions">
+                            <div class="seg is-compact" id="categorySide" data-value="spend">
+                                <button type="button" data-val="spend" class="is-on">Spending</button>
+                                <button type="button" data-val="income">Money in</button>
+                                <button type="button" data-val="method">Payment method</button>
+                            </div>
+                            <button type="button" class="ghost-btn" id="categoryAdd">
+                                <i class="bi bi-plus-lg"></i> Add category
+                            </button>
+                        </div>
+                    </div>
+                    <div class="cat-list" id="categoryList"></div>
+                    <p class="hint" id="categoryListHint">Rename anything here and the new name follows into every entry already filed under it &mdash; the record points at the category, not at its name. The bucket is what keeps the 50/30/20 reading honest, and it is the same list the Planner plans against, and you can add, rename or retire a category from either place. Anything with entries behind it cannot be deleted; retire it with the eye instead and its history stays intact.</p>
+                    <p class="hint" id="categoryMethodHint" hidden>A payment method is an account: choosing one is what moves its balance, which is why cash and a credit card cannot be the same entry. Opening balance, kind and currency live on the Accounts card above &mdash; this is for naming them.</p>
                 </section>
                 </div>
 
