@@ -58,6 +58,11 @@
         </button>
 
         <div class="backup">
+            <!-- There is no Save button in MoneyFlow, so there is nothing to
+                 press and nothing to reassure anyone. One time says it, and
+                 pressing it opens the panel that says the rest. -->
+            <button type="button" class="stamp" id="saveStamp"
+                    title="Where these records live, and how much room is left"></button>
             <span class="drive-stamp" id="driveStamp"></span>
             <button type="button" class="drive-auto" id="driveAuto" aria-pressed="false"
                     title="Off &mdash; nothing goes to Drive unless you press &quot;To Drive&quot;.">
@@ -2207,6 +2212,38 @@
         <div class="dialog-actions">
             <button type="button" id="backupCancel">Cancel</button>
             <button type="button" id="backupConfirm">Replace everything</button>
+        </div>
+    </div>
+</div>
+
+<!-- ======================================================================
+     THE DATA PANEL
+
+     Where the records actually are, how much room is left, and whether there
+     is a second copy anywhere. Every button in the topbar says what it does;
+     none of them could say where any of this lives, and that is the question
+     people ask of an app that never makes them press Save.
+     ====================================================================== -->
+<div class="dialog" id="dataBox" hidden>
+    <div class="dialog-card is-wide" role="dialog" aria-modal="true" aria-labelledby="dataTitle">
+        <h2 id="dataTitle">Your data</h2>
+
+        <section class="data-block">
+            <h3><i class="bi bi-hdd"></i>Where it lives</h3>
+            <p id="dataWhere">&mdash;</p>
+            <div class="data-meter"><span id="dataMeterFill"></span></div>
+            <p class="data-sub" id="dataUsed">&mdash;</p>
+            <p class="data-sub" id="dataBiggest" hidden></p>
+        </section>
+
+        <section class="data-block">
+            <h3><i class="bi bi-google"></i>The second copy</h3>
+            <p class="data-sub" id="driveWhen">&mdash;</p>
+            <p class="data-note">Drive holds a <em>copy</em>, and so does an exported file &mdash; the same file either way. Nothing leaves this browser unless you press one of the buttons in the top bar, and MoneyFlow works with no account at all.</p>
+        </section>
+
+        <div class="dialog-actions">
+            <button type="button" id="dataClose">Close</button>
         </div>
     </div>
 </div>

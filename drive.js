@@ -413,16 +413,22 @@
      */
     function showStamp() {
         const el = $('driveStamp');
-        if (!el) return;
+        const line = $('driveWhen');
 
         let stamp = null;
         try { stamp = localStorage.getItem(STAMP_KEY); } catch (err) { stamp = null; }
 
-        const show = (state, html, title) => {
-            el.dataset.state = state;
-            el.innerHTML = html;
-            el.title = title + storageNote();
-            el.classList.toggle('is-stale', state === 'warn');
+        // Two audiences for one fact. The topbar gets a glyph, because a
+        // sentence up there is something to decode on every glance; the data
+        // panel is where somebody went *to read*, so it gets the words.
+        const show = (state, html, title, words) => {
+            if (el) {
+                el.dataset.state = state;
+                el.innerHTML = html;
+                el.title = title + storageNote();
+                el.classList.toggle('is-stale', state === 'warn');
+            }
+            if (line) line.textContent = words || title;
         };
 
         if (!stamp) {
@@ -434,7 +440,9 @@
                     + 'very first copy has to be one you send. Press "To Drive" once; after that '
                     + 'Auto keeps it up to date on its own.');
             }
-            return show('none', '', 'Nothing has been sent to Drive from this browser.');
+            return show('none', '', 'Nothing has been sent to Drive from this browser.',
+                configured() ? 'Nothing has been sent to Drive from this browser yet.'
+                    : 'The Drive copy is not set up in this browser.');
         }
 
         const then = new Date(stamp);
@@ -450,7 +458,8 @@
         }
 
         show('ok', '<i class="bi bi-cloud-check-fill"></i>',
-            'Saved to Drive ' + when + ' · ' + then.toLocaleString());
+            'Saved to Drive ' + when + ' · ' + then.toLocaleString(),
+            'In Drive, ' + when + ' — ' + then.toLocaleString() + '.');
     }
 
     /* ------------------------------------------------------------------ */
@@ -492,6 +501,10 @@
         // The only way in from app.js. It is a no-op when the switch is off,
         // so the record modules need to know nothing about any of this.
         window.MFDriveTouch = schedule;
+
+        // The data panel asks for this when it opens, so the second block is
+        // current even if nothing has touched Drive since the page loaded.
+        window.MFDriveStamp = showStamp;
 
         const offer = $('driveOfferPull');
         if (offer) {

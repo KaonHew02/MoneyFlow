@@ -57,8 +57,47 @@ function storeWrite(key, value) {
     // has switched auto-push on, and it is absent entirely when drive.js did
     // not load — so this stays a one-way nudge. A write that did not land must
     // not trigger one, or Drive would be sent a copy that is already stale.
+    stampSaved();
     if (typeof window.MFDriveTouch === 'function') window.MFDriveTouch();
     return true;
+}
+
+/**
+ * --------------------------------------------------------------------
+ * "Saved 20:02"
+ * --------------------------------------------------------------------
+ * There is no Save button here — everything typed is in the store before you
+ * look up from the keyboard. That is the right behaviour and it is completely
+ * invisible, which leaves people asking the reasonable question of whether any
+ * of it is being kept at all. One time in the corner answers it.
+ *
+ * The stamp lives in localStorage rather than alongside the records: it
+ * belongs to this browser and not to the book, and an exported file carrying
+ * somebody else's save time would be a small lie.
+ */
+const SAVED_KEY = 'moneyflow.savedAt';
+
+function stampSaved() {
+    try { localStorage.setItem(SAVED_KEY, new Date().toISOString()); } catch (err) { /* not vital */ }
+    paintSaveStamp();
+}
+
+function paintSaveStamp() {
+    const el = document.getElementById('saveStamp');
+    if (!el) return;
+
+    let stamp = null;
+    try { stamp = localStorage.getItem(SAVED_KEY); } catch (err) { stamp = null; }
+    if (!stamp) { el.textContent = ''; return; }
+
+    // A bare time is only the truth on the day it was written — "Saved 20:02"
+    // beside a book last touched last week reads as tonight. Older than today
+    // and it becomes a date instead.
+    const then = new Date(stamp);
+    const today = then.toDateString() === new Date().toDateString();
+    el.textContent = 'Saved ' + (today
+        ? then.toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' })
+        : then.toLocaleDateString('en-GB', { day: 'numeric', month: 'short' }));
 }
 
 /** Handed to `MFStore` at start-up: the one place a write's fate is noticed.
@@ -11393,6 +11432,74 @@ function flashButton(btn, html) {
     setTimeout(() => { btn.innerHTML = idle; }, 1800);
 }
 
+/**
+ * ====================================================================
+ * THE DATA PANEL
+ * ====================================================================
+ * Behind the save stamp: where the records are, how much room is left, and
+ * whether there is a second copy. All of it was already known — it was spread
+ * across a tooltip, a warning bar that only speaks at 80% full, and a Drive
+ * icon. None of that is somewhere you can go and look.
+ */
+function openData() {
+    paintStorage();
+
+    // drive.js paints the second block itself, and is allowed not to be here
+    // at all — the app is complete without it.
+    if (typeof window.MFDriveStamp === 'function') window.MFDriveStamp();
+    else set('driveWhen', 'The Drive copy is not set up in this browser.');
+
+    const box = $('dataBox');
+    if (box) box.hidden = false;
+}
+
+function closeData() {
+    const box = $('dataBox');
+    if (box) box.hidden = true;
+}
+
+function fmtSize(bytes) {
+    if (bytes < 1024) return bytes + ' B';
+    if (bytes < 1024 * 1024) return Math.round(bytes / 1024) + ' KB';
+    if (bytes < 1024 * 1024 * 1024) return (bytes / 1024 / 1024).toFixed(1) + ' MB';
+    return (bytes / 1024 / 1024 / 1024).toFixed(1) + ' GB';
+}
+
+async function paintStorage() {
+    const used = storeUsedBytes();
+    const budget = MFStore.measure ? await MFStore.measure() : storeBudgetBytes();
+    const kept = MFStore.persisted ? await MFStore.persisted() : false;
+
+    set('dataWhere', MFStore.backend() === 'indexedDB'
+        ? 'In this browser, in IndexedDB.'
+            + (kept ? ' Marked to be kept — the browser will not clear it to free space.' : '')
+        : 'In this browser’s localStorage. IndexedDB was not available, so the ceiling is about '
+            + '5 MB — receipts and photos are what will reach it.');
+
+    // Against the ceiling rather than against itself: the question here is how
+    // much room is left, and a bar that rescales to whatever is stored can
+    // never answer it.
+    const share = budget ? used / budget * 100 : 0;
+    const fill = $('dataMeterFill');
+    if (fill) {
+        fill.style.width = Math.max(0.4, Math.min(100, share)).toFixed(2) + '%';
+        fill.className = share > 90 ? 'is-over' : (share > 70 ? 'is-warn' : '');
+    }
+    set('dataUsed', fmtSize(used) + ' of ' + fmtSize(budget)
+        + (share < 1 ? ' — barely a dent' : ' — ' + share.toFixed(1) + '%'));
+
+    // And what is taking the room, where anything is taking enough of it to be
+    // worth naming. "2.6 MB of saved bill splits" is something you can act on;
+    // a percentage is only an alarm. Below half a megabyte there is nothing to
+    // act on and every share rounds to 0.00 MB, so it says nothing instead.
+    const big = $('dataBiggest');
+    if (big) {
+        const named = used >= 512 * 1024 ? storeBiggest(used) : [];
+        big.textContent = named.length ? 'Mostly ' + named.join(', ') + '.' : '';
+        big.hidden = !named.length;
+    }
+}
+
 function wireBackup() {
     const exportBtn = $('backupExport');
     if (exportBtn) exportBtn.addEventListener('click', () => backupExport(exportBtn));
@@ -11434,6 +11541,20 @@ function wireBackup() {
     if (box) box.addEventListener('click', (event) => { if (event.target === box) backupClose(); });
     document.addEventListener('keydown', (event) => {
         if (event.key === 'Escape' && box && !box.hidden) backupClose();
+    });
+
+    // The save stamp is the only way into the data panel, and it closes the
+    // same three ways this one does.
+    const stamp = $('saveStamp');
+    if (stamp) stamp.addEventListener('click', openData);
+
+    const dataClose = $('dataClose');
+    if (dataClose) dataClose.addEventListener('click', closeData);
+
+    const dataBox = $('dataBox');
+    if (dataBox) dataBox.addEventListener('click', (event) => { if (event.target === dataBox) closeData(); });
+    document.addEventListener('keydown', (event) => {
+        if (event.key === 'Escape' && dataBox && !dataBox.hidden) closeData();
     });
 }
 
@@ -12323,6 +12444,9 @@ function startApp() {
     }
 
     wireBackup();
+
+    // What the last session left behind, before anything in this one writes.
+    paintSaveStamp();
 
     // Says nothing at all until a write fails or the store fills up.
     const storeAlertExport = $('storeAlertExport');
