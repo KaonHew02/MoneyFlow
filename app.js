@@ -1884,9 +1884,17 @@ function splitSummaryText() {
     if (bill.platformSen) parts.push('platform fee ' + money(fromSen(bill.platformSen)));
     if (bill.voucherSen)  parts.push('less ' + money(fromSen(bill.voucherSen)) + ' voucher');
 
-    // --- several people paid: the handovers, and nothing else --------------
+    // --- several people paid: who paid, what it came to, the handovers -----
+    // Three lines of context, then the list. Any more of the working than this
+    // buries the line people are scrolling for; any less and the first reply
+    // in the chat is somebody asking where the figures came from.
     if (many) {
-        if (parts.length > 1) lines.push('(' + parts.join(', ') + ')');
+        lines.push('Paid: ' + b.people
+            .map((person, index) => ({ person, index, sen: bill.paidSen[index] }))
+            .filter((row) => row.sen > 0)
+            .map((row) => personName(row.person, row.index) + ' ' + money(fromSen(row.sen)))
+            .join(' · '));
+        lines.push('(' + parts.join(', ') + ')');
         lines.push('');
 
         if (!bill.transfers.length) {

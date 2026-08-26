@@ -313,10 +313,15 @@ which is the sum the whole thing has to be checked against.
 
 All of that stays on screen. **Copy summary** is sized for a group chat, and a
 group chat scrolls past everything to reach one thing: what do I send, and who
-to. So the message is one handover per line and nothing else — plus the
-charges, when the place added enough that the total needs explaining.
+to. So the message is three lines of context and then one handover per line.
+
+Three, not none and not the lot: any more of the working and it buries the line
+people are scrolling for; any less and the first reply in the chat is somebody
+asking where the figures came from.
 
     Hotpot — RM 189.10
+    Paid: Kaon RM 68.75 · Pan RM 7.80 · Agatha RM 112.55
+    (ordered RM 189.10)
 
     Lavelle → Kaon RM 13.75
     Lavelle → Pan RM 1.56
