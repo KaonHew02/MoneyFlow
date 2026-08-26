@@ -312,7 +312,11 @@ const CHARGE_PRESETS = {
 
 const newItem   = () => ({ id: nextId('i'), label: '', amount: '', off: '' });
 const newPerson = () => ({ id: nextId('p'), name: '', items: [newItem()] });
-const newPayment = () => ({ id: nextId('y'), by: '', label: '', amount: '' });
+// `items` is which lines this payment paid for. Naming them is what lets the
+// bill say "everyone pays back whoever paid" — without them a payment is just
+// an amount, and an amount cannot be handed back to the till it came from.
+// A line belongs to at most one payment.
+const newPayment = () => ({ id: nextId('y'), by: '', label: '', amount: '', items: [] });
 
 /** A blank bill. Two people, because a bill split one way is not a split. */
 function newBill() {
@@ -331,6 +335,10 @@ function newBill() {
         // one person paying the lot.
         multiPay: false,
         payments: [],
+        // 'net'  — the fewest handovers that leaves everybody square
+        // 'till' — everyone pays back whoever paid for what they had, which is
+        //          more handovers and no arithmetic anybody has to trust
+        settleStyle: 'net',
         service: '0', tax: '0', discount: '', discountUnit: 'pct', round: false,
         itemDiscounts: false, offUnit: 'pct',
         // Ordered in rather than sat down: two flat fees that are not food,
@@ -426,13 +434,19 @@ function readSplitState() {
     if (bill.people.some((p) => p.id === paidBy)) bill.paidBy = paidBy;
 
     bill.multiPay = !!($('splitMultiPay') || {}).checked;
+    bill.settleStyle = (($('splitSettleStyle') || {}).dataset || {}).value === 'till' ? 'till' : 'net';
 
     document.querySelectorAll('#splitPayments .split-pay').forEach((row) => {
         const pay = bill.payments.find((x) => x.id === row.dataset.pay);
         if (!pay) return;
-        pay.by     = row.querySelector('.split-pay-who').value;
-        pay.label  = row.querySelector('.split-pay-label').value;
-        pay.amount = row.querySelector('.split-pay-amount').value;
+        pay.by    = row.querySelector('.split-pay-who').value;
+        pay.label = row.querySelector('.split-pay-label').value;
+
+        // A payment that names lines is worth what those lines come to — the
+        // box is a readout, not a field, and reading it back would write a
+        // formatted figure over the number it was formatted from.
+        const amount = row.querySelector('.split-pay-amount');
+        if (amount && !amount.readOnly) pay.amount = amount.value;
     });
 
     document.querySelectorAll('#splitPeople .split-person').forEach((card) => {
@@ -600,12 +614,78 @@ function buildSplitPayments() {
         const label = row.querySelector('.split-pay-label');
         label.value = pay.label;
         label.placeholder = 'What they paid for';
-        row.querySelector('.split-pay-amount').value = pay.amount;
+
+        // A payment that names lines is worth what those lines come to, so the
+        // box stops being a field and becomes a readout — typing a second
+        // answer beside one the bill already knows is the thing this module
+        // refuses to do anywhere else.
+        const named = (pay.items || []).length > 0;
+        const amount = row.querySelector('.split-pay-amount');
+        amount.readOnly = named;
+        amount.classList.toggle('is-read', named);
+        if (!named) amount.value = pay.amount;
 
         rows.appendChild(row);
+        rows.appendChild(splitPayLineRow(pay, billLines(bill)));
     });
 
     host.appendChild(rows);
+}
+
+/** Every line worth paying for: the ones with a figure against them. */
+function billLines(bill) {
+    const out = [];
+    bill.people.forEach((person, index) => person.items.forEach((item) => {
+        if ((parseFloat(item.amount) || 0) > 0) {
+            out.push({ id: item.id, label: (item.label.trim() || 'Item') + ' — ' + personName(person, index) });
+        }
+    }));
+    bill.shared.forEach((item) => {
+        if ((parseFloat(item.amount) || 0) > 0) {
+            out.push({ id: item.id, label: item.label.trim() || 'Shared dish' });
+        }
+    });
+    return out;
+}
+
+/**
+ * Which lines a payment paid for.
+ *
+ * The same chips as **Shared by** under a dish, doing the same job one level
+ * up: there it is who was on the dish, here it is which dishes were on the
+ * till. Naming them is what lets everyone pay back the person who actually
+ * paid, rather than whoever the arithmetic happens to leave short.
+ *
+ * A line belongs to one payment, so tapping a line another payment has already
+ * claimed moves it here rather than doing nothing — the alternative is a dead
+ * chip and a reader hunting for which other row is holding it.
+ */
+function splitPayLineRow(pay, lines) {
+    const mine = pay.items || [];
+
+    const block = document.createElement('div');
+    block.className = 'split-pay-lines';
+    block.dataset.pay = pay.id;
+
+    if (!lines.length) {
+        block.innerHTML = '<span class="split-share-label">Paid for</span>' +
+            '<p class="split-empty">Nothing on the bill yet.</p>';
+        return block;
+    }
+
+    block.innerHTML =
+        '<span class="split-share-label">Paid for</span>' +
+        '<div class="split-chips">' +
+        lines.map((line) => {
+            const on = mine.includes(line.id);
+            return '<button type="button" class="split-chip' + (on ? ' is-in' : '') + '" ' +
+                'data-line="' + escapeHtml(line.id) + '" aria-pressed="' + on + '">' +
+                '<i class="bi ' + (on ? 'bi-check-lg' : 'bi-plus-lg') + '"></i>' +
+                '<span>' + escapeHtml(line.label) + '</span></button>';
+        }).join('') +
+        '</div>';
+
+    return block;
 }
 
 function buildSplitShared() {
@@ -781,6 +861,51 @@ function settleTransfers(bill, netSen) {
     return out.sort((a, b) => a.from - b.from || a.to - b.to);
 }
 
+/**
+ * Everyone pays back whoever paid, till by till.
+ *
+ * The other way round from `settleTransfers`: nothing is netted, so the same
+ * two people can owe each other in both directions — you paid at NSK and Pan
+ * paid for the paste, so Pan owes you RM13.75 and you owe Pan RM1.56. That is
+ * more handovers, and it is the point: nobody has to take the arithmetic on
+ * trust, because every figure is their own share of one thing one person
+ * bought.
+ *
+ * A pair still settles once, because a person hands money over once however
+ * many of the payer's lines they were on — so the lines are carried on the
+ * handover as `parts` rather than each becoming a handover of its own.
+ */
+function tillTransfers(bill, lines, pieces, ownerOf) {
+    const found = new Map();
+
+    lines.forEach((line, at) => {
+        const owner = ownerOf[at];
+        bill.people.forEach((person, index) => {
+            if (index === owner) return;
+            const sen = pieces[index][at];
+            if (sen <= 0) return;
+
+            const fromPerson = person;
+            const toPerson   = bill.people[owner];
+            const key = fromPerson.id + '>' + toPerson.id;
+
+            const move = found.get(key) || {
+                key,
+                from: index, to: owner,
+                fromPerson, toPerson,
+                amount: 0,
+                parts: [],
+                settled: !!bill.settled[key],
+            };
+            move.amount += sen;
+            move.parts.push({ label: line.label, amount: sen });
+            found.set(key, move);
+        });
+    });
+
+    return [...found.values()].sort((a, b) => a.from - b.from || a.to - b.to);
+}
+
 /** "Amy", "Amy & John", "Amy, John & David" — a list said the way it is said. */
 const nameList = (names) => (names.length < 2
     ? (names[0] || '')
@@ -902,6 +1027,64 @@ function splitCompute(source) {
     const paysSen = allocateSen(grandSen, spread);
     const payer   = payerIndex(bill);
 
+    // --- the bill, line by line -------------------------------------------
+    // Every line on the bill in reading order, and what each person's share of
+    // it comes to once the charges are on. A person's total is divided across
+    // the lines they are on rather than each line being worked out on its own,
+    // so the pieces add back to exactly what they pay — no line is a sen out
+    // and no sen goes missing between them.
+    const lines = [];
+    bill.people.forEach((person, index) => person.items.forEach((item) => lines.push({
+        item, id: item.id, owner: index,
+        label: (item.label.trim() || 'Item') + ' (' + personName(person, index) + ')',
+    })));
+    bill.shared.forEach((item) => lines.push({
+        item, id: item.id, owner: -1,
+        label: item.label.trim() || 'Shared dish',
+    }));
+
+    const rawShare = bill.people.map(() => lines.map(() => 0));
+    lines.forEach((line, at) => {
+        if (line.owner >= 0) {
+            rawShare[line.owner][at] = itemSen(line.item);
+            return;
+        }
+        const split = sharedSplits.find((one) => one.item === line.item);
+        bill.people.forEach((person, index) => { rawShare[index][at] = split ? split.parts[index] : 0; });
+    });
+
+    const pieces = bill.people.map((person, index) => allocateSen(paysSen[index], rawShare[index]));
+    const lineSen = lines.map((line, at) =>
+        bill.people.reduce((sum, person, index) => sum + pieces[index][at], 0));
+
+    // Which payment claimed which line. A line belongs to at most one — the
+    // first that claims it — or nobody would know whose till it was on, and
+    // the same money would be counted twice.
+    const lineAt = new Map(lines.map((line, at) => [line.id, at]));
+    const ownerOf = lines.map(() => payer);
+    const claimed = new Set();
+    const payAmountSen = new Map();
+
+    if (bill.multiPay) {
+        (bill.payments || []).forEach((pay) => {
+            const seatAt = bill.people.findIndex((person) => person.id === pay.by);
+            const by = seatAt >= 0 ? seatAt : payer;
+            let sen = 0;
+
+            (pay.items || []).forEach((id) => {
+                const at = lineAt.get(id);
+                if (at === undefined || claimed.has(id)) return;
+                claimed.add(id);
+                ownerOf[at] = by;
+                sen += lineSen[at];
+            });
+
+            // Nothing named: it is a lump, and worth whatever was typed.
+            payAmountSen.set(pay.id, (pay.items || []).length ? sen
+                : Math.max(0, toSen(parseFloat(pay.amount) || 0)));
+        });
+    }
+
     // --- who put the money down -------------------------------------------
     // The listed payments as typed, and whatever they leave over goes to the
     // primary payer. That single rule is what makes a bill with no payment
@@ -913,7 +1096,7 @@ function splitCompute(source) {
 
     if (bill.multiPay) {
         (bill.payments || []).forEach((pay) => {
-            const sen = Math.max(0, toSen(parseFloat(pay.amount) || 0));
+            const sen = payAmountSen.get(pay.id) || 0;
             if (!sen) return;
             paidSen[seat.has(pay.by) ? seat.get(pay.by) : payer] += sen;
             listedPaidSen += sen;
@@ -930,9 +1113,13 @@ function splitCompute(source) {
     // below always come out even however many people paid.
     const dueSen = paysSen.map((pays, index) => pays - paidSen[index]);
 
-    // What is still outstanding, and to whom. Somebody who put down exactly
-    // their own share appears in nobody's list.
-    const transfers = settleTransfers(bill, dueSen);
+    // What is still outstanding, and to whom — in whichever of the two shapes
+    // the bill asks for. Netting is the default because it is the fewest
+    // handovers; paying each till back is the one nobody has to check.
+    const perTill = bill.multiPay && bill.settleStyle === 'till';
+    const transfers = perTill
+        ? tillTransfers(bill, lines, pieces, ownerOf)
+        : settleTransfers(bill, dueSen);
 
     const openSen = transfers.filter((t) => !t.settled).reduce((sum, t) => sum + t.amount, 0);
     const owedToMeSen = transfers.filter((t) => t.to === 0 && !t.settled)
@@ -955,6 +1142,10 @@ function splitCompute(source) {
         // Who paid what, what that leaves each person net, and the handovers
         // that clear it. One payer or five, this is the same shape.
         paidSen, netSen: dueSen, payers, listedPaidSen, restSen,
+        // The bill line by line: what each line came to with charges on, whose
+        // till it was on, and each person's piece of it.
+        lines, pieces, lineSen, ownerOf, perTill,
+        payAmountSen,
         transfers,
         openSen, owedToMeSen, iOweSen,
         mySen: paysSen[0] || 0,
@@ -1035,6 +1226,14 @@ function paintSplit(bill) {
               ? nameList(putDown.map((row) => personName(row.person, row.index)))
               : personName(b.people[bill.payer], bill.payer))
         : 'Add someone to split with');
+
+    // A payment that named lines shows what they come to. Repainted rather
+    // than rebuilt, because the row beside it is being typed into.
+    (b.payments || []).forEach((pay) => {
+        const box = document.querySelector('#splitPayments .split-pay[data-pay="' +
+            pay.id + '"] .split-pay-amount');
+        if (box && box.readOnly) box.value = fmt(fromSen(bill.payAmountSen.get(pay.id) || 0));
+    });
 
     // The payments card's own running total: what the list accounts for, and
     // what that leaves for the person carrying the rest.
@@ -1266,7 +1465,51 @@ function paintSettle(bill) {
                 : 'Put in what everyone had and who paid, and the handovers work themselves out.') +
                 '</p>';
         } else {
-            bill.transfers.forEach((move) => {
+            // Grouped, once several people paid, because a flat list names two
+            // people on every line and reading your own out of it means
+            // scanning both ends of all of them.
+            //
+            // Netted, the group is the person handing money over — somebody
+            // paying two people is one debt split to clear two creditors, not
+            // two debts. Per till it is the person being paid, because the
+            // till is the thing being paid back and everyone on it belongs
+            // together. With one payer every line is a different person
+            // already, and a heading per row would be a heading per row.
+            const order = bill.perTill
+                ? bill.transfers.slice().sort((a, b) => a.to - b.to || a.from - b.from)
+                : bill.transfers;
+
+            let heading = -1;
+
+            order.forEach((move) => {
+                const group = bill.perTill ? move.to : move.from;
+
+                if (bill.payers > 1 && group !== heading) {
+                    heading = group;
+                    const head = document.createElement('p');
+                    head.className = 'settle-group';
+                    const who = group === 0 ? 'You' : personName(bill.bill.people[group], group);
+
+                    if (bill.perTill) {
+                        const tills = bill.lines
+                            .map((line, at) => ({ line, at }))
+                            .filter((one) => bill.ownerOf[one.at] === group && bill.lineSen[one.at] > 0)
+                            .map((one) => one.line.label + ' ' + money(fromSen(bill.lineSen[one.at])));
+                        const takes = bill.transfers.filter((one) => one.to === group)
+                            .reduce((sum, one) => sum + one.amount, 0);
+
+                        head.textContent = who + (group === 0 ? ' paid ' : ' paid ') +
+                            (tills.length ? tills.join(' + ') : 'the rest') +
+                            ' — ' + (group === 0 ? 'you collect ' : 'collects ') + money(fromSen(takes));
+                    } else {
+                        head.textContent = who +
+                            ' — share ' + money(fromSen(bill.paysSen[group])) + ', put in ' +
+                            (bill.paidSen[group] > 0 ? money(fromSen(bill.paidSen[group])) : 'nothing') +
+                            ', so ' + money(fromSen(bill.netSen[group])) + ' to hand over';
+                    }
+                    list.appendChild(head);
+                }
+
                 const row = document.createElement('div');
                 row.className = 'settle-row' + (move.settled ? ' is-done' : '');
                 const fromName = personName(move.fromPerson, move.from);
@@ -1284,6 +1527,14 @@ function paintSettle(bill) {
                         ? '<strong>' + escapeHtml(fromName) + '</strong> owes you'
                         : '<strong>' + escapeHtml(fromName) + '</strong> owes ' + escapeHtml(toName);
 
+                // One handover can cover two of the same person's lines — you
+                // hand money over once, however many of their tills you were
+                // on — so the lines it is made of are named under it.
+                const parts = (move.parts || []).length > 1
+                    ? '<small>' + move.parts.map((part) => escapeHtml(part.label) + ' ' +
+                        escapeHtml(money(fromSen(part.amount)))).join(' · ') + '</small>'
+                    : '';
+
                 // Two directions, both needing an account. Money coming back
                 // to you moves between two of your own pockets — a transfer.
                 // Money you hand over is your share leaving for good — an
@@ -1292,7 +1543,7 @@ function paintSettle(bill) {
                 const landed = held && held.account ? accountById(held.account) : null;
 
                 row.innerHTML =
-                    '<span class="settle-who">' + sentence + '</span>' +
+                    '<span class="settle-who">' + sentence + parts + '</span>' +
                     '<b>' + money(fromSen(move.amount)) + '</b>' +
                     (!saved ? ''
                         : move.settled
@@ -1312,6 +1563,40 @@ function paintSettle(bill) {
                           '<i class="bi bi-check-lg"></i> Mark settled</button>');
                 list.appendChild(row);
             });
+
+            // Once several people have paid, a handover can go to somebody who
+            // did not buy the thing being paid for. That reads as a mistake
+            // until it is said out loud, so it is said here — and the figure
+            // each of them ends up with is put where they can check it.
+            if (bill.payers > 1) {
+                const collects = b.people
+                    .map((person, index) => ({
+                        person, index,
+                        sen: bill.transfers.filter((move) => move.to === index)
+                            .reduce((sum, move) => sum + move.amount, 0),
+                    }))
+                    .filter((row) => row.sen > 0);
+
+                if (collects.length) {
+                    const totals = document.createElement('p');
+                    totals.className = 'settle-collects';
+                    totals.textContent = collects.map((row) =>
+                        (row.index === 0 ? 'You collect ' : personName(row.person, row.index) + ' collects ') +
+                        money(fromSen(row.sen))).join(' · ');
+                    list.appendChild(totals);
+                }
+
+                const why = document.createElement('p');
+                why.className = 'hint';
+                why.textContent = bill.perTill
+                    ? 'Everyone pays back whoever paid for what they had, till by till — so the ' +
+                      'same two people can owe each other both ways. More handovers, and no ' +
+                      'arithmetic anybody has to take on trust.'
+                    : 'Everybody owes their share less whatever they put down, and the biggest ' +
+                      'debt is matched against the biggest credit. So this is the fewest ' +
+                      'handovers that leaves everyone square — not one payment per till.';
+                list.appendChild(why);
+            }
 
             // The ticks are what wait for a save, not the figures: a tick is a
             // fact about the world and has to be kept somewhere, while who
@@ -1499,23 +1784,37 @@ function splitSummaryText() {
     const bill = splitCompute();
     const b = bill.bill;
 
+    const many = bill.payers > 1;
+
     const putDown = b.people
         .map((person, index) => ({ person, index, sen: bill.paidSen[index] }))
         .filter((row) => row.sen > 0);
 
-    const lines = [(b.title.trim() || 'Bill split') + ' — ' +
-        money(fromSen(bill.grandSen)) + ', paid by ' + (bill.payers > 1
-            ? putDown.map((row) => personName(row.person, row.index) + ' ' + money(fromSen(row.sen))).join(', ')
-            : personName(b.people[bill.payer], bill.payer))];
+    // One payer fits in the title: "Dinner — RM240, paid by You". Three do
+    // not — run into the same sentence they turn the one line a reader skims
+    // into three facts at once, so who paid gets a line of its own.
+    const lines = [(b.title.trim() || 'Bill split') + ' — ' + money(fromSen(bill.grandSen)) +
+        (many ? '' : ', paid by ' + personName(b.people[bill.payer], bill.payer))];
 
-    b.people.forEach((person, index) => {
-        const owes = bill.transfers.filter((move) => move.from === index);
-        lines.push(personName(person, index) + ': ' + money(fromSen(bill.paysSen[index])) +
-            (!owes.length
-                ? (bill.paidSen[index] > 0 ? ' (paid)' : '')
-                : owes.every((move) => move.settled) ? ' — settled'
-                : ''));
-    });
+    if (many) {
+        lines.push('Paid: ' + putDown
+            .map((row) => personName(row.person, row.index) + ' ' + money(fromSen(row.sen)))
+            .join(' · '));
+    }
+
+    // One payer: a line per person is the whole answer, because everybody in
+    // it owes the same person. Several payers: every one of these figures is
+    // said again in the blocks below, against what that person put in and who
+    // they hand it to — so printing them here as well is the same list twice.
+    if (!many) {
+        b.people.forEach((person, index) => {
+            const owes = bill.transfers.filter((move) => move.from === index);
+            lines.push(personName(person, index) + ': ' + money(fromSen(bill.paysSen[index])) +
+                (!owes.length ? (bill.paidSen[index] > 0 ? ' (paid)' : '')
+                    : owes.every((move) => move.settled) ? ' — settled'
+                    : ''));
+        });
+    }
 
     // A dish split by portions is the one thing a reader cannot reconstruct
     // from the per-person totals, so the summary spells it out.
@@ -1549,13 +1848,88 @@ function splitSummaryText() {
 
     // Who hands what to whom. With one payer that is every line above said
     // backwards, so it is only worth printing once more than one person paid.
-    if (bill.payers > 1 && bill.transfers.length) {
+    //
+    // A block per person rather than a list of arrows. The flat list was four
+    // lines that each named two people, and reading your own out of it meant
+    // scanning both ends of every one; here a reader finds their own name once
+    // and everything under it is theirs. It also puts the share and what they
+    // put in right above the figure those two produce, which is the question
+    // anybody actually asks of a bill somebody else added up.
+    if (many && bill.transfers.length) {
         lines.push('');
-        bill.transfers.forEach((move) => {
-            lines.push(personName(move.fromPerson, move.from) + ' → ' +
-                personName(move.toPerson, move.to) + ': ' + money(fromSen(move.amount)) +
-                (move.settled ? ' (settled)' : ''));
+        lines.push('Who pays who');
+
+        // Per till, the unit is the till: one block per thing somebody bought,
+        // with everyone who was on it under it. That is the shape a reader
+        // asked for it in, and it is the one they can check without trusting
+        // any arithmetic but a division they watched happen.
+        if (bill.perTill) {
+            const tills = [];
+            bill.lines.forEach((line, at) => {
+                if (bill.lineSen[at] <= 0) return;
+                const owner = bill.ownerOf[at];
+                const found = tills.find((one) => one.owner === owner);
+                if (found) found.on.push({ line, at });
+                else tills.push({ owner, on: [{ line, at }] });
+            });
+            tills.sort((a, b) => a.owner - b.owner);
+
+            tills.forEach((till) => {
+                const who = personName(b.people[till.owner], till.owner);
+                const sum = (index) => till.on.reduce((total, one) => total + bill.pieces[index][one.at], 0);
+                const takes = b.people.reduce((total, person, index) =>
+                    total + (index === till.owner ? 0 : sum(index)), 0);
+
+                lines.push('');
+                lines.push(who + ' paid ' + till.on
+                    .map((one) => one.line.label + ' ' + money(fromSen(bill.lineSen[one.at])))
+                    .join(' + ') + ' — collects ' + money(fromSen(takes)));
+
+                b.people.forEach((person, index) => {
+                    if (index === till.owner) return;
+                    const sen = sum(index);
+                    if (sen > 0) lines.push('   ' + personName(person, index) + ' ' + money(fromSen(sen)));
+                });
+
+                const own = sum(till.owner);
+                if (own > 0) lines.push('   (' + who + "'s own share of it: " + money(fromSen(own)) + ')');
+            });
+
+            lines.push('');
+            lines.push(bill.transfers.length + ' handovers in all — everyone pays back whoever paid ' +
+                'for what they had.');
+            return lines.join('\n');
+        }
+
+
+        b.people.forEach((person, index) => {
+            const pays     = bill.transfers.filter((move) => move.from === index);
+            const collects = bill.transfers.filter((move) => move.to === index);
+
+            lines.push('');
+            lines.push(personName(person, index) + ' — share ' + money(fromSen(bill.paysSen[index])) +
+                ', put in ' + (bill.paidSen[index] > 0 ? money(fromSen(bill.paidSen[index])) : 'nothing'));
+
+            if (collects.length) {
+                lines.push('   collects ' + money(fromSen(
+                    collects.reduce((sum, move) => sum + move.amount, 0))));
+                collects.forEach((move) => lines.push('   from ' +
+                    personName(move.fromPerson, move.from) + ' ' + money(fromSen(move.amount)) +
+                    (move.settled ? ' (settled)' : '')));
+            }
+
+            pays.forEach((move) => lines.push('   pays ' + personName(move.toPerson, move.to) +
+                ' ' + money(fromSen(move.amount)) + (move.settled ? ' (settled)' : '')));
+
+            // Somebody who put down exactly their own share is in nobody's
+            // list, and saying nothing about them reads as an omission.
+            if (!pays.length && !collects.length) lines.push('   square');
         });
+
+        lines.push('');
+        lines.push(bill.transfers.length + (bill.transfers.length === 1 ? ' handover' : ' handovers') +
+            ' in all — the fewest that leaves everybody square, so some of it goes to somebody ' +
+            'other than whoever paid for that dish.');
     }
 
     return lines.join('\n');
@@ -1610,6 +1984,10 @@ function onSplitEdit(event) {
         } else {
             bill.shared = bill.shared.filter((item) => item.id !== itemId);
         }
+        // A line that has gone cannot still be on somebody's till.
+        bill.payments.forEach((pay) => {
+            pay.items = (pay.items || []).filter((one) => one !== itemId);
+        });
     } else if (btn.hasAttribute('data-remove-person') && person) {
         bill.people = bill.people.filter((p) => p.id !== person.id);
         // Every handover they were either end of goes with them, and so does
@@ -1618,6 +1996,11 @@ function onSplitEdit(event) {
             if (key.split('>').includes(person.id)) delete bill.settled[key];
         });
         bill.payments = bill.payments.filter((pay) => pay.by !== person.id);
+        // Their own lines went with them, so no till can still be claiming one.
+        const gone = new Set(person.items.map((item) => item.id));
+        bill.payments.forEach((pay) => {
+            pay.items = (pay.items || []).filter((one) => !gone.has(one));
+        });
         // Their portions go with them, or a dish would keep dividing by a
         // share nobody at the table is carrying.
         bill.shared.forEach((item) => {
@@ -1805,15 +2188,19 @@ function splitCopyBill(id) {
     copy.created = '';
     // New ids all the way down, or the copy and the original share rows.
     const remap = {};
+    // Lines are remapped too, because a payment names the ones it paid for and
+    // a copy pointing at the original's lines is two bills sharing a till.
+    const lineMap = {};
     copy.people.forEach((p) => { remap[p.id] = nextId('p'); p.id = remap[p.id];
-        p.items.forEach((i) => { i.id = nextId('i'); }); });
-    copy.shared.forEach((i) => { i.id = nextId('i'); });
+        p.items.forEach((i) => { lineMap[i.id] = nextId('i'); i.id = lineMap[i.id]; }); });
+    copy.shared.forEach((i) => { lineMap[i.id] = nextId('i'); i.id = lineMap[i.id]; });
     copy.paidBy = remap[bill.paidBy] || copy.people[0].id;
     copy.payments = (copy.payments || []).map((pay) => ({
         id: nextId('y'),
         by: remap[pay.by] || copy.people[0].id,
         label: pay.label,
         amount: pay.amount,
+        items: (pay.items || []).map((one) => lineMap[one]).filter(Boolean),
     }));
 
     splitState.editing = null;
@@ -1936,6 +2323,7 @@ function paintSplitForm() {
     if ($('splitRound'))    $('splitRound').checked = !!bill.round;
     if ($('splitItemOff'))  $('splitItemOff').checked = !!bill.itemDiscounts;
     if ($('splitMultiPay')) $('splitMultiPay').checked = !!bill.multiPay;
+    if ($('splitSettleStyle')) setSegment($('splitSettleStyle'), bill.settleStyle);
     if ($('splitDiscountUnit')) setSegment($('splitDiscountUnit'), bill.discountUnit);
     if ($('splitItemOffUnit'))  setSegment($('splitItemOffUnit'), bill.offUnit);
 
@@ -2301,6 +2689,14 @@ function loadSplit() {
             // Who put money down at which till. A bill saved before there
             // could be more than one has none of this, which reads as the one
             // payer covering the lot — exactly what it always was.
+            // Lines a payment names have to still be on the bill, and no line
+            // may be on two tills — an edited file must not be able to make the
+            // same money come back twice.
+            const lineIds = new Set(people.reduce((list, person) =>
+                list.concat(person.items.map((item) => item.id)), [])
+                .concat((Array.isArray(b.shared) ? b.shared : []).map((item) => String((item || {}).id || ''))));
+            const taken = new Set();
+
             const payments = (Array.isArray(b.payments) ? b.payments : [])
                 .filter((pay) => pay && known.has(String(pay.by)))
                 .map((pay) => ({
@@ -2308,6 +2704,8 @@ function loadSplit() {
                     by: String(pay.by),
                     label: String(pay.label || ''),
                     amount: String(pay.amount || ''),
+                    items: (Array.isArray(pay.items) ? pay.items : []).map(String)
+                        .filter((one) => lineIds.has(one) && !taken.has(one) && taken.add(one) !== false),
                 }));
 
             // A tick used to be `true` and nothing more. Now it remembers the
@@ -2345,6 +2743,10 @@ function loadSplit() {
                 paidBy,
                 multiPay: !!b.multiPay,
                 payments,
+                // Absent means the bill predates the choice, and what it did
+                // was net — reading it the other way would show a reader a
+                // different set of debts than the one they ticked off.
+                settleStyle: b.settleStyle === 'till' ? 'till' : 'net',
                 service: String(b.service || '0'),
                 tax: String(b.tax || '0'),
                 discount: String(b.discount || ''),
@@ -12386,7 +12788,8 @@ function startApp() {
             setSegment(seg, btn.dataset.val);
             if (seg.id === 'splitCharges') { applyChargePreset(btn.dataset.val); renderSplit(); }
             if (seg.id === 'splitFilter') { splitState.filter = btn.dataset.val; saveSplit(); paintBills(); }
-            if (['splitDiscountUnit', 'splitVoucherUnit', 'splitFeeSplit'].includes(seg.id)) onSplitFormEdit();
+            if (['splitDiscountUnit', 'splitVoucherUnit', 'splitFeeSplit', 'splitSettleStyle']
+                .includes(seg.id)) onSplitFormEdit();
             // The unit lives in each dish row's affix, so the rows are rebuilt.
             if (seg.id === 'splitItemOffUnit') {
                 readSplitState();
@@ -12670,11 +13073,35 @@ function startApp() {
         paymentsHost.addEventListener('input', onSplitFormEdit);
         paymentsHost.addEventListener('change', onSplitFormEdit);
         paymentsHost.addEventListener('click', (event) => {
-            const btn = event.target.closest('button[data-remove-pay]');
-            if (!btn) return;
+            const chip = event.target.closest('button[data-line]');
+            const btn  = event.target.closest('button[data-remove-pay]');
+            if (!chip && !btn) return;
+
             readSplitState();
             const bill = draft();
-            bill.payments = bill.payments.filter((pay) => pay.id !== btn.closest('.split-pay').dataset.pay);
+
+            if (chip) {
+                const pay = bill.payments.find((one) => one.id === chip.closest('.split-pay-lines').dataset.pay);
+                if (!pay) return;
+                const id = chip.dataset.line;
+                pay.items = pay.items || [];
+
+                if (pay.items.includes(id)) {
+                    pay.items = pay.items.filter((one) => one !== id);
+                } else {
+                    // A line is on one till. Tapping one another payment is
+                    // holding moves it rather than doing nothing, which is the
+                    // only way to correct a mis-tap without hunting for which
+                    // other row has it.
+                    bill.payments.forEach((other) => {
+                        other.items = (other.items || []).filter((one) => one !== id);
+                    });
+                    pay.items.push(id);
+                }
+            } else {
+                bill.payments = bill.payments.filter((pay) => pay.id !== btn.closest('.split-pay').dataset.pay);
+            }
+
             buildSplitPayments();
             commitBill();
             renderSplit();

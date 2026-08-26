@@ -739,6 +739,21 @@
                             <i class="bi bi-plus-lg"></i> Add a payment
                         </button>
                         <p class="hint" id="splitPayHint">&mdash;</p>
+
+                        <!-- Two honest ways to clear the same debts. Netting is
+                             the fewest handovers; paying each till back is the
+                             one nobody has to check, because every figure in it
+                             is somebody's own share of one thing one person
+                             bought. Which is right depends on the table, not on
+                             the arithmetic — so the table picks. -->
+                        <div class="field is-wide" id="splitSettleStyleField">
+                            <label>Settle up</label>
+                            <div class="seg" id="splitSettleStyle" data-value="net">
+                                <button type="button" data-val="net" class="is-on">Fewest handovers</button>
+                                <button type="button" data-val="till">Pay back whoever paid</button>
+                            </div>
+                            <p class="hint">Tick the lines each payment covered above, then <b>Pay back whoever paid</b> settles it till by till &mdash; everyone on the NSK bill pays whoever paid at NSK. <b>Fewest handovers</b> nets it all off instead: the same money, fewer transfers, but some of it goes to somebody other than whoever bought that dish.</p>
+                        </div>
                     </div>
 
                     <!-- ----------------------------------------------------

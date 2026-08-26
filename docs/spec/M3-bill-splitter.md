@@ -214,7 +214,53 @@ The card reports what the list covers against what the bill comes to, and says
 plainly when the two do not meet — payments adding to more than the bill means
 a figure is wrong somewhere, not that somebody is owed twice.
 
+### Which lines a payment paid for
+
+A payment names the lines it covered, with the same chips a shared dish uses
+for **Shared by** — there it is who was on the dish, here it is which dishes
+were on the till. A line belongs to one payment; tapping one another payment
+already holds moves it, because the alternative is a dead chip and a reader
+hunting for which row has it.
+
+A payment that names lines is **worth what those lines come to**, charges and
+all, and its box stops being a field. Typing a second answer beside one the
+bill already knows is the thing this module refuses to do everywhere else —
+there is no total field on the form for exactly that reason. A payment that
+names nothing is a lump, and is worth what was typed.
+
 ## Settlement
+
+Two honest ways to clear the same debts, and the table picks:
+
+| | |
+|---|---|
+| **Fewest handovers** | net every share against what that person put down, then match the biggest debt to the biggest credit |
+| **Pay back whoever paid** | everyone pays their share of each line to whoever paid for that line |
+
+Netting is the default because it is the fewest transfers. Paying each till
+back is the one nobody has to check: every figure in it is somebody's own
+share of one thing one person bought, so there is no arithmetic to take on
+trust. It costs handovers — eleven against four on a five-person, three-till
+hotpot — and it lets the same two people owe each other in both directions,
+which is what actually happened when you paid at NSK and Pan bought the paste.
+
+    Kaon paid NSK RM 68.75 — collects RM 55.00
+       Lavelle RM 13.75 · Pan RM 13.75 · JK RM 13.75 · Agatha RM 13.75
+       (Kaon's own share of it: RM 13.75)
+
+A pair still settles **once**, however many of that payer's lines they were on
+— a person hands money over once — so the lines are carried on the handover
+and named under it rather than each becoming a handover of its own.
+
+Each person's total is divided across the lines they are on rather than each
+line being worked out on its own, so the pieces add back to exactly what they
+pay: no line is a sen out and no sen falls between two of them.
+
+A bill saved before the choice existed has no `settleStyle`, which reads as
+netted — anything else would show a reader a different set of debts from the
+one they ticked off.
+
+### Netting
 
 Each person owes their share less whatever they already put down. Those
 figures add to zero — every ringgit somebody is short is a ringgit somebody
@@ -232,6 +278,24 @@ and a tick cannot land on a handover nobody made.
 
 With one payer this is the list it always was — they are the only person owed,
 so everybody else pays them.
+
+Read back **a block per person**, not a list of arrows. A flat list names two
+people on every line, so finding your own means scanning both ends of all of
+them — and somebody paying two people reads as two unrelated debts rather than
+one debt split to clear two creditors. Under a person's own name sits their
+share, what they put in, and the figure those two produce:
+
+    JK — share RM 43.45, put in nothing
+       pays Kaon   RM 17.79
+       pays Agatha RM 25.66
+
+    Agatha — share RM 43.44, put in RM 112.55
+       collects RM 69.11
+       from Lavelle RM 43.45
+       from JK      RM 25.66
+
+The collected figure is printed because it is the one a person being paid back
+wants, and the one the netting has to be checked against.
 
 A handover is ticked on its own, and each tick is keyed by **the two people in
 it**. It used to be keyed by the debtor alone, which named the handover only

@@ -932,6 +932,43 @@ input[type="date"]:hover::-webkit-calendar-picker-indicator { opacity: .85; }
 
 .split-pay-card .hint { margin-top: 10px; }
 
+/* Which lines a payment paid for: the same chips as "Shared by" under a dish,
+   doing the same job one level up. Sits under its row rather than inside it,
+   because the row is a grid of fields and a variable number of lines will not
+   fit one. */
+.split-pay-lines {
+    display: flex;
+    align-items: baseline;
+    gap: 10px;
+    flex-wrap: wrap;
+    margin: -2px 0 4px;
+    padding: 0 0 10px;
+    border-bottom: 1px solid var(--line);
+}
+
+.split-pay-lines:last-child { border-bottom: 0; padding-bottom: 0; }
+.split-pay-lines .split-chips { flex: 1 1 auto; }
+.split-pay-lines .split-empty { font-size: 12px; }
+
+/* A payment that names lines is worth what those lines come to, and the box
+   says so rather than asking. It has to read as a figure, not as an empty
+   field somebody forgot to fill in. */
+.money-input-sm input.is-read {
+    background: transparent;
+    color: var(--ink-2);
+    cursor: default;
+}
+
+.split-pay-card .field { margin-top: 14px; }
+
+.settle-row .settle-who small {
+    display: block;
+    margin-top: 3px;
+    font-size: 11.5px;
+    color: var(--ink-3);
+    font-variant-numeric: tabular-nums;
+}
+
 /* --------------------------------------------------------------------
    Portions — a shared dish that did not divide evenly
    --------------------------------------------------------------------
@@ -1230,6 +1267,30 @@ input[type="date"]:hover::-webkit-calendar-picker-indicator { opacity: .85; }
 
 /* A settled debt stays on the list — the record is that it was paid, not that
    it never existed — but it stops competing for attention. */
+/* The name over a run of handovers, once several people have paid. It is a
+   heading rather than a row: nothing in it is ticked, and it has to read as
+   belonging to the rows beneath rather than sitting between them. */
+.settle-group {
+    margin: 16px 0 7px;
+    font-size: 12px;
+    font-weight: 700;
+    color: var(--ink-2);
+}
+
+.settle-group:first-child { margin-top: 0; }
+
+/* What the other end of all those handovers comes to — the one figure the
+   people being paid want, and the one the netting has to be checked against. */
+.settle-collects {
+    margin: 14px 0 0;
+    padding-top: 11px;
+    border-top: 1px dashed var(--line);
+    font-size: 13px;
+    font-weight: 700;
+    color: var(--jade);
+    font-variant-numeric: tabular-nums;
+}
+
 .settle-row.is-done { background: transparent; border-style: dashed; }
 .settle-row.is-done .settle-who,
 .settle-row.is-done > b { color: var(--ink-3); }
