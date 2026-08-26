@@ -874,6 +874,14 @@ function settleTransfers(bill, netSen) {
  * A pair still settles once, because a person hands money over once however
  * many of the payer's lines they were on — so the lines are carried on the
  * handover as `parts` rather than each becoming a handover of its own.
+ *
+ * And once, not twice: two people who owe each other both ways hand over the
+ * difference. You owe Pan RM1.56 for the paste and Pan owes you RM13.75 for
+ * NSK, so Pan gives you RM12.19 and your RM1.56 never leaves your pocket.
+ * Sending money to somebody who is about to send more of it back is not a
+ * settlement, it is two people doing a favour for a bank. What each side was
+ * owed is kept on the handover, so the subtraction can be shown rather than
+ * asserted.
  */
 function tillTransfers(bill, lines, pieces, ownerOf) {
     const found = new Map();
@@ -903,7 +911,46 @@ function tillTransfers(bill, lines, pieces, ownerOf) {
         });
     });
 
-    return [...found.values()].sort((a, b) => a.from - b.from || a.to - b.to);
+    // The two directions of a pair, folded into the one that survives.
+    const pairs = new Map();
+    found.forEach((move) => {
+        const low  = Math.min(move.from, move.to);
+        const high = Math.max(move.from, move.to);
+        const key  = low + ':' + high;
+        const pair = pairs.get(key) || { ways: {} };
+        pair.ways[move.from === low ? 'up' : 'down'] = move;
+        pairs.set(key, pair);
+    });
+
+    const out = [];
+    pairs.forEach((pair) => {
+        const up   = pair.ways.up;
+        const down = pair.ways.down;
+        const upSen   = up ? up.amount : 0;
+        const downSen = down ? down.amount : 0;
+
+        // Dead level: they are square, and nothing needs to move at all.
+        if (upSen === downSen) return;
+
+        const wins  = upSen > downSen ? up : down;
+        const loses = upSen > downSen ? down : up;
+        const key   = bill.people[wins.from].id + '>' + bill.people[wins.to].id;
+
+        out.push({
+            key,
+            from: wins.from, to: wins.to,
+            fromPerson: wins.fromPerson, toPerson: wins.toPerson,
+            amount: Math.abs(upSen - downSen),
+            // The losing side's lines are kept, marked as coming back the
+            // other way, so the row can show 13.75 less 1.56 rather than a
+            // figure nobody can trace to a dish.
+            parts: wins.parts.concat((loses ? loses.parts : [])
+                .map((part) => ({ label: part.label, amount: part.amount, back: true }))),
+            settled: !!bill.settled[key],
+        });
+    });
+
+    return out.sort((a, b) => a.from - b.from || a.to - b.to);
 }
 
 /** "Amy", "Amy & John", "Amy, John & David" — a list said the way it is said. */
@@ -1531,7 +1578,8 @@ function paintSettle(bill) {
                 // hand money over once, however many of their tills you were
                 // on — so the lines it is made of are named under it.
                 const parts = (move.parts || []).length > 1
-                    ? '<small>' + move.parts.map((part) => escapeHtml(part.label) + ' ' +
+                    ? '<small>' + move.parts.map((part) => (part.back ? 'less ' : '') +
+                        escapeHtml(part.label) + ' ' +
                         escapeHtml(money(fromSen(part.amount)))).join(' · ') + '</small>'
                     : '';
 
@@ -1577,11 +1625,36 @@ function paintSettle(bill) {
                     }))
                     .filter((row) => row.sen > 0);
 
+                // Per till, somebody has to add their own name up across
+                // three groups to learn what the evening costs them. Netted,
+                // the group heading over their rows already said it — so this
+                // line only earns its place in the first case.
+                if (bill.perTill) {
+                    const out = b.people
+                        .map((person, index) => ({
+                            person, index,
+                            sen: bill.transfers.filter((move) => move.from === index)
+                                .reduce((sum, move) => sum + move.amount, 0),
+                        }))
+                        .filter((row) => row.sen > 0);
+
+                    if (out.length) {
+                        const hands = document.createElement('p');
+                        hands.className = 'settle-collects is-out';
+                        hands.textContent = 'Hands over — ' + out.map((row) =>
+                            (row.index === 0 ? 'you ' : personName(row.person, row.index) + ' ') +
+                            money(fromSen(row.sen))).join(' · ');
+                        list.appendChild(hands);
+                    }
+                }
+
                 if (collects.length) {
                     const totals = document.createElement('p');
                     totals.className = 'settle-collects';
-                    totals.textContent = collects.map((row) =>
-                        (row.index === 0 ? 'You collect ' : personName(row.person, row.index) + ' collects ') +
+                    totals.textContent = (bill.perTill ? 'Collects — ' : '') + collects.map((row) =>
+                        (row.index === 0
+                            ? (bill.perTill ? 'you ' : 'You collect ')
+                            : personName(row.person, row.index) + (bill.perTill ? ' ' : ' collects ')) +
                         money(fromSen(row.sen))).join(' · ');
                     list.appendChild(totals);
                 }
@@ -1589,9 +1662,9 @@ function paintSettle(bill) {
                 const why = document.createElement('p');
                 why.className = 'hint';
                 why.textContent = bill.perTill
-                    ? 'Everyone pays back whoever paid for what they had, till by till — so the ' +
-                      'same two people can owe each other both ways. More handovers, and no ' +
-                      'arithmetic anybody has to take on trust.'
+                    ? 'Everyone pays back whoever paid for what they had, till by till. Where two ' +
+                      'of you owe each other, only the difference changes hands — nobody sends ' +
+                      'money to somebody who is about to send more of it back.'
                     : 'Everybody owes their share less whatever they put down, and the biggest ' +
                       'debt is matched against the biggest credit. So this is the fewest ' +
                       'handovers that leaves everyone square — not one payment per till.';
@@ -1883,7 +1956,7 @@ function splitSummaryText() {
                 lines.push('');
                 lines.push(who + ' paid ' + till.on
                     .map((one) => one.line.label + ' ' + money(fromSen(bill.lineSen[one.at])))
-                    .join(' + ') + ' — collects ' + money(fromSen(takes)));
+                    .join(' + ') + ' — ' + money(fromSen(takes)) + ' of it is other people\'s');
 
                 b.people.forEach((person, index) => {
                     if (index === till.owner) return;
@@ -1895,9 +1968,50 @@ function splitSummaryText() {
                 if (own > 0) lines.push('   (' + who + "'s own share of it: " + money(fromSen(own)) + ')');
             });
 
+            // The tills above are the working; this is the answer. Reading
+            // down a till tells somebody what they owe *that* person, and
+            // finding what the evening costs them means adding their own name
+            // up across three blocks. So it is added up for them, once, under
+            // their own name — with the pieces still shown, because being
+            // able to check every figure is the whole point of settling this
+            // way rather than netting it.
             lines.push('');
-            lines.push(bill.transfers.length + ' handovers in all — everyone pays back whoever paid ' +
-                'for what they had.');
+            lines.push('So, in the end');
+            lines.push('');
+
+            b.people.forEach((person, index) => {
+                const out = bill.transfers.filter((move) => move.from === index);
+                const takes = bill.transfers.filter((move) => move.to === index)
+                    .reduce((sum, move) => sum + move.amount, 0);
+                const also = takes > 0 ? ', and collects ' + money(fromSen(takes)) : '';
+
+                if (!out.length) {
+                    lines.push(personName(person, index) + ' hands over nothing' + also);
+                    return;
+                }
+
+                const total = out.reduce((sum, move) => sum + move.amount, 0);
+                lines.push(personName(person, index) + ' pays ' +
+                    out.map((move) => {
+                        // Where the two of them owed each other, the figure is
+                        // a subtraction, and a subtraction nobody can see is a
+                        // figure they have to take on faith.
+                        const back = (move.parts || []).filter((part) => part.back)
+                            .reduce((sum, part) => sum + part.amount, 0);
+                        const owed = (move.parts || []).filter((part) => !part.back)
+                            .reduce((sum, part) => sum + part.amount, 0);
+
+                        return personName(move.toPerson, move.to) + ' ' + money(fromSen(move.amount)) +
+                            (back > 0 ? ' (' + money(fromSen(owed)) + ' − ' + money(fromSen(back)) + ')' : '') +
+                            (move.settled ? ' (settled)' : '');
+                    }).join(' + ') +
+                    (out.length > 1 ? ' = ' + money(fromSen(total)) : '') + also);
+            });
+
+            lines.push('');
+            lines.push(bill.transfers.length + ' handovers, ' +
+                money(fromSen(bill.transfers.reduce((sum, move) => sum + move.amount, 0))) +
+                ' changing hands — everyone pays back whoever paid for what they had.');
             return lines.join('\n');
         }
 

@@ -1291,6 +1291,20 @@ input[type="date"]:hover::-webkit-calendar-picker-indicator { opacity: .85; }
     font-variant-numeric: tabular-nums;
 }
 
+/* What each person hands over, against what each person takes. Paying out is
+   the reader's own money leaving, so it is not painted in the colour money
+   coming back is. */
+.settle-collects.is-out {
+    margin-top: 14px;
+    color: var(--ink-2);
+}
+
+.settle-collects.is-out + .settle-collects {
+    margin-top: 4px;
+    padding-top: 0;
+    border-top: 0;
+}
+
 .settle-row.is-done { background: transparent; border-style: dashed; }
 .settle-row.is-done .settle-who,
 .settle-row.is-done > b { color: var(--ink-3); }

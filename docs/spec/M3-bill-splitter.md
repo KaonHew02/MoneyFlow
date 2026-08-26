@@ -252,6 +252,21 @@ A pair still settles **once**, however many of that payer's lines they were on
 — a person hands money over once — so the lines are carried on the handover
 and named under it rather than each becoming a handover of its own.
 
+And once, not twice. Two people who owe each other both ways hand over **the
+difference**: you owe Pan RM1.56 for the paste and Pan owes you RM13.75 for
+NSK, so Pan gives you RM12.19 and your RM1.56 never leaves your pocket.
+Sending money to somebody who is about to send more of it back is not a
+settlement. What each side was owed stays on the handover, so the row shows
+the subtraction rather than asserting the answer:
+
+    Pan owes you    NSK RM 13.75 — less Paste RM 1.56
+                    RM 12.19
+
+Which is why the working and the answer carry different figures, and say so:
+the till block reports what a till **is owed** (RM55.00 of the NSK bill was
+other people's), and only the closing block reports what anybody **collects**
+(RM53.44, once the paste has cancelled against it).
+
 Each person's total is divided across the lines they are on rather than each
 line being worked out on its own, so the pieces add back to exactly what they
 pay: no line is a sen out and no sen falls between two of them.
