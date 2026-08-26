@@ -126,7 +126,62 @@ A bill saved before the switch existed recorded ringgit, and is read back as
 ringgit — reading it as a percentage would silently rewrite a figure that was
 already checked.
 
+## More than one person paid
+
+An evening is often three tills. JK put the pork down at the hotpot, you paid
+at NSK, Lavelle bought the drinks at Chagee — one outing, three people out of
+pocket, and nothing about it is three separate bills: the shares are worked out
+across the whole night and only then does anyone hand anything over.
+
+**More than one person paid** opens a list under the form. One line per
+handover — who, what it paid for, how much — because the same person can be at
+two counters and a figure per person would lose which was which.
+
+Whatever the list does not account for stays with the person named above it,
+which is why the picker stops saying *Paid by* and starts saying *Who paid the
+rest*. That single rule is what keeps a bill with no list the same object as
+one with it:
+
+| Listed | Left over | Lands on |
+|---|---|---|
+| nothing | the whole bill | the one payer — which is what this module always was |
+| some of it | the remainder | whoever is named under *Who paid the rest* |
+| all of it | nothing | nobody; the picker stops mattering |
+
+    Pork    RM90 shared     You     put down RM120 at NSK
+    NSK     RM120 shared    JK      RM90 — the rest
+    Chagee  RM15 each       Lavelle put down RM45 at Chagee
+
+    Everyone's share: RM85
+    net:  You −35 · JK −5 · Lavelle +40
+
+The card reports what the list covers against what the bill comes to, and says
+plainly when the two do not meet — payments adding to more than the bill means
+a figure is wrong somewhere, not that somebody is owed twice.
+
 ## Settlement
+
+Each person owes their share less whatever they already put down. Those
+figures add to zero — every ringgit somebody is short is a ringgit somebody
+else is up — so the handovers always come out even however many people paid.
+
+The biggest debt is matched against the biggest credit until both sides are
+empty, which is the shortest list of handovers there is:
+
+    Lavelle → You  RM35
+    Lavelle → JK   RM5
+
+rather than Lavelle paying RM40 to one person who then passes RM5 on. Ties
+break on position in the bill, so the same bill always produces the same pairs
+and a tick cannot land on a handover nobody made.
+
+With one payer this is the list it always was — they are the only person owed,
+so everybody else pays them.
+
+A handover is ticked on its own, and each tick is keyed by **the two people in
+it**. It used to be keyed by the debtor alone, which named the handover only
+because there was one person to owe; a saved bill's ticks are read forward as
+that person owing whoever paid the bill, which is who they owed.
 
 The payer is owed by everyone else. Their own share is what they keep.
 
@@ -144,8 +199,8 @@ If somebody else paid, the direction reverses: *You owe John RM60.*
 
 ## Expense integration
 
-A bill is not an expense until the reader says so, and even then only their
-own share of it is.
+A bill is not an expense until the reader says so, and even then only what was
+actually theirs.
 
     Your share is RM60.
     → Add your share to Expense Recorder?
@@ -156,6 +211,11 @@ own share of it is.
 
 **RM60 is recorded, not RM240.** The other RM180 was never the reader's money
 — it was lent for the length of a dinner.
+
+The other switch, *the whole bill*, records what actually left the reader's
+account, so that it matches a bank statement and repayments come back off it.
+Where several people paid, that is their part of the night rather than the
+bill total — the RM120 at NSK, not the RM255 the table came to.
 
 The bill remembers the entry it created. Removing the link deletes that entry;
 it never leaves a second copy behind. This is the *record once* rule: the
@@ -171,8 +231,12 @@ Actions: open · duplicate · delete.
 
 ## Persistence
 
-`bills`, `bill participants` and `bill settlements` are saved together under
-one key and included in the backup file.
+`bills`, `bill participants`, `bill payments` and `bill settlements` are saved
+together under one key and included in the backup file.
+
+A bill saved before there could be more than one payer has no payment list,
+which reads as the one payer covering the lot — the same bill it always was.
+No migration needed beyond the settlement keys above.
 
 ### Methods that no longer exist
 

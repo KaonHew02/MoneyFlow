@@ -893,6 +893,33 @@ input[type="date"]:hover::-webkit-calendar-picker-indicator { opacity: .85; }
 .money-input-sm.is-off:focus-within { border-color: var(--red); }
 
 /* --------------------------------------------------------------------
+   Who put the money down
+   --------------------------------------------------------------------
+   The item row with a name on the front of it, because that is what a
+   payment is: somebody, something, an amount. It sits in its own card so
+   that a bill nobody split the paying of costs no height at all. */
+.split-pay-card {
+    margin-top: 12px;
+    padding: 14px 15px;
+    border: 1px solid var(--line-2);
+    border-radius: 14px;
+    background: var(--paper-2);
+}
+
+.split-pay {
+    display: grid;
+    grid-template-columns: minmax(0, 132px) minmax(0, 1fr) 130px 30px;
+    gap: 8px;
+    align-items: center;
+}
+
+.split-pay > select,
+.split-pay-label { padding: 9px 12px; font-size: 13.5px; }
+.split-pay > select { font-weight: 650; }
+
+.split-pay-card .hint { margin-top: 10px; }
+
+/* --------------------------------------------------------------------
    Portions — a shared dish that did not divide evenly
    --------------------------------------------------------------------
    Sits under its dish rather than inside the row: the row is a grid of
@@ -3742,6 +3769,11 @@ tr.is-locked { animation: nudge .3s ease; }
     .purpose-row.is-icon { grid-template-columns: 36px minmax(0, 1fr) auto 36px; }
     .type-icon { width: 36px; height: 36px; }
     .split-item, .split-item.has-off { grid-template-columns: minmax(0, 1fr) 104px 36px; }
+
+    /* Four fields do not fit across a phone, and the name is the one that
+       reads as a heading for the other three — so it takes the line above. */
+    .split-pay { grid-template-columns: minmax(0, 1fr) 104px 36px; }
+    .split-pay > select { grid-column: 1 / -1; }
     .bgt-row.is-custom { grid-template-columns: 38px minmax(0, 1fr) minmax(0, 1fr) 36px; }
     .bgt-row.is-plan { grid-template-columns: 38px minmax(0, 1fr) 36px; }
     .goal-c { grid-template-columns: minmax(0, 1fr) auto 36px; }

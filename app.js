@@ -312,6 +312,7 @@ const CHARGE_PRESETS = {
 
 const newItem   = () => ({ id: nextId('i'), label: '', amount: '', off: '' });
 const newPerson = () => ({ id: nextId('p'), name: '', items: [newItem()] });
+const newPayment = () => ({ id: nextId('y'), by: '', label: '', amount: '' });
 
 /** A blank bill. Two people, because a bill split one way is not a split. */
 function newBill() {
@@ -322,6 +323,14 @@ function newBill() {
         people: [newPerson(), newPerson()],
         shared: [],
         paidBy: '',
+        // An evening is rarely one till. JK put the pork down at the hotpot,
+        // you paid at NSK, Lavelle bought the drinks — one outing, three
+        // people out of pocket. `payments` is who handed over what; `paidBy`
+        // is whoever covered whatever the list does not account for, which is
+        // why a bill with no list at all still reads exactly as it always did:
+        // one person paying the lot.
+        multiPay: false,
+        payments: [],
         service: '0', tax: '0', discount: '', discountUnit: 'pct', round: false,
         itemDiscounts: false, offUnit: 'pct',
         settled: {},
@@ -398,6 +407,16 @@ function readSplitState() {
 
     const paidBy = ($('splitPaidBy') || {}).value;
     if (bill.people.some((p) => p.id === paidBy)) bill.paidBy = paidBy;
+
+    bill.multiPay = !!($('splitMultiPay') || {}).checked;
+
+    document.querySelectorAll('#splitPayments .split-pay').forEach((row) => {
+        const pay = bill.payments.find((x) => x.id === row.dataset.pay);
+        if (!pay) return;
+        pay.by     = row.querySelector('.split-pay-who').value;
+        pay.label  = row.querySelector('.split-pay-label').value;
+        pay.amount = row.querySelector('.split-pay-amount').value;
+    });
 
     document.querySelectorAll('#splitPeople .split-person').forEach((card) => {
         const person = bill.people.find((p) => p.id === card.dataset.person);
@@ -494,6 +513,82 @@ function buildSplitPeople() {
     });
 
     buildPaidByOptions();
+    buildSplitPayments();
+}
+
+/**
+ * Who put money down, and how much.
+ *
+ * A line per till rather than a figure per person: one evening is often three
+ * counters — the pork at the hotpot, the groceries at NSK, the drinks at
+ * Chagee — and the same person can be at two of them. Labelling the line is
+ * what makes the list read back as the evening actually went.
+ *
+ * Whatever the lines do not add up to is carried by the person named under
+ * **Paid by**, which is what keeps a bill with no lines at all the same
+ * object as this one: nothing listed, so the whole bill is left over, so it
+ * all lands on the one person who paid.
+ */
+/** A fresh line, pointed at somebody who is not already carrying the rest. */
+function nextPaymentFor(bill) {
+    const pay = newPayment();
+    const rest = bill.people[payerIndex(bill)];
+    const other = bill.people.find((person) => person.id !== rest.id);
+    pay.by = (other || rest).id;
+    return pay;
+}
+
+function buildSplitPayments() {
+    const host = $('splitPayments');
+    if (!host) return;
+
+    const bill = draft();
+    host.innerHTML = '';
+
+    if (!bill.payments.length) {
+        host.innerHTML = '<p class="split-empty">Nothing listed yet, so the whole bill is down ' +
+            'to whoever is named under <b>Paid by</b>. Add a line for each of the others.</p>';
+        return;
+    }
+
+    const rows = document.createElement('div');
+    rows.className = 'split-items';
+
+    bill.payments.forEach((pay) => {
+        const row = document.createElement('div');
+        row.className = 'split-pay';
+        row.dataset.pay = pay.id;
+        row.innerHTML =
+            '<select class="split-pay-who" aria-label="Who paid"></select>' +
+            '<input type="text" class="split-pay-label" aria-label="What this payment was for">' +
+            '<div class="money-input money-input-sm"><span class="affix">RM</span>' +
+            '<input type="number" class="split-pay-amount" min="0" step="0.10" placeholder="0.00" ' +
+            'inputmode="decimal" aria-label="How much they put down"></div>' +
+            '<button type="button" class="split-x" data-remove-pay aria-label="Remove payment">' +
+            '<i class="bi bi-x-lg"></i></button>';
+
+        const who = row.querySelector('.split-pay-who');
+        bill.people.forEach((person, index) => {
+            const option = document.createElement('option');
+            option.value = person.id;
+            option.textContent = personName(person, index);
+            who.appendChild(option);
+        });
+        // A payment by somebody who has since left the table goes back to the
+        // reader rather than to nobody — the same rule `paidBy` follows.
+        if (!bill.people.some((x) => x.id === pay.by)) pay.by = bill.people[0].id;
+        who.value = pay.by;
+
+        // Assigned rather than interpolated — these are user-typed strings.
+        const label = row.querySelector('.split-pay-label');
+        label.value = pay.label;
+        label.placeholder = 'What they paid for';
+        row.querySelector('.split-pay-amount').value = pay.amount;
+
+        rows.appendChild(row);
+    });
+
+    host.appendChild(rows);
 }
 
 function buildSplitShared() {
@@ -612,6 +707,68 @@ function buildPaidByOptions() {
  * One pipeline, whatever the method: weights in, a bill total and a row of
  * shares out. The weights are the only thing the four methods disagree about.
  */
+/**
+ * The fewest handovers that clear the table.
+ *
+ * `net` is what each person owes less what they already put down, so it adds
+ * to zero: every ringgit somebody is short is a ringgit somebody else is up.
+ * The biggest debt is matched against the biggest credit until both sides are
+ * empty, which is the shortest list there is — two people who are RM30 apart
+ * settle between themselves instead of passing it through a third.
+ *
+ * With one payer it is the list this module always had: they are the only
+ * person owed, so everybody else pays them, and nothing about a saved bill
+ * reads differently.
+ *
+ * A handover is keyed by the two people in it rather than by its position, so
+ * a tick stays attached to the pair as the figures around it move.
+ */
+function settleTransfers(bill, netSen) {
+    const owes = [];
+    const owed = [];
+    netSen.forEach((sen, index) => {
+        if (sen > 0) owes.push({ index, left: sen });
+        else if (sen < 0) owed.push({ index, left: -sen });
+    });
+
+    // Biggest first on both sides, position in the bill breaking a tie: the
+    // same bill has to produce the same pairs every time it is worked out, or
+    // a tick would find itself against a handover nobody made.
+    owes.sort((a, b) => b.left - a.left || a.index - b.index);
+    owed.sort((a, b) => b.left - a.left || a.index - b.index);
+
+    const out = [];
+    let i = 0;
+    let j = 0;
+    while (i < owes.length && j < owed.length) {
+        const amount = Math.min(owes[i].left, owed[j].left);
+        if (amount > 0) {
+            const fromPerson = bill.people[owes[i].index];
+            const toPerson   = bill.people[owed[j].index];
+            const key = fromPerson.id + '>' + toPerson.id;
+            out.push({
+                key,
+                from: owes[i].index, to: owed[j].index,
+                fromPerson, toPerson,
+                amount,
+                settled: !!bill.settled[key],
+            });
+        }
+        owes[i].left -= amount;
+        owed[j].left -= amount;
+        if (owes[i].left <= 0) i++;
+        if (owed[j].left <= 0) j++;
+    }
+
+    // Read in the order the table is written in, whatever order they matched.
+    return out.sort((a, b) => a.from - b.from || a.to - b.to);
+}
+
+/** "Amy", "Amy & John", "Amy, John & David" — a list said the way it is said. */
+const nameList = (names) => (names.length < 2
+    ? (names[0] || '')
+    : names.slice(0, -1).join(', ') + ' & ' + names[names.length - 1]);
+
 function splitCompute(source) {
     const bill = source || draft();
     const grossSen = (item) => Math.max(0, toSen(parseFloat(item.amount) || 0));
@@ -692,14 +849,43 @@ function splitCompute(source) {
     const paysSen = allocateSen(grandSen, weights);
     const payer   = payerIndex(bill);
 
-    // What is still outstanding, and to whom. The payer owes nobody.
-    const debts = bill.people.map((person, index) => ({
-        person, index,
-        amount: paysSen[index],
-        settled: index === payer || !!bill.settled[person.id],
-    })).filter((d) => d.index !== payer && d.amount > 0);
+    // --- who put the money down -------------------------------------------
+    // The listed payments as typed, and whatever they leave over goes to the
+    // primary payer. That single rule is what makes a bill with no payment
+    // list the same object as one with it: nothing listed leaves the whole
+    // bill over, and the whole bill lands on the one person who paid.
+    const seat = new Map(bill.people.map((person, index) => [person.id, index]));
+    const paidSen = bill.people.map(() => 0);
+    let listedPaidSen = 0;
 
-    const openSen = debts.filter((d) => !d.settled).reduce((sum, d) => sum + d.amount, 0);
+    if (bill.multiPay) {
+        (bill.payments || []).forEach((pay) => {
+            const sen = Math.max(0, toSen(parseFloat(pay.amount) || 0));
+            if (!sen) return;
+            paidSen[seat.has(pay.by) ? seat.get(pay.by) : payer] += sen;
+            listedPaidSen += sen;
+        });
+    }
+
+    const restSen = grandSen - listedPaidSen;
+    paidSen[payer] += restSen;
+
+    const payers = paidSen.reduce((count, sen) => count + (sen > 0 ? 1 : 0), 0);
+
+    // What each person owes against what they are already out of pocket by.
+    // These add to zero by construction, which is what lets the handovers
+    // below always come out even however many people paid.
+    const dueSen = paysSen.map((pays, index) => pays - paidSen[index]);
+
+    // What is still outstanding, and to whom. Somebody who put down exactly
+    // their own share appears in nobody's list.
+    const transfers = settleTransfers(bill, dueSen);
+
+    const openSen = transfers.filter((t) => !t.settled).reduce((sum, t) => sum + t.amount, 0);
+    const owedToMeSen = transfers.filter((t) => t.to === 0 && !t.settled)
+        .reduce((sum, t) => sum + t.amount, 0);
+    const iOweSen = transfers.filter((t) => t.from === 0 && !t.settled)
+        .reduce((sum, t) => sum + t.amount, 0);
 
     return {
         bill, weights, ownSen, sharedSen, sharedSplits, sharedParts, foodSen, discountSen, serviceSen, taxSen, grandSen,
@@ -711,12 +897,16 @@ function splitCompute(source) {
         // Each person's slice of the bill before charges, and after.
         shareSen: allocateSen(foodSen, weights),
         paysSen,
-        debts,
-        openSen,
+        // Who paid what, what that leaves each person net, and the handovers
+        // that clear it. One payer or five, this is the same shape.
+        paidSen, netSen: dueSen, payers, listedPaidSen, restSen,
+        transfers,
+        openSen, owedToMeSen, iOweSen,
         mySen: paysSen[0] || 0,
+        myPaidSen: paidSen[0] || 0,
         // A bill with nothing left to chase is done, but an empty one is not
         // "settled" — it has simply not been filled in yet.
-        isSettled: grandSen > 0 && debts.every((d) => d.settled),
+        isSettled: grandSen > 0 && transfers.every((t) => t.settled),
     };
 }
 
@@ -748,6 +938,13 @@ function syncSplitForm() {
     // No unit to choose until there are dish discounts to put one on.
     if ($('splitItemOffUnit')) $('splitItemOffUnit').hidden = !bill.itemDiscounts;
 
+    // With a list of payments up, the single picker above it stops meaning
+    // "who paid" and starts meaning "who covered the rest" — so it says so.
+    const many = !!bill.multiPay;
+    if ($('splitPayCard'))   $('splitPayCard').hidden = !many;
+    if ($('splitPayNote'))   $('splitPayNote').hidden = !many;
+    if ($('splitPaidByLabel')) set('splitPaidByLabel', many ? 'Who paid the rest' : 'Paid by');
+
     const asPct = bill.discountUnit !== 'rm';
     if ($('splitDiscountBox')) $('splitDiscountBox').classList.toggle('is-suffix', asPct);
     set('splitDiscountAffix', asPct ? '%' : 'RM');
@@ -762,12 +959,35 @@ function paintSplit(bill) {
     const b = bill.bill;
     const pax = b.people.length;
 
+    // Everybody who actually put money down, in the order they sit in the
+    // bill. With no payment list that is the one person under "Paid by",
+    // which is what it has always said.
+    const putDown = b.people
+        .map((person, index) => ({ person, index, sen: bill.paidSen[index] }))
+        .filter((row) => row.sen > 0);
+
     set('splitTotal', money(fromSen(bill.grandSen)));
     set('splitPaxFoot', pax
         ? pax + (pax === 1 ? ' person' : ' people') + ' · ' +
-          'paid by ' +
-          personName(b.people[bill.payer], bill.payer)
+          'paid by ' + (putDown.length
+              ? nameList(putDown.map((row) => personName(row.person, row.index)))
+              : personName(b.people[bill.payer], bill.payer))
         : 'Add someone to split with');
+
+    // The payments card's own running total: what the list accounts for, and
+    // what that leaves for the person carrying the rest.
+    set('splitPayNote', bill.grandSen > 0
+        ? money(fromSen(bill.listedPaidSen)) + ' of ' + money(fromSen(bill.grandSen)) + ' listed'
+        : 'Nothing on the bill yet');
+
+    const restName = personName(b.people[bill.payer], bill.payer);
+    set('splitPayHint', bill.restSen > 0
+        ? money(fromSen(bill.restSen)) + ' of the bill is not on this list, so it is down to ' +
+          restName + '. Add a line for each of the other tills and it comes to nothing.'
+        : bill.restSen < 0
+            ? 'These payments come to ' + money(fromSen(-bill.restSen)) + ' more than the bill does. ' +
+              'Either a figure is too high, or something is missing from what everyone had.'
+            : 'Every ringgit of the bill is accounted for.');
 
     set('splitYourShare', money(fromSen(bill.mySen)));
     set('splitYourShareFoot', bill.grandSen > 0
@@ -776,19 +996,24 @@ function paintSplit(bill) {
 
     // The direction of the debt is the whole point of the figure, so the
     // label changes with it rather than making the reader work it out.
-    const iPaid = bill.payer === 0;
-    set('splitOwedLabel', iPaid ? 'Owed to you' : 'You owe');
-    if (iPaid) {
-        set('splitOwed', money(fromSen(bill.openSen)));
-        const done = bill.debts.filter((d) => d.settled).length;
-        set('splitOwedFoot', bill.debts.length
-            ? done + ' of ' + bill.debts.length + ' paid you back'
+    // Whoever paid what, a person is on one side of it or the other — never
+    // both — because the net is a single figure.
+    const iAmOwed = bill.netSen[0] <= 0;
+    set('splitOwedLabel', iAmOwed ? 'Owed to you' : 'You owe');
+    if (iAmOwed) {
+        const mine = bill.transfers.filter((t) => t.to === 0);
+        const done = mine.filter((t) => t.settled).length;
+        set('splitOwed', money(fromSen(bill.owedToMeSen)));
+        set('splitOwedFoot', mine.length
+            ? done + ' of ' + mine.length + ' paid you back'
             : 'Nobody owes you anything');
     } else {
-        const mine = bill.debts.find((d) => d.index === 0);
-        set('splitOwed', money(fromSen(mine && !mine.settled ? mine.amount : 0)));
-        set('splitOwedFoot', !mine ? 'Nothing outstanding'
-            : mine.settled ? 'Paid back' : 'to ' + personName(b.people[bill.payer], bill.payer));
+        const mine = bill.transfers.filter((t) => t.from === 0);
+        const left = mine.filter((t) => !t.settled);
+        set('splitOwed', money(fromSen(bill.iOweSen)));
+        set('splitOwedFoot', !mine.length ? 'Nothing outstanding'
+            : !left.length ? 'Paid back'
+            : 'to ' + nameList(left.map((t) => personName(t.toPerson, t.to))));
     }
 
     // --- the tally ---
@@ -869,10 +1094,19 @@ function paintSplit(bill) {
 
         const detail = (lines ? lines + (lines === 1 ? ' item' : ' items') : 'Nothing ordered') + sharedNote;
 
+        // What they put down at the till, which is a different question from
+        // what they owe — and with several people paying it is the only place
+        // the two can be seen against each other.
+        const put = bill.paidSen[index];
+
         const tr = document.createElement('tr');
         tr.appendChild(cell(
             '<strong>' + escapeHtml(personName(person, index)) + '</strong>' +
-            (index === bill.payer ? '<span class="tag is-paid">paid</span>' : '') +
+            (put > 0
+                ? '<span class="tag is-paid">' +
+                  (bill.payers > 1 ? 'paid ' + escapeHtml(money(fromSen(put))) : 'paid') +
+                  '</span>'
+                : '') +
             '<small>' + detail + '</small>'
         ));
         tr.appendChild(cell(fmt(fromSen(share))));
@@ -903,19 +1137,33 @@ function paintSettle(bill) {
     const b = bill.bill;
     const list = $('splitSettleList');
     const saved = !!splitState.editing;
-    const payerName = personName(b.people[bill.payer], bill.payer);
-    const iPaid = bill.payer === 0;
 
     set('splitSettleNote', !saved ? 'Not saved yet'
         : bill.isSettled ? '✅ Settled'
-        : bill.debts.length ? money(fromSen(bill.openSen)) + ' outstanding'
+        : bill.transfers.length ? money(fromSen(bill.openSen)) + ' outstanding'
         : '—');
+
+    const putDown = b.people
+        .map((person, index) => ({ person, index, sen: bill.paidSen[index] }))
+        .filter((row) => row.sen > 0);
+
+    // One till reads as it always did. Several read as a list, because
+    // "somebody paid RM245" is not what happened — three people did, and each
+    // of them is owed for their own part of it.
+    const only     = putDown[0];
+    const onlyAt   = only ? only.index : bill.payer;
+    const onlyName = personName(b.people[onlyAt], onlyAt);
+    const onlyIsMe = onlyAt === 0;
 
     set('splitSettleLead', bill.grandSen <= 0
         ? 'Nothing to settle yet.'
-        : (iPaid ? 'You paid ' : payerName + ' paid ') + money(fromSen(bill.grandSen)) +
-          '. ' + (iPaid ? 'Your own share is ' : 'Their own share is ') +
-          money(fromSen(bill.paysSen[bill.payer])) + '.');
+        : putDown.length > 1
+            ? putDown.map((row) => (row.index === 0 ? 'You put down ' : personName(row.person, row.index) + ' put down ') +
+                  money(fromSen(row.sen))).join(' · ') +
+              '. Your own share is ' + money(fromSen(bill.mySen)) + '.'
+            : (onlyIsMe ? 'You paid ' : onlyName + ' paid ') + money(fromSen(bill.grandSen)) +
+              '. ' + (onlyIsMe ? 'Your own share is ' : 'Their own share is ') +
+              money(fromSen(bill.paysSen[onlyAt])) + '.');
 
     if (list) {
         list.innerHTML = '';
@@ -923,39 +1171,43 @@ function paintSettle(bill) {
         if (!saved) {
             list.innerHTML = '<p class="split-empty">Save the bill and each debt gets its own ' +
                 'tick here, so a month later you can still see who paid you back.</p>';
-        } else if (!bill.debts.length) {
+        } else if (!bill.transfers.length) {
             list.innerHTML = '<p class="split-empty">Nobody owes anything on this bill.</p>';
         } else {
-            bill.debts.forEach((debt) => {
+            bill.transfers.forEach((move) => {
                 const row = document.createElement('div');
-                row.className = 'settle-row' + (debt.settled ? ' is-done' : '');
-                const who = personName(debt.person, debt.index);
+                row.className = 'settle-row' + (move.settled ? ' is-done' : '');
+                const fromName = personName(move.fromPerson, move.from);
+                const toName   = personName(move.toPerson, move.to);
 
-                // Said from the reader's side wherever they are in it.
-                const sentence = debt.index === 0
-                    ? '<strong>You</strong> owe ' + escapeHtml(payerName)
-                    : iPaid
-                        ? '<strong>' + escapeHtml(who) + '</strong> owes you'
-                        : '<strong>' + escapeHtml(who) + '</strong> owes ' + escapeHtml(payerName);
+                // Said from the reader's side wherever they are in it — and
+                // with several payers there are handovers they are not part of
+                // at all, which are simply reported.
+                const iOwe     = move.from === 0;
+                const owedToMe = move.to === 0;
+
+                const sentence = iOwe
+                    ? '<strong>You</strong> owe ' + escapeHtml(toName)
+                    : owedToMe
+                        ? '<strong>' + escapeHtml(fromName) + '</strong> owes you'
+                        : '<strong>' + escapeHtml(fromName) + '</strong> owes ' + escapeHtml(toName);
 
                 // Two directions, both needing an account. Money coming back
                 // to you moves between two of your own pockets — a transfer.
                 // Money you hand over is your share leaving for good — an
                 // expense, recorded on the day you actually pay it.
-                const owedToMe = iPaid && debt.index !== 0;
-                const iOwe = debt.index === 0 && !bill.bill.entryId;
-                const held = b.settled[debt.person.id];
+                const held = b.settled[move.key];
                 const landed = held && held.account ? accountById(held.account) : null;
 
                 row.innerHTML =
                     '<span class="settle-who">' + sentence + '</span>' +
-                    '<b>' + money(fromSen(debt.amount)) + '</b>' +
-                    (debt.settled
+                    '<b>' + money(fromSen(move.amount)) + '</b>' +
+                    (move.settled
                         ? '<span class="settle-done"><i class="bi bi-check-circle-fill"></i> Settled' +
                               // "into" for money arriving, "from" for money leaving.
-                              (landed ? (debt.index === 0 ? ' from ' : ' into ') +
+                              (landed ? (iOwe ? ' from ' : ' into ') +
                                   escapeHtml(accountName(landed.id)) : '') + '</span>' +
-                          '<button type="button" class="ghost-btn is-small" data-unsettle="' + debt.person.id + '">Undo</button>'
+                          '<button type="button" class="ghost-btn is-small" data-unsettle="' + escapeHtml(move.key) + '">Undo</button>'
                         : (owedToMe || iOwe
                             ? '<label class="settle-into-field"><span>' +
                               (iOwe ? 'Paid from' : 'Paid back into') + '</span>' +
@@ -963,7 +1215,7 @@ function paintSettle(bill) {
                               (iOwe ? 'Which account you paid them from' : 'Which account they paid you back into') +
                               '">' + settleAccountOptions(iOwe ? '' : billPaidFromAccount(b)) + '</select></label>'
                             : '') +
-                          '<button type="button" class="ghost-btn is-small" data-settle="' + debt.person.id + '">' +
+                          '<button type="button" class="ghost-btn is-small" data-settle="' + escapeHtml(move.key) + '">' +
                           '<i class="bi bi-check-lg"></i> Mark settled</button>');
                 list.appendChild(row);
             });
@@ -986,16 +1238,27 @@ function paintExpenseLink(bill) {
     const entry = bill.bill.entryId
         && ledgerState.entries.find((e) => e.id === bill.bill.entryId);
 
+    // What actually left the reader's own pocket at the till. With one payer
+    // that is either the whole bill or nothing; with several it is their part
+    // of it, and that — not the bill total — is what a bank statement shows.
+    const putSen = bill.myPaidSen;
+    const many   = bill.payers > 1;
+
     const mode = (($('splitExpMode') || {}).dataset || {}).value === 'share' ? 'share' : 'full';
-    set('splitExpAmount', money(fromSen(mode === 'share' ? bill.mySen : bill.grandSen)));
+    set('splitExpAmount', money(fromSen(mode === 'share' ? bill.mySen : putSen)));
 
     // The button said "my share" whichever way the switch was set, which is
     // the one place this could quietly do something other than what it says.
     const add = $('splitExpAdd');
     if (add) {
         add.innerHTML = '<i class="bi bi-plus-lg"></i> ' +
-            (mode === 'share' ? 'Record my share' : 'Record the whole bill');
+            (mode === 'share' ? 'Record my share'
+                : many ? 'Record what I paid' : 'Record the whole bill');
     }
+
+    // "The whole bill" is only the whole bill when one person paid it.
+    const fullBtn = $('splitExpMode') && $('splitExpMode').querySelector('[data-val="full"]');
+    if (fullBtn) fullBtn.textContent = many ? 'What I paid' : 'The whole bill';
 
     if (!body || !state) return;
 
@@ -1006,13 +1269,13 @@ function paintExpenseLink(bill) {
         commitBill();
     }
 
-    // Whose money left the table. When somebody else paid, none of it was
+    // Whose money left the table. When you put nothing down, none of it was
     // yours yet: you owe them, and the money leaves your account on the day
     // you hand it over — which is the tick down in Settle up, not this card.
-    const iPaid = bill.payer === 0;
+    const iPaid = putSen > 0;
 
     const linked = !!entry;
-    body.hidden = linked || !saved || bill.mySen <= 0 || !iPaid;
+    body.hidden = linked || !saved || (bill.mySen <= 0 && putSen <= 0) || !iPaid;
     state.hidden = !linked;
 
     if (linked) {
@@ -1023,20 +1286,27 @@ function paintExpenseLink(bill) {
     }
 
     if (hint) {
-        const payerName = personName(bill.bill.people[bill.payer], bill.payer);
+        // Who you would be paying back, rather than "the payer" — with
+        // several people out of pocket there is no single one of those.
+        const owedTo = nameList(bill.transfers.filter((move) => move.from === 0)
+            .map((move) => personName(move.toPerson, move.to)));
 
         hint.textContent = !saved
             ? 'Save the bill first — the entry it creates is linked back to it, so it can be undone from here.'
-            : bill.mySen <= 0
+            : bill.mySen <= 0 && putSen <= 0
                 ? 'Your share is nothing, so there is no expense to record.'
                 : linked
                     ? 'Removing this deletes that entry from Expenses. There is only ever one copy — the bill points at it rather than keeping its own.'
                     : !iPaid
-                        ? payerName + ' paid, so none of your money has moved yet. Tick your own line under ' +
+                        ? (owedTo || 'Somebody else') + ' paid, so none of your money has moved yet. Tick your own line under ' +
                           'Settle up when you pay them back and pick the account it came out of — the expense ' +
                           'is recorded then, on the day it actually left.'
-                        : 'Your share only. The rest of the bill was never your money, so recording all of it ' +
-                          'would tell every total in the app that you spent far more than you did.';
+                        : many
+                            ? 'Your share, or the ' + money(fromSen(putSen)) + ' you actually put down — the rest ' +
+                              'of what you paid was lent for the length of an evening, and comes back off it as ' +
+                              'they settle up.'
+                            : 'Your share only. The rest of the bill was never your money, so recording all of it ' +
+                              'would tell every total in the app that you spent far more than you did.';
     }
 }
 
@@ -1055,10 +1325,7 @@ function paintBills() {
             : (a.bill.date < b.bill.date ? 1 : -1)));
 
     const open = splitState.bills.filter((bill) => !billIsSettled(bill));
-    const owed = open.reduce((sum, bill) => {
-        const sums = splitCompute(bill);
-        return sum + (sums.payer === 0 ? sums.openSen : 0);
-    }, 0);
+    const owed = open.reduce((sum, bill) => sum + splitCompute(bill).owedToMeSen, 0);
     set('splitBillsNote', splitState.bills.length
         ? splitState.bills.length + (splitState.bills.length === 1 ? ' bill' : ' bills') +
           (owed > 0 ? ' · ' + money(fromSen(owed)) + ' owed to you' : '')
@@ -1127,15 +1394,23 @@ function renderSplit() {
 function splitSummaryText() {
     const bill = splitCompute();
     const b = bill.bill;
-    const payer = personName(b.people[bill.payer], bill.payer);
+
+    const putDown = b.people
+        .map((person, index) => ({ person, index, sen: bill.paidSen[index] }))
+        .filter((row) => row.sen > 0);
 
     const lines = [(b.title.trim() || 'Bill split') + ' — ' +
-        money(fromSen(bill.grandSen)) + ', paid by ' + payer];
+        money(fromSen(bill.grandSen)) + ', paid by ' + (bill.payers > 1
+            ? putDown.map((row) => personName(row.person, row.index) + ' ' + money(fromSen(row.sen))).join(', ')
+            : personName(b.people[bill.payer], bill.payer))];
 
     b.people.forEach((person, index) => {
+        const owes = bill.transfers.filter((move) => move.from === index);
         lines.push(personName(person, index) + ': ' + money(fromSen(bill.paysSen[index])) +
-            (index === bill.payer ? ' (paid)'
-                : bill.bill.settled[person.id] ? ' — settled' : ''));
+            (!owes.length
+                ? (bill.paidSen[index] > 0 ? ' (paid)' : '')
+                : owes.every((move) => move.settled) ? ' — settled'
+                : ''));
     });
 
     // A dish split by portions is the one thing a reader cannot reconstruct
@@ -1156,6 +1431,17 @@ function splitSummaryText() {
     if (bill.serviceSen)  parts.push('service ' + pct(bill.serviceRate, 0) + ' ' + money(fromSen(bill.serviceSen)));
     if (bill.taxSen)      parts.push('SST ' + pct(bill.taxRate, 0) + ' ' + money(fromSen(bill.taxSen)));
     lines.push('(' + parts.join(', ') + ')');
+
+    // Who hands what to whom. With one payer that is every line above said
+    // backwards, so it is only worth printing once more than one person paid.
+    if (bill.payers > 1 && bill.transfers.length) {
+        lines.push('');
+        bill.transfers.forEach((move) => {
+            lines.push(personName(move.fromPerson, move.from) + ' → ' +
+                personName(move.toPerson, move.to) + ': ' + money(fromSen(move.amount)) +
+                (move.settled ? ' (settled)' : ''));
+        });
+    }
 
     return lines.join('\n');
 }
@@ -1211,7 +1497,12 @@ function onSplitEdit(event) {
         }
     } else if (btn.hasAttribute('data-remove-person') && person) {
         bill.people = bill.people.filter((p) => p.id !== person.id);
-        delete bill.settled[person.id];
+        // Every handover they were either end of goes with them, and so does
+        // anything they put down at a till.
+        Object.keys(bill.settled).forEach((key) => {
+            if (key.split('>').includes(person.id)) delete bill.settled[key];
+        });
+        bill.payments = bill.payments.filter((pay) => pay.by !== person.id);
         // Their portions go with them, or a dish would keep dividing by a
         // share nobody at the table is carrying.
         bill.shared.forEach((item) => {
@@ -1258,12 +1549,12 @@ function onSettleClick(event) {
         const into = select ? select.value : '';
 
         const sums = splitCompute(bill);
-        const debt = sums.debts.find((d) => d.person.id === id);
-        const mine = debt && debt.index === 0;
+        const debt = sums.transfers.find((move) => move.key === id);
+        const mine = debt && debt.from === 0;
 
         // Your own line: this is the moment your money leaves, so this is the
         // moment the expense is written — from the account you actually used.
-        if (mine && into && !bill.entryId) {
+        if (mine && into) {
             const entryId = settleWriteShare(bill, debt, into);
             bill.settled[id] = { account: into, entryId, date: todayIso() };
             splitHint('Recorded ' + money(fromSen(debt.amount)) + ' from ' + accountName(into) +
@@ -1403,6 +1694,12 @@ function splitCopyBill(id) {
         p.items.forEach((i) => { i.id = nextId('i'); }); });
     copy.shared.forEach((i) => { i.id = nextId('i'); });
     copy.paidBy = remap[bill.paidBy] || copy.people[0].id;
+    copy.payments = (copy.payments || []).map((pay) => ({
+        id: nextId('y'),
+        by: remap[pay.by] || copy.people[0].id,
+        label: pay.label,
+        amount: pay.amount,
+    }));
 
     splitState.editing = null;
     splitState.draft = copy;
@@ -1466,6 +1763,15 @@ function paintPortions(bill) {
         document.querySelectorAll('[data-person-label="' + person.id + '"]').forEach((el) => {
             el.textContent = personName(person, index);
         });
+
+        // The two pickers name people as well, and an <option> is not caught
+        // by the loop above. Without this a name typed after the lists were
+        // built sits stale in "Paid by" and in every payment line until
+        // something else happens to rebuild them.
+        document.querySelectorAll('#splitPaidBy option[value="' + person.id + '"], ' +
+            '#splitPayments option[value="' + person.id + '"]').forEach((option) => {
+            option.textContent = personName(person, index);
+        });
     });
 
     (bill.sharedSplits || []).forEach((split) => {
@@ -1514,6 +1820,7 @@ function paintSplitForm() {
     if ($('splitDiscount')) $('splitDiscount').value = bill.discount;
     if ($('splitRound'))    $('splitRound').checked = !!bill.round;
     if ($('splitItemOff'))  $('splitItemOff').checked = !!bill.itemDiscounts;
+    if ($('splitMultiPay')) $('splitMultiPay').checked = !!bill.multiPay;
     if ($('splitDiscountUnit')) setSegment($('splitDiscountUnit'), bill.discountUnit);
     if ($('splitItemOffUnit'))  setSegment($('splitItemOffUnit'), bill.offUnit);
 
@@ -1537,7 +1844,6 @@ function splitRecordShare() {
     const sums = splitCompute(bill);
 
     if (!splitState.editing) { splitHint('Save the bill first.'); return; }
-    if (sums.mySen <= 0)     { splitHint('Your share is nothing — there is no expense to record.'); return; }
     if (bill.entryId)        { return; }
 
     const category = ($('splitExpCategory') || {}).value || '';
@@ -1546,9 +1852,19 @@ function splitRecordShare() {
 
     // Whole bill or own share. Whole bill is what left the account, so it is
     // what a bank statement shows; the rest comes back off it as people pay.
+    // "The whole bill" means the money that actually left this reader's
+    // account, which is the whole bill only when they were the only one at a
+    // till. With several payers it is their part of it.
     const mode = (($('splitExpMode') || {}).dataset || {}).value === 'share' ? 'share' : 'full';
     bill.recorded = mode;
-    const senToRecord = mode === 'share' ? sums.mySen : sums.grandSen;
+    const senToRecord = mode === 'share' ? sums.mySen : sums.myPaidSen;
+
+    if (senToRecord <= 0) {
+        splitHint(mode === 'share'
+            ? 'Your share is nothing — there is no expense to record.'
+            : 'You did not put anything down on this bill, so there is nothing to record yet.');
+        return;
+    }
 
     const stamp = todayIso();
     const entry = {
@@ -1562,7 +1878,8 @@ function splitRecordShare() {
         category, sub: '',
         account, toAccount: '',
         note: (bill.title.trim() || 'Bill split') +
-            (mode === 'share' ? ' — my share' : ' — the whole bill'),
+            (mode === 'share' ? ' — my share'
+                : sums.payers > 1 ? ' — what I paid' : ' — the whole bill'),
         created: stamp, updated: stamp,
     };
 
@@ -1580,7 +1897,8 @@ function splitRecordShare() {
 
     splitHint(mode === 'share'
         ? 'Recorded ' + money(fromSen(sums.mySen)) + ' under Expenses — your share only.'
-        : 'Recorded ' + money(fromSen(sums.grandSen)) + ' under Expenses — the whole bill. ' +
+        : 'Recorded ' + money(fromSen(senToRecord)) + ' under Expenses — ' +
+          (sums.payers > 1 ? 'what you put down. ' : 'the whole bill. ') +
           'Each repayment comes back off it as they pay you.');
     renderSplit();
     renderLedger();
@@ -1622,22 +1940,26 @@ const billPaidFromAccount = (bill) => {
  * have spent, which is why it is written here rather than when the bill was
  * typed in.
  */
-function settleWriteShare(bill, debt, fromAccount) {
-    if (!accountById(fromAccount) || debt.amount <= 0) return '';
+function settleWriteShare(bill, move, fromAccount) {
+    if (!accountById(fromAccount) || move.amount <= 0) return '';
 
     const stamp = todayIso();
     const entry = {
         id: ledgerId('e'),
         seq: ++ledgerSeq,
         type: 'expense',
-        amount: String(fromSen(debt.amount)),
+        amount: String(fromSen(move.amount)),
         currency: BASE_CURRENCY,
         base: '', rate: '',
         date: stamp,
         category: ($('splitExpCategory') || {}).value || '',
         sub: '',
         account: fromAccount, toAccount: '',
-        note: (bill.title.trim() || 'Bill split') + ' — my share',
+        // Named when there is more than one person to pay back, or two
+        // top-ups on the same bill would land in Expenses reading the same.
+        note: (bill.title.trim() || 'Bill split') + ' — my share' +
+            (splitCompute(bill).transfers.filter((t) => t.from === 0).length > 1
+                ? ' to ' + personName(move.toPerson, move.to) : ''),
         created: stamp, updated: stamp,
     };
 
@@ -1645,8 +1967,14 @@ function settleWriteShare(bill, debt, fromAccount) {
     ledgerState.month = monthOf(entry.date);
     saveLedger();
 
-    bill.entryId = entry.id;
-    bill.account = fromAccount;
+    // The bill claims this as its entry only if it has none. Where several
+    // people paid, the reader can both have recorded what they put down and
+    // still owe somebody a top-up — two entries, and the second must not
+    // shove the first out of the link.
+    if (!bill.entryId) {
+        bill.entryId = entry.id;
+        bill.account = fromAccount;
+    }
     return entry.id;
 }
 
@@ -1659,17 +1987,17 @@ function settleWriteShare(bill, debt, fromAccount) {
  *   your share only → a transfer: the money you fronted leaving the account it
  *                     really left, and arriving where they actually paid you.
  */
-function settleWriteEntry(bill, debt, toAccount) {
+function settleWriteEntry(bill, move, toAccount) {
     if (!toAccount || !accountById(toAccount)) return '';
 
     const stamp = todayIso();
-    const who = personName(debt.person, debt.index) || 'someone';
+    const who = personName(move.fromPerson, move.from) || 'someone';
     const note = (bill.title.trim() || 'Bill split') + ' — ' + who + ' paid back';
 
     const common = {
         id: ledgerId('e'),
         seq: ++ledgerSeq,
-        amount: String(fromSen(debt.amount)),
+        amount: String(fromSen(move.amount)),
         currency: BASE_CURRENCY,
         base: '', rate: '',
         date: stamp,
@@ -1845,14 +2173,37 @@ function loadSplit() {
             people.forEach((p) => { if (!p.items.length) p.items.push(newItem()); });
 
             const known = new Set(people.map((p) => p.id));
+            const paidBy = known.has(b.paidBy) ? String(b.paidBy) : people[0].id;
+
+            // Who put money down at which till. A bill saved before there
+            // could be more than one has none of this, which reads as the one
+            // payer covering the lot — exactly what it always was.
+            const payments = (Array.isArray(b.payments) ? b.payments : [])
+                .filter((pay) => pay && known.has(String(pay.by)))
+                .map((pay) => ({
+                    id: String(pay.id || nextId('y')),
+                    by: String(pay.by),
+                    label: String(pay.label || ''),
+                    amount: String(pay.amount || ''),
+                }));
+
             // A tick used to be `true` and nothing more. Now it remembers the
             // account the money came back into and the transfer that moved it,
             // so an older bill reads as settled with neither.
+            //
+            // It was also keyed by the person who owed, because with one payer
+            // that named the handover on its own. It cannot any more — the
+            // same person can owe two people — so a tick belongs to the pair,
+            // and an older key is read forward as that person owing whoever
+            // paid the bill, which is who they owed.
             const settled = {};
-            Object.keys(b.settled || {}).forEach((id) => {
-                if (!known.has(id)) return;
-                const held = b.settled[id];
-                settled[id] = (held && typeof held === 'object')
+            Object.keys(b.settled || {}).forEach((raw) => {
+                const ends = String(raw).split('>');
+                const pair = ends.length === 2 ? ends : [String(raw), paidBy];
+                if (!known.has(pair[0]) || !known.has(pair[1]) || pair[0] === pair[1]) return;
+
+                const held = b.settled[raw];
+                settled[pair[0] + '>' + pair[1]] = (held && typeof held === 'object')
                     ? {
                         account: String(held.account || ''),
                         entryId: String(held.entryId || ''),
@@ -1868,7 +2219,9 @@ function loadSplit() {
                 date: /^\d{4}-\d{2}-\d{2}$/.test(b.date || '') ? String(b.date) : todayIso(),
                 people,
                 shared: (Array.isArray(b.shared) ? b.shared : []).map((item) => readShared(item, known)),
-                paidBy: known.has(b.paidBy) ? String(b.paidBy) : people[0].id,
+                paidBy,
+                multiPay: !!b.multiPay,
+                payments,
                 service: String(b.service || '0'),
                 tax: String(b.tax || '0'),
                 discount: String(b.discount || ''),
@@ -11765,8 +12118,18 @@ function enhanceDateInput(iso) {
 
     // The label still points at the date input by id, and a click on it still
     // means "start typing here" — so the focus is passed along.
+    //
+    // Except while the calendar is being opened. A phone has no popup to put
+    // a date picker in: it opens the picker *by focusing the date input*, the
+    // same way any other field opens a keyboard. Passing that focus along to
+    // the text box shuts the picker in the tick it appeared and puts a number
+    // pad there instead — which is a calendar button that does nothing.
+    let openingAt = 0;
     iso.tabIndex = -1;
-    iso.addEventListener('focus', () => text.focus());
+    iso.addEventListener('focus', () => {
+        if (Date.now() - openingAt < 700) return;
+        text.focus();
+    });
 
     const show = () => { text.value = isoToDmy(iso.value); };
 
@@ -11801,17 +12164,29 @@ function enhanceDateInput(iso) {
     text.addEventListener('change', (event) => { event.stopPropagation(); commit(); });
     text.addEventListener('blur', commit);
 
-    pick.addEventListener('mousedown', (event) => event.preventDefault());
+    // Only a mouse has focus taken off the text box by pressing a button, so
+    // only a mouse needs it held. Cancelling the touch equivalent costs the
+    // tap the click that follows it in Safari, and then nothing opens at all.
+    pick.addEventListener('pointerdown', (event) => {
+        if (event.pointerType === 'mouse') event.preventDefault();
+    });
+
     pick.addEventListener('click', (event) => {
         // Some of these fields sit inside a <label>, and a click anywhere in one
         // activates the control it names — which here is the invisible date
         // input. That is the one thing that must not happen on this button.
         event.preventDefault();
+        openingAt = Date.now();
 
         if (typeof iso.showPicker === 'function') {
             try { iso.showPicker(); return; } catch (err) { /* not allowed here: fall through */ }
         }
-        text.focus();
+
+        // No `showPicker`, or not allowed from here. Focusing the date input
+        // is what opens the picker on a phone, and it is the last thing left
+        // to try anywhere else — the text box only ever offers a number pad.
+        try { iso.focus({ preventScroll: true }); } catch (err) { iso.focus(); }
+        if (document.activeElement !== iso) text.focus();
     });
 }
 
@@ -12149,6 +12524,51 @@ function startApp() {
             buildSplitPeople();
             // A new head means a new portion box on every dish that has them.
             buildSplitShared();
+            commitBill();
+            renderSplit();
+        });
+    }
+
+    // A payment row is built on the fly like every other row here, so its
+    // events are delegated to the card it lives in.
+    const paymentsHost = $('splitPayments');
+    if (paymentsHost) {
+        paymentsHost.addEventListener('input', onSplitFormEdit);
+        paymentsHost.addEventListener('change', onSplitFormEdit);
+        paymentsHost.addEventListener('click', (event) => {
+            const btn = event.target.closest('button[data-remove-pay]');
+            if (!btn) return;
+            readSplitState();
+            const bill = draft();
+            bill.payments = bill.payments.filter((pay) => pay.id !== btn.closest('.split-pay').dataset.pay);
+            buildSplitPayments();
+            commitBill();
+            renderSplit();
+        });
+    }
+
+    const addPayment = $('splitAddPayment');
+    if (addPayment) {
+        addPayment.addEventListener('click', () => {
+            readSplitState();
+            const bill = draft();
+            bill.payments.push(nextPaymentFor(bill));
+            buildSplitPayments();
+            commitBill();
+            renderSplit();
+        });
+    }
+
+    const multiPay = $('splitMultiPay');
+    if (multiPay) {
+        multiPay.addEventListener('change', () => {
+            readSplitState();
+            const bill = draft();
+            // Turning it on with an empty list would say "nobody else paid",
+            // which is the thing the reader has just said is untrue — so it
+            // opens with a line ready for whoever paid the other till.
+            if (bill.multiPay && !bill.payments.length) bill.payments.push(nextPaymentFor(bill));
+            buildSplitPayments();
             commitBill();
             renderSplit();
         });

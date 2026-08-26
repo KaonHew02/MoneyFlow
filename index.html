@@ -710,11 +710,35 @@
                         </div>
 
                         <div class="field">
-                            <label for="splitPaidBy">Paid by</label>
+                            <label for="splitPaidBy" id="splitPaidByLabel">Paid by</label>
                             <select id="splitPaidBy"></select>
                         </div>
 
 
+                    </div>
+
+                    <!-- ----------------------------------------------------
+                         One evening is often three tills: JK put the pork
+                         down at the hotpot, you paid at NSK, Lavelle bought
+                         the drinks at Chagee. One line per handover, and
+                         whatever the lines do not account for stays with the
+                         person named above — which is why a bill with no
+                         lines at all is still one person paying the lot.
+                         ---------------------------------------------------- -->
+                    <div class="check-row" id="splitPayLine">
+                        <label class="check-line">
+                            <input type="checkbox" id="splitMultiPay">
+                            <span>More than one person paid</span>
+                        </label>
+                        <span class="card-note" id="splitPayNote" hidden>&mdash;</span>
+                    </div>
+
+                    <div class="split-pay-card" id="splitPayCard" hidden>
+                        <div id="splitPayments"></div>
+                        <button type="button" class="split-add" id="splitAddPayment">
+                            <i class="bi bi-plus-lg"></i> Add a payment
+                        </button>
+                        <p class="hint" id="splitPayHint">&mdash;</p>
                     </div>
 
                     <!-- ----------------------------------------------------
