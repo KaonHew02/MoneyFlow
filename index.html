@@ -7,7 +7,20 @@
     <title>MoneyFlow — Understand Your Money. Manage Your Future.</title>
     <link rel="icon" href="logo-icon.svg">
     <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.min.css">
-    <link rel="stylesheet" href="style.css">
+    <!-- ==================================================================
+         ?v= on every file this repo owns
+         ==================================================================
+         GitHub Pages serves each file with its own ten-minute cache and no
+         way to set a header, so index.html and app.js expire independently.
+         A reader can end up with a fresh page and yesterday's script — a
+         control that draws but does nothing, which reads as a bug in the app
+         rather than as a bug in a cache.
+         A stale pair cannot happen when the script's *address* changes with
+         it: an old index.html asks for the old app.js and gets a matching
+         one, which is merely out of date rather than broken.
+         Bump this on any change to the files below. It is the one thing here
+         that has to be remembered by hand. -->
+    <link rel="stylesheet" href="style.css?v=2">
 </head>
 <body>
 
@@ -2364,10 +2377,10 @@
      working store and every screen runs without a network. The three below it
      add the Drive copy on top, and are allowed to fail without taking the app
      with them — which is why they load last. -->
-<script src="store.js"></script>
-<script src="app.js"></script>
+<script src="store.js?v=2"></script>
+<script src="app.js?v=2"></script>
 <script src="https://accounts.google.com/gsi/client" async defer></script>
-<script src="drive-config.js"></script>
-<script src="drive.js"></script>
+<script src="drive-config.js?v=2"></script>
+<script src="drive.js?v=2"></script>
 </body>
 </html>
