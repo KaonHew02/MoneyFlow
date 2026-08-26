@@ -1227,7 +1227,10 @@ function paintSettle(bill) {
     const list = $('splitSettleList');
     const saved = !!splitState.editing;
 
-    set('splitSettleNote', !saved ? 'Not saved yet'
+    set('splitSettleNote', !saved
+        ? (bill.transfers.length
+            ? money(fromSen(bill.openSen)) + ' to settle · not saved yet'
+            : 'Not saved yet')
         : bill.isSettled ? '✅ Settled'
         : bill.transfers.length ? money(fromSen(bill.openSen)) + ' outstanding'
         : '—');
@@ -1257,11 +1260,11 @@ function paintSettle(bill) {
     if (list) {
         list.innerHTML = '';
 
-        if (!saved) {
-            list.innerHTML = '<p class="split-empty">Save the bill and each debt gets its own ' +
-                'tick here, so a month later you can still see who paid you back.</p>';
-        } else if (!bill.transfers.length) {
-            list.innerHTML = '<p class="split-empty">Nobody owes anything on this bill.</p>';
+        if (!bill.transfers.length) {
+            list.innerHTML = '<p class="split-empty">' + (bill.grandSen > 0
+                ? 'Nobody owes anything on this bill.'
+                : 'Put in what everyone had and who paid, and the handovers work themselves out.') +
+                '</p>';
         } else {
             bill.transfers.forEach((move) => {
                 const row = document.createElement('div');
@@ -1291,7 +1294,8 @@ function paintSettle(bill) {
                 row.innerHTML =
                     '<span class="settle-who">' + sentence + '</span>' +
                     '<b>' + money(fromSen(move.amount)) + '</b>' +
-                    (move.settled
+                    (!saved ? ''
+                        : move.settled
                         ? '<span class="settle-done"><i class="bi bi-check-circle-fill"></i> Settled' +
                               // "into" for money arriving, "from" for money leaving.
                               (landed ? (iOwe ? ' from ' : ' into ') +
@@ -1308,6 +1312,17 @@ function paintSettle(bill) {
                           '<i class="bi bi-check-lg"></i> Mark settled</button>');
                 list.appendChild(row);
             });
+
+            // The ticks are what wait for a save, not the figures: a tick is a
+            // fact about the world and has to be kept somewhere, while who
+            // owes whom is known the moment the bill is typed.
+            if (!saved) {
+                const note = document.createElement('p');
+                note.className = 'split-empty';
+                note.textContent = 'Save the bill and each of these gets its own tick, so a month ' +
+                    'later you can still see who paid you back.';
+                list.appendChild(note);
+            }
         }
     }
 
