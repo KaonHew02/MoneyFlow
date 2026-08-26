@@ -12711,7 +12711,14 @@ function enhanceDateInput(iso) {
     text.autocomplete = 'off';
     text.placeholder = DATE_MASK;
     text.setAttribute('aria-label', (iso.getAttribute('aria-label') || 'Date') + ', ' + DATE_MASK);
+    if (iso.id) text.id = iso.id + 'Text';
     wrap.appendChild(text);
+
+    // The label has to name the box somebody can actually type into. The date
+    // input keeps its id, because that is what every other line of code in
+    // this file calls it by.
+    const label = iso.id && document.querySelector('label[for="' + iso.id + '"]');
+    if (label) label.setAttribute('for', text.id);
 
     const pick = document.createElement('button');
     pick.type = 'button';
@@ -12721,27 +12728,18 @@ function enhanceDateInput(iso) {
     pick.innerHTML = '<i class="bi bi-calendar3"></i>';
     wrap.appendChild(pick);
 
-    // The label still points at the date input by id, and a click on it still
-    // means "start typing here" — so the focus is passed along.
-    //
-    // Except while the calendar is being opened. A phone has no popup to put
-    // a date picker in: it opens the picker *by focusing the date input*, the
-    // same way any other field opens a keyboard. Passing that focus along to
-    // the text box shuts the picker in the tick it appeared and puts a number
-    // pad there instead — which is a calendar button that does nothing.
-    let openingAt = 0;
-    iso.tabIndex = -1;
-    iso.addEventListener('focus', () => {
-        if (Date.now() - openingAt < 700) return;
-        text.focus();
-    });
-
     const show = () => { text.value = isoToDmy(iso.value); };
 
     Object.defineProperty(iso, 'value', {
         configurable: true,
         get() { return nativeValue.get.call(this); },
-        set(next) { nativeValue.set.call(this, next); show(); },
+        set(next) {
+            nativeValue.set.call(this, next);
+            show();
+            // A date set in code while the grid is open has to move the
+            // highlight, or the calendar is showing a day nothing holds.
+            if (datePop && datePop.iso === this) paintDatePop();
+        },
     });
 
     iso.addEventListener('change', show);
@@ -12777,21 +12775,142 @@ function enhanceDateInput(iso) {
     });
 
     pick.addEventListener('click', (event) => {
-        // Some of these fields sit inside a <label>, and a click anywhere in one
-        // activates the control it names — which here is the invisible date
-        // input. That is the one thing that must not happen on this button.
+        // Some of these fields sit inside a <label>, and a click anywhere in
+        // one activates the control it names. Nothing here wants that.
         event.preventDefault();
-        openingAt = Date.now();
+        openDatePop(iso, wrap);
+    });
 
-        if (typeof iso.showPicker === 'function') {
-            try { iso.showPicker(); return; } catch (err) { /* not allowed here: fall through */ }
+    // Last, so nothing above has to care: the native control is not merely
+    // covered any more, it is gone. A hidden input cannot be focused by a
+    // stray tap, cannot open a wheel picker of its own on top of this one,
+    // and cannot draw a second calendar icon inside the box.
+    iso.type = 'hidden';
+}
+
+/**
+ * ====================================================================
+ * THE CALENDAR BEHIND THE BUTTON
+ * ====================================================================
+ * A native date picker is the browser's to draw — and on a phone it is the
+ * browser's to *not* draw. iOS opens its wheel when it judges the field was
+ * really touched, and a field this app has covered with a box of its own
+ * never is; `showPicker()` is refused or ignored, and the button reads as
+ * broken. Every workaround for that is a guess about what a browser will
+ * decide next.
+ *
+ * So the app draws the month itself. One grid, the same on every browser,
+ * with nothing native left to negotiate with.
+ */
+const DATE_POP_WEEK = ['Mo', 'Tu', 'We', 'Th', 'Fr', 'Sa', 'Su'];
+
+let datePop = null;
+
+function closeDatePop() {
+    if (!datePop) return;
+    if (datePop.btn) datePop.btn.classList.remove('is-open');
+    datePop.el.remove();
+    datePop = null;
+}
+
+/** The same button closes what it opened, because that is what it looks like. */
+function openDatePop(iso, wrap) {
+    const same = datePop && datePop.iso === iso;
+    closeDatePop();
+    if (same) return;
+
+    const el = document.createElement('div');
+    el.className = 'date-pop';
+    // Opens on the month it is holding, or on this one when it holds nothing.
+    const btn = wrap.querySelector('.date-pick');
+    if (btn) btn.classList.add('is-open');
+
+    datePop = { el, iso, btn, cursor: monthOf(iso.value) || monthOf(todayIso()) };
+    wrap.appendChild(el);
+    paintDatePop();
+}
+
+function paintDatePop() {
+    if (!datePop) return;
+
+    const [year, month] = datePop.cursor.split('-').map(Number);
+    if (!year || !month) return;
+
+    // Monday first, because a week here starts on a Monday. getDay() calls
+    // Sunday 0, so it is rotated rather than used as it comes.
+    const lead = (new Date(year, month - 1, 1).getDay() + 6) % 7;
+    const days = new Date(year, month, 0).getDate();
+    const picked = datePop.iso.value;
+    const now = todayIso();
+
+    let cells = '';
+    for (let blank = 0; blank < lead; blank++) cells += '<span></span>';
+    for (let day = 1; day <= days; day++) {
+        const iso = datePop.cursor + '-' + pad2(day);
+        cells += '<button type="button"' +
+            (iso === picked ? ' class="is-on"' : iso === now ? ' class="is-now"' : '') +
+            ' data-pick-day="' + iso + '">' + day + '</button>';
+    }
+
+    datePop.el.innerHTML =
+        '<div class="dp-head">' +
+            '<button type="button" class="dp-step" data-pick-step="-1" aria-label="Previous month">' +
+            '<i class="bi bi-chevron-left"></i></button>' +
+            '<b>' + escapeHtml(monthKeyLabel(datePop.cursor)) + '</b>' +
+            '<button type="button" class="dp-step" data-pick-step="1" aria-label="Next month">' +
+            '<i class="bi bi-chevron-right"></i></button>' +
+        '</div>' +
+        '<div class="dp-week">' + DATE_POP_WEEK.map((w) => '<span>' + w + '</span>').join('') + '</div>' +
+        '<div class="dp-grid">' + cells + '</div>' +
+        '<div class="dp-foot">' +
+            '<button type="button" class="dp-act" data-pick-day="' + now + '">Today</button>' +
+            '<button type="button" class="dp-act" data-pick-clear="1">Clear</button>' +
+        '</div>';
+}
+
+/**
+ * A day picked off the grid has to sound exactly like one typed into the box.
+ * The app listens to the date input, and a figure that repaints from a date
+ * it was never told about is a total that quietly disagrees with the date
+ * printed above it.
+ */
+function pickDate(value) {
+    if (!datePop) return;
+    const iso = datePop.iso;
+
+    if (iso.value !== value) {
+        iso.value = value;
+        iso.dispatchEvent(new Event('input',  { bubbles: true }));
+        iso.dispatchEvent(new Event('change', { bubbles: true }));
+    }
+    closeDatePop();
+}
+
+function wireDatePop() {
+    document.addEventListener('click', (event) => {
+        if (!event.target.closest('.date-pop')) {
+            // The calendar button has its own listener and would reopen what
+            // this closes, so it is the one click left alone.
+            if (!event.target.closest('.date-pick')) closeDatePop();
+            return;
+        }
+        if (!datePop) return;
+
+        const step = event.target.closest('[data-pick-step]');
+        if (step) {
+            datePop.cursor = shiftMonthKey(datePop.cursor, Number(step.dataset.pickStep));
+            paintDatePop();
+            return;
         }
 
-        // No `showPicker`, or not allowed from here. Focusing the date input
-        // is what opens the picker on a phone, and it is the last thing left
-        // to try anywhere else — the text box only ever offers a number pad.
-        try { iso.focus({ preventScroll: true }); } catch (err) { iso.focus(); }
-        if (document.activeElement !== iso) text.focus();
+        const day = event.target.closest('[data-pick-day]');
+        if (day) { pickDate(day.dataset.pickDay); return; }
+
+        if (event.target.closest('[data-pick-clear]')) pickDate('');
+    });
+
+    document.addEventListener('keydown', (event) => {
+        if (event.key === 'Escape') closeDatePop();
     });
 }
 
@@ -12808,8 +12927,10 @@ document.addEventListener('DOMContentLoaded', () => {
 function startApp() {
 
     // Before any of it: every date box on the page says dd-mm-yyyy, whatever
-    // the browser's own locale would have written.
+    // the browser's own locale would have written, and opens this app's own
+    // calendar rather than whichever one the browser felt like drawing.
     enhanceDateInputs();
+    wireDatePop();
 
     // --- bill split: the saved bills first, then a blank form over them ---
     loadSplit();

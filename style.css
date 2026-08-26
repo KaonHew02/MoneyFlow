@@ -3824,6 +3824,109 @@ tr.is-locked { animation: nudge .3s ease; }
 
 .date-pick:hover { background: var(--paper-2); color: var(--ink); }
 .date-pick i { font-size: 14px; }
+.date-pick.is-open { background: var(--jade-soft); color: var(--jade-ink); }
+
+/* --------------------------------------------------------------------
+   The month behind the button
+
+   Drawn by the app rather than by the browser, so it is the same grid on
+   a desktop, an Android and an iPhone — and so there is no native picker
+   left to refuse to open. Sits inside `.date-field`, which is already
+   positioned, so it hangs off the box it belongs to. */
+.date-pop {
+    position: absolute;
+    top: calc(100% + 6px);
+    left: 0;
+    z-index: 60;
+    width: 268px;
+    padding: 12px;
+    border: 1px solid var(--line);
+    border-radius: 14px;
+    background: var(--paper);
+    box-shadow: var(--shadow);
+}
+
+/* In the last column of a grid it would hang off the card, so it opens
+   leftward instead. */
+.field:last-child .date-pop,
+.field-pair > *:last-child .date-pop { left: auto; right: 0; }
+
+.dp-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+    margin-bottom: 8px;
+}
+
+.dp-head b { font-size: 13.5px; font-weight: 700; color: var(--ink); }
+
+.dp-step {
+    width: 28px;
+    height: 28px;
+    padding: 0;
+    border: 0;
+    border-radius: 8px;
+    background: transparent;
+    font: inherit;
+    color: var(--ink-2);
+    cursor: pointer;
+}
+
+.dp-step:hover { background: var(--jade-soft); color: var(--jade-ink); }
+
+.dp-week,
+.dp-grid { display: grid; grid-template-columns: repeat(7, 1fr); gap: 2px; }
+
+.dp-week span {
+    padding: 4px 0;
+    font-size: 10.5px;
+    font-weight: 700;
+    letter-spacing: .04em;
+    text-align: center;
+    text-transform: uppercase;
+    color: var(--ink-3);
+}
+
+.dp-grid button {
+    height: 32px;
+    padding: 0;
+    border: 0;
+    border-radius: 9px;
+    background: transparent;
+    font: inherit;
+    font-size: 12.5px;
+    font-variant-numeric: tabular-nums;
+    color: var(--ink);
+    cursor: pointer;
+}
+
+.dp-grid button:hover { background: var(--jade-soft); }
+.dp-grid button.is-now { color: var(--jade-ink); font-weight: 750; }
+.dp-grid button.is-on { background: var(--jade); color: var(--on-jade); font-weight: 700; }
+
+.dp-foot {
+    display: flex;
+    gap: 6px;
+    margin-top: 10px;
+    padding-top: 10px;
+    border-top: 1px solid var(--row-line);
+}
+
+.dp-act {
+    flex: 1;
+    padding: 7px 0;
+    border: 1px solid var(--line);
+    border-radius: 9px;
+    background: transparent;
+    font: inherit;
+    font-size: 12px;
+    font-weight: 650;
+    color: var(--ink-2);
+    cursor: pointer;
+}
+
+.dp-act:hover { border-color: var(--jade); color: var(--jade-ink); }
 
 /* ==========================================================================
    On a phone
@@ -3861,6 +3964,13 @@ tr.is-locked { animation: nudge .3s ease; }
     .split-x { width: 36px; height: 36px; font-size: 13px; }
     .cat-sub .split-x { width: 32px; height: 32px; }
     .date-pick { width: 38px; height: 38px; right: 4px; }
+
+    /* A day cell a thumb can actually land on, and a grid that still fits
+       inside a 375px screen with the card's padding either side of it. */
+    .date-pop { width: min(300px, calc(100vw - 72px)); padding: 13px; }
+    .dp-grid button { height: 38px; font-size: 13.5px; }
+    .dp-step { width: 34px; height: 34px; }
+    .dp-act { padding: 10px 0; font-size: 13px; }
 
     .date-field input.date-text,
     .goal-field input.date-text,
