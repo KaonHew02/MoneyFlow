@@ -2220,6 +2220,15 @@ function splitCopyBill(id) {
     splitState.draft = copy;
     paintSplitForm();
     renderSplit();
+
+    // A copy lands in the form, which on a phone is a screen and a half above
+    // the button that made it. Doing that silently is indistinguishable from
+    // doing nothing — so it says what it did, and takes the reader there.
+    splitHint('A copy of ' + (bill.title.trim() || 'that bill') +
+        ', ready to change. It is not saved until you press Save bill.');
+
+    const form = $('split-form');
+    if (form) reveal(form).scrollIntoView({ behavior: 'smooth', block: 'start' });
 }
 
 function splitDropBill(id) {
@@ -2238,6 +2247,13 @@ function splitDropBill(id) {
         }
         renderSplit();
 
+        // The reason has to be legible from where the reader ends up, which is
+        // the entry itself. Printing it at the foot of the form and scrolling
+        // somewhere else was the half of this that never worked: the page
+        // jumped, the bill stayed, and nothing on screen said why.
+        splitBlocked('This bill has ' + money(parseFloat(
+            (ledgerState.entries.find((e) => e.id === bill.entryId) || {}).amount) || 0) +
+            ' recorded in Expenses. Press Remove here first, then it will delete.');
         splitHint('That bill has an expense in Expenses. Press Remove under Settle up first, then delete it.');
 
         const btn = document.querySelector('#splitBills [data-drop-bill="' + bill.id + '"]');
@@ -2256,6 +2272,22 @@ function splitDropBill(id) {
     if (splitState.editing === id) splitNewBill();
     saveSplit();
     renderSplit();
+}
+
+/**
+ * Why something would not go, said next to the thing that is stopping it.
+ *
+ * `splitHint` speaks from the form's foot, which is the right place for
+ * anything the form did. A refusal that sends the reader half a page away
+ * needs to speak from where they land instead, or the journey is all they get.
+ */
+function splitBlocked(message) {
+    const note = $('splitDropNote');
+    if (!note) return;
+    note.textContent = message;
+    note.hidden = false;
+    clearTimeout(splitBlocked.timer);
+    splitBlocked.timer = setTimeout(() => { note.hidden = true; }, 9000);
 }
 
 function splitNewBill() {
@@ -2566,6 +2598,7 @@ function splitRemoveShare() {
     commitBill();
     saveSplit();
 
+    if ($('splitDropNote')) $('splitDropNote').hidden = true;
     splitHint('Entry removed from Expenses.');
     renderSplit();
     renderLedger();

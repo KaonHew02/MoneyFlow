@@ -1305,6 +1305,20 @@ input[type="date"]:hover::-webkit-calendar-picker-indicator { opacity: .85; }
     border-top: 0;
 }
 
+/* A refusal, said next to the thing doing the refusing. Warm rather than red:
+   nothing has gone wrong, something is being kept safe. */
+.hint.is-block {
+    margin-top: 10px;
+    padding: 9px 12px;
+    border: 1px solid var(--amber);
+    border-radius: var(--radius-sm);
+    background: var(--amber-soft);
+    font-weight: 600;
+    color: var(--ink);
+}
+
+.hint.is-block[hidden] { display: none; }
+
 .settle-row.is-done { background: transparent; border-style: dashed; }
 .settle-row.is-done .settle-who,
 .settle-row.is-done > b { color: var(--ink-3); }
