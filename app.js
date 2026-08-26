@@ -1852,42 +1852,67 @@ function renderSplit() {
     if ($('splitDirtyNote')) $('splitDirtyNote').hidden = !!splitState.editing;
 }
 
-/** Plain-text recap, sized to paste straight into the group chat. */
+/**
+ * Plain-text recap, sized to paste straight into the group chat.
+ *
+ * Which is the whole brief, and it decides what is not in here. A bill several
+ * people paid has a lot to say for itself — what each till came to, whose
+ * share of it was whose, what cancelled against what — and every line of that
+ * is on screen, where somebody querying their own figure can look at it while
+ * they query it. Pasted into a chat it is a wall of arithmetic in front of the
+ * one thing anybody scrolls to: what do I send, and who to.
+ *
+ * So the message is the answer. One handover per line, and the working stays
+ * where the working belongs.
+ */
 function splitSummaryText() {
     const bill = splitCompute();
     const b = bill.bill;
 
     const many = bill.payers > 1;
 
-    const putDown = b.people
-        .map((person, index) => ({ person, index, sen: bill.paidSen[index] }))
-        .filter((row) => row.sen > 0);
-
-    // One payer fits in the title: "Dinner — RM240, paid by You". Three do
-    // not — run into the same sentence they turn the one line a reader skims
-    // into three facts at once, so who paid gets a line of its own.
     const lines = [(b.title.trim() || 'Bill split') + ' — ' + money(fromSen(bill.grandSen)) +
         (many ? '' : ', paid by ' + personName(b.people[bill.payer], bill.payer))];
 
+    // What the place added and took off. Worth a line when it says more than
+    // "this is what the food cost", because that is the figure people query.
+    const parts = ['ordered ' + money(fromSen(bill.foodSen))];
+    if (bill.discountSen) parts.push('less ' + money(fromSen(bill.discountSen)) + ' discount');
+    if (bill.serviceSen)  parts.push('service ' + pct(bill.serviceRate, 0) + ' ' + money(fromSen(bill.serviceSen)));
+    if (bill.taxSen)      parts.push('SST ' + pct(bill.taxRate, 0) + ' ' + money(fromSen(bill.taxSen)));
+    if (bill.deliverySen) parts.push('delivery ' + money(fromSen(bill.deliverySen)));
+    if (bill.platformSen) parts.push('platform fee ' + money(fromSen(bill.platformSen)));
+    if (bill.voucherSen)  parts.push('less ' + money(fromSen(bill.voucherSen)) + ' voucher');
+
+    // --- several people paid: the handovers, and nothing else --------------
     if (many) {
-        lines.push('Paid: ' + putDown
-            .map((row) => personName(row.person, row.index) + ' ' + money(fromSen(row.sen)))
-            .join(' · '));
+        if (parts.length > 1) lines.push('(' + parts.join(', ') + ')');
+        lines.push('');
+
+        if (!bill.transfers.length) {
+            lines.push('Nobody owes anybody anything.');
+            return lines.join('\n');
+        }
+
+        bill.transfers.forEach((move) => {
+            lines.push(personName(move.fromPerson, move.from) + ' → ' +
+                personName(move.toPerson, move.to) + ' ' + money(fromSen(move.amount)) +
+                (move.settled ? ' (settled)' : ''));
+        });
+
+        return lines.join('\n');
     }
 
-    // One payer: a line per person is the whole answer, because everybody in
-    // it owes the same person. Several payers: every one of these figures is
-    // said again in the blocks below, against what that person put in and who
-    // they hand it to — so printing them here as well is the same list twice.
-    if (!many) {
-        b.people.forEach((person, index) => {
-            const owes = bill.transfers.filter((move) => move.from === index);
-            lines.push(personName(person, index) + ': ' + money(fromSen(bill.paysSen[index])) +
-                (!owes.length ? (bill.paidSen[index] > 0 ? ' (paid)' : '')
-                    : owes.every((move) => move.settled) ? ' — settled'
-                    : ''));
-        });
-    }
+    // --- one payer: a line per person is already the list ------------------
+    // Everybody in it owes the same person, so naming them both on every line
+    // would be the payer's name written out once per head.
+    b.people.forEach((person, index) => {
+        const owes = bill.transfers.filter((move) => move.from === index);
+        lines.push(personName(person, index) + ': ' + money(fromSen(bill.paysSen[index])) +
+            (!owes.length ? (bill.paidSen[index] > 0 ? ' (paid)' : '')
+                : owes.every((move) => move.settled) ? ' — settled'
+                : ''));
+    });
 
     // A dish split by portions is the one thing a reader cannot reconstruct
     // from the per-person totals, so the summary spells it out.
@@ -1902,13 +1927,6 @@ function splitSummaryText() {
                 .join(', '));
     });
 
-    const parts = ['ordered ' + money(fromSen(bill.foodSen))];
-    if (bill.discountSen) parts.push('less ' + money(fromSen(bill.discountSen)) + ' discount');
-    if (bill.serviceSen)  parts.push('service ' + pct(bill.serviceRate, 0) + ' ' + money(fromSen(bill.serviceSen)));
-    if (bill.taxSen)      parts.push('SST ' + pct(bill.taxRate, 0) + ' ' + money(fromSen(bill.taxSen)));
-    if (bill.deliverySen) parts.push('delivery ' + money(fromSen(bill.deliverySen)));
-    if (bill.platformSen) parts.push('platform fee ' + money(fromSen(bill.platformSen)));
-    if (bill.voucherSen)  parts.push('less ' + money(fromSen(bill.voucherSen)) + ' voucher');
     lines.push('(' + parts.join(', ') + ')');
 
     // Whose the fees were is not something the shares above can be read back
@@ -1917,133 +1935,6 @@ function splitSummaryText() {
         lines.push('Fees ' + money(fromSen(bill.feesSen)) + (b.feeSplit === 'order'
             ? ' divided by what each ordered.'
             : ' divided evenly between ' + b.people.length + '.'));
-    }
-
-    // Who hands what to whom. With one payer that is every line above said
-    // backwards, so it is only worth printing once more than one person paid.
-    //
-    // A block per person rather than a list of arrows. The flat list was four
-    // lines that each named two people, and reading your own out of it meant
-    // scanning both ends of every one; here a reader finds their own name once
-    // and everything under it is theirs. It also puts the share and what they
-    // put in right above the figure those two produce, which is the question
-    // anybody actually asks of a bill somebody else added up.
-    if (many && bill.transfers.length) {
-        lines.push('');
-        lines.push('Who pays who');
-
-        // Per till, the unit is the till: one block per thing somebody bought,
-        // with everyone who was on it under it. That is the shape a reader
-        // asked for it in, and it is the one they can check without trusting
-        // any arithmetic but a division they watched happen.
-        if (bill.perTill) {
-            const tills = [];
-            bill.lines.forEach((line, at) => {
-                if (bill.lineSen[at] <= 0) return;
-                const owner = bill.ownerOf[at];
-                const found = tills.find((one) => one.owner === owner);
-                if (found) found.on.push({ line, at });
-                else tills.push({ owner, on: [{ line, at }] });
-            });
-            tills.sort((a, b) => a.owner - b.owner);
-
-            tills.forEach((till) => {
-                const who = personName(b.people[till.owner], till.owner);
-                const sum = (index) => till.on.reduce((total, one) => total + bill.pieces[index][one.at], 0);
-                const takes = b.people.reduce((total, person, index) =>
-                    total + (index === till.owner ? 0 : sum(index)), 0);
-
-                lines.push('');
-                lines.push(who + ' paid ' + till.on
-                    .map((one) => one.line.label + ' ' + money(fromSen(bill.lineSen[one.at])))
-                    .join(' + ') + ' — ' + money(fromSen(takes)) + ' of it is other people\'s');
-
-                b.people.forEach((person, index) => {
-                    if (index === till.owner) return;
-                    const sen = sum(index);
-                    if (sen > 0) lines.push('   ' + personName(person, index) + ' ' + money(fromSen(sen)));
-                });
-
-                const own = sum(till.owner);
-                if (own > 0) lines.push('   (' + who + "'s own share of it: " + money(fromSen(own)) + ')');
-            });
-
-            // The tills above are the working; this is the answer. Reading
-            // down a till tells somebody what they owe *that* person, and
-            // finding what the evening costs them means adding their own name
-            // up across three blocks. So it is added up for them, once, under
-            // their own name — with the pieces still shown, because being
-            // able to check every figure is the whole point of settling this
-            // way rather than netting it.
-            lines.push('');
-            lines.push('So, in the end');
-            lines.push('');
-
-            b.people.forEach((person, index) => {
-                const out = bill.transfers.filter((move) => move.from === index);
-                const takes = bill.transfers.filter((move) => move.to === index)
-                    .reduce((sum, move) => sum + move.amount, 0);
-                const also = takes > 0 ? ', and collects ' + money(fromSen(takes)) : '';
-
-                if (!out.length) {
-                    lines.push(personName(person, index) + ' hands over nothing' + also);
-                    return;
-                }
-
-                const total = out.reduce((sum, move) => sum + move.amount, 0);
-                lines.push(personName(person, index) + ' pays ' +
-                    out.map((move) => {
-                        // Where the two of them owed each other, the figure is
-                        // a subtraction, and a subtraction nobody can see is a
-                        // figure they have to take on faith.
-                        const back = (move.parts || []).filter((part) => part.back)
-                            .reduce((sum, part) => sum + part.amount, 0);
-                        const owed = (move.parts || []).filter((part) => !part.back)
-                            .reduce((sum, part) => sum + part.amount, 0);
-
-                        return personName(move.toPerson, move.to) + ' ' + money(fromSen(move.amount)) +
-                            (back > 0 ? ' (' + money(fromSen(owed)) + ' − ' + money(fromSen(back)) + ')' : '') +
-                            (move.settled ? ' (settled)' : '');
-                    }).join(' + ') +
-                    (out.length > 1 ? ' = ' + money(fromSen(total)) : '') + also);
-            });
-
-            lines.push('');
-            lines.push(bill.transfers.length + ' handovers, ' +
-                money(fromSen(bill.transfers.reduce((sum, move) => sum + move.amount, 0))) +
-                ' changing hands — everyone pays back whoever paid for what they had.');
-            return lines.join('\n');
-        }
-
-
-        b.people.forEach((person, index) => {
-            const pays     = bill.transfers.filter((move) => move.from === index);
-            const collects = bill.transfers.filter((move) => move.to === index);
-
-            lines.push('');
-            lines.push(personName(person, index) + ' — share ' + money(fromSen(bill.paysSen[index])) +
-                ', put in ' + (bill.paidSen[index] > 0 ? money(fromSen(bill.paidSen[index])) : 'nothing'));
-
-            if (collects.length) {
-                lines.push('   collects ' + money(fromSen(
-                    collects.reduce((sum, move) => sum + move.amount, 0))));
-                collects.forEach((move) => lines.push('   from ' +
-                    personName(move.fromPerson, move.from) + ' ' + money(fromSen(move.amount)) +
-                    (move.settled ? ' (settled)' : '')));
-            }
-
-            pays.forEach((move) => lines.push('   pays ' + personName(move.toPerson, move.to) +
-                ' ' + money(fromSen(move.amount)) + (move.settled ? ' (settled)' : '')));
-
-            // Somebody who put down exactly their own share is in nobody's
-            // list, and saying nothing about them reads as an omission.
-            if (!pays.length && !collects.length) lines.push('   square');
-        });
-
-        lines.push('');
-        lines.push(bill.transfers.length + (bill.transfers.length === 1 ? ' handover' : ' handovers') +
-            ' in all — the fewest that leaves everybody square, so some of it goes to somebody ' +
-            'other than whoever paid for that dish.');
     }
 
     return lines.join('\n');

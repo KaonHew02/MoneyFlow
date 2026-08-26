@@ -294,23 +294,43 @@ and a tick cannot land on a handover nobody made.
 With one payer this is the list it always was — they are the only person owed,
 so everybody else pays them.
 
-Read back **a block per person**, not a list of arrows. A flat list names two
-people on every line, so finding your own means scanning both ends of all of
-them — and somebody paying two people reads as two unrelated debts rather than
-one debt split to clear two creditors. Under a person's own name sits their
-share, what they put in, and the figure those two produce:
+On screen the handovers are read back **grouped**, because a flat list names
+two people on every line and finding your own means scanning both ends of all
+of them. Netted, the group is the person handing money over — somebody paying
+two people is one debt split to clear two creditors, not two debts. Per till
+it is the person being paid, because the till is the thing being paid back and
+everyone on it belongs together. Each group's heading carries the figures a
+reader would otherwise have to add up:
 
-    JK — share RM 43.45, put in nothing
-       pays Kaon   RM 17.79
-       pays Agatha RM 25.66
+    JK — share RM 43.45, put in nothing, so RM 43.45 to hand over
+       JK owes you       RM 17.79
+       JK owes Agatha    RM 25.66
 
-    Agatha — share RM 43.44, put in RM 112.55
-       collects RM 69.11
-       from Lavelle RM 43.45
-       from JK      RM 25.66
+and the card closes on what each person hands over against what each collects,
+which is the sum the whole thing has to be checked against.
 
-The collected figure is printed because it is the one a person being paid back
-wants, and the one the netting has to be checked against.
+### The copied summary is the answer, not the working
+
+All of that stays on screen. **Copy summary** is sized for a group chat, and a
+group chat scrolls past everything to reach one thing: what do I send, and who
+to. So the message is one handover per line and nothing else — plus the
+charges, when the place added enough that the total needs explaining.
+
+    Hotpot — RM 189.10
+
+    Lavelle → Kaon RM 13.75
+    Lavelle → Pan RM 1.56
+    Lavelle → Agatha RM 28.14
+    Pan → Kaon RM 12.19
+    ...
+
+Somebody querying their own figure has the person who copied it sitting in
+front of the screen that explains it. Pasting the explanation as well only
+buries the line they were looking for.
+
+A bill one person paid keeps its line per head, because everybody in it owes
+the same person — naming both ends of every line would be the payer's name
+written out once per guest.
 
 A handover is ticked on its own, and each tick is keyed by **the two people in
 it**. It used to be keyed by the debtor alone, which named the handover only
