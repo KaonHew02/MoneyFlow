@@ -1823,8 +1823,14 @@ function paintBills() {
         tr.appendChild(cell(
             '<button type="button" class="split-x" data-open-bill="' + bill.id + '" aria-label="Open bill">' +
             '<i class="bi bi-pencil"></i></button>' +
-            '<button type="button" class="split-x" data-copy-bill="' + bill.id + '" aria-label="Duplicate bill">' +
-            '<i class="bi bi-files"></i></button>' +
+            // A clipboard, and it copies to the clipboard. It used to be two
+            // sheets of paper that duplicated the bill, which is what anybody
+            // would guess that icon means everywhere else on a phone — and
+            // guessing wrong got you a second bill you did not ask for.
+            // Duplicating is still there; it moved into the open bill, under
+            // a word rather than a picture.
+            '<button type="button" class="split-x" data-share-bill="' + bill.id + '" aria-label="Copy summary">' +
+            '<i class="bi bi-clipboard"></i></button>' +
             '<button type="button" class="split-x" data-drop-bill="' + bill.id + '" aria-label="Delete bill">' +
             '<i class="bi bi-x-lg"></i></button>', 'row-actions'));
 
@@ -1849,6 +1855,8 @@ function renderSplit() {
             : '<i class="bi bi-check-lg"></i> Save bill';
     }
     if ($('splitCancel')) $('splitCancel').hidden = !splitState.editing;
+    // Only a saved bill can be duplicated; a draft is already the copy.
+    if ($('splitDuplicate')) $('splitDuplicate').hidden = !splitState.editing;
     if ($('splitDirtyNote')) $('splitDirtyNote').hidden = !!splitState.editing;
 }
 
@@ -1865,8 +1873,10 @@ function renderSplit() {
  * So the message is the answer. One handover per line, and the working stays
  * where the working belongs.
  */
-function splitSummaryText() {
-    const bill = splitCompute();
+const splitSummaryText = () => splitSummaryFor();
+
+function splitSummaryFor(source) {
+    const bill = splitCompute(source);
     const b = bill.bill;
 
     const many = bill.payers > 1;
@@ -2184,6 +2194,19 @@ function splitOpenBill(id) {
     renderSplit();
     const form = $('split-form');
     if (form) reveal(form).scrollIntoView({ behavior: 'smooth', block: 'start' });
+}
+
+/**
+ * That bill's summary, straight onto the clipboard.
+ *
+ * From the list rather than from the form, so a bill somebody asks about a
+ * week later can be pasted back into the chat without opening it and without
+ * losing whatever is half-typed in the form.
+ */
+function splitShareBill(btn, id) {
+    const bill = splitState.bills.find((b) => b.id === id);
+    if (!bill) return;
+    copySummary(btn, splitSummaryFor(bill), '');
 }
 
 /** A copy of last month's dinner, with the debts wiped: same table, new night. */
@@ -13279,16 +13302,24 @@ function startApp() {
     const bills = $('splitBills');
     if (bills) {
         bills.addEventListener('click', (event) => {
-            const btn = event.target.closest('button[data-open-bill], button[data-copy-bill], button[data-drop-bill]');
+            const btn = event.target.closest(
+                'button[data-open-bill], button[data-share-bill], button[data-drop-bill]');
             if (!btn) return;
             if (btn.dataset.openBill) splitOpenBill(btn.dataset.openBill);
-            else if (btn.dataset.copyBill) splitCopyBill(btn.dataset.copyBill);
+            else if (btn.dataset.shareBill) splitShareBill(btn, btn.dataset.shareBill);
             else splitDropBill(btn.dataset.dropBill);
         });
     }
 
     const addCat = $('budgetAddCat');
     if (addCat) addCat.addEventListener('click', addBudgetCategory);
+
+    const duplicate = $('splitDuplicate');
+    if (duplicate) {
+        duplicate.addEventListener('click', () => {
+            if (splitState.editing) splitCopyBill(splitState.editing);
+        });
+    }
 
     const splitCopy = $('splitCopy');
     if (splitCopy) splitCopy.addEventListener('click', () => copySummary(splitCopy, splitSummaryText(), 'Copy summary'));
