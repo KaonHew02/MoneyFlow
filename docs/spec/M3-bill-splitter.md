@@ -49,7 +49,62 @@ A cash bill can be rounded to the nearest 5 sen.
 
 Charges do not change who owes what *proportionally*; they scale every share
 by the same factor. They are still part of the bill, so they are part of what
-each person pays.
+each person pays. The flat fees a delivery adds are the exception, and they
+have a section of their own below.
+
+## Delivered rather than sat down
+
+A foodpanda receipt has two lines that are not food and one that is not a
+restaurant discount:
+
+    Subtotal              60.00
+    Delivery fee           4.99
+    Platform fee           1.00
+    Voucher              -10.00
+    Total                 55.99
+
+**This was a delivery** opens all three. They cannot be said with the
+percentages above them, because none of them is a percentage of anything — a
+delivery fee is a flat charge for the ride, and the platform fee is a flat
+charge for the app.
+
+### How the fees divide
+
+**Evenly, by default.** A flat fee is not bigger because somebody ordered
+more; the person who added a drink did not use less of the delivery. The
+alternative — dividing them by what each ordered — is the second button, for a
+table that would rather they rode on the shares.
+
+    Food     You 40 · JK 15 · Amy 5      fees RM5.99
+
+    evenly            2.00 · 2.00 · 1.99
+    by what ordered   3.99 · 1.50 · 0.50
+
+This is the one figure in a person's row that has nothing to do with what they
+had, so the row names it rather than letting it read as a share of something
+they ordered.
+
+### The voucher, and the discount it is not
+
+The bill already has a discount, and the voucher is not it. Where a discount
+sits in the arithmetic is what decides who it moves:
+
+| | Comes off | Because |
+|---|---|---|
+| a dish's discount | that item, before the weights | it belongs to whoever ate it |
+| the bill's discount | the food, before service and SST | a receipt taxes the discounted subtotal |
+| the voucher | the order, after the fees | that is where the app takes it off, and "free delivery" has to be able to reach the delivery fee |
+
+Like the bill discount, the voucher scales every share by the same factor, so
+it moves nobody's position against anybody else. It is capped at the order, so
+no share can go negative — a voucher larger than the bill leaves a bill of
+nothing rather than a table owed money.
+
+It is **ringgit by default**, where the bill discount is a percentage by
+default, because that is what each of them nearly always is.
+
+A bill saved before any of this has none of the fields, which reads as a bill
+nobody delivered — which it was. No migration needed.
 
 ## Shared dishes: who had it, and how much
 

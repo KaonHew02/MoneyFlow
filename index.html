@@ -820,6 +820,67 @@
                             <input type="checkbox" id="splitRound">
                             <span>Round the total to 5 sen (paying cash)</span>
                         </label>
+
+                        <!-- ------------------------------------------------
+                             Ordered in. A delivery receipt has two lines that
+                             are not food — the ride and the app — and a
+                             voucher that comes off once both are on it. All
+                             three are flat ringgit, which is why they cannot
+                             be said with the percentages above.
+                             ------------------------------------------------ -->
+                        <label class="check-line">
+                            <input type="checkbox" id="splitDelivery">
+                            <span>This was a delivery (foodpanda, Grab, ShopeeFood&hellip;)</span>
+                        </label>
+
+                        <div class="split-delivery" id="splitDeliveryCard" hidden>
+                            <div class="field-grid">
+                                <div class="field">
+                                    <label for="splitDeliveryFee">Delivery fee</label>
+                                    <div class="money-input">
+                                        <span class="affix">RM</span>
+                                        <input type="number" id="splitDeliveryFee" min="0" step="0.10" placeholder="0.00" inputmode="decimal">
+                                    </div>
+                                </div>
+
+                                <div class="field">
+                                    <label for="splitPlatformFee">Platform fee</label>
+                                    <div class="money-input">
+                                        <span class="affix">RM</span>
+                                        <input type="number" id="splitPlatformFee" min="0" step="0.10" placeholder="0.00" inputmode="decimal">
+                                    </div>
+                                    <p class="hint">Whatever the app charges on top of the ride &mdash; service fee, platform fee, small-order fee. Add them together.</p>
+                                </div>
+
+                                <div class="field">
+                                    <label for="splitVoucher">Voucher <span class="per">off the order</span></label>
+                                    <div class="field-pair">
+                                        <div class="money-input" id="splitVoucherBox">
+                                            <span class="affix" id="splitVoucherAffix">RM</span>
+                                            <input type="number" id="splitVoucher" min="0" step="0.10" placeholder="0" inputmode="decimal">
+                                        </div>
+                                        <!-- A delivery promo is nearly always a
+                                             flat amount, so ringgit leads here
+                                             where the bill discount leads with a
+                                             percentage. -->
+                                        <div class="seg is-compact" id="splitVoucherUnit" data-value="rm">
+                                            <button type="button" data-val="rm" class="is-on">RM</button>
+                                            <button type="button" data-val="pct">%</button>
+                                        </div>
+                                    </div>
+                                    <p class="hint">Taken off after the fees, the way the app takes it off &mdash; so a free-delivery promo can reach the delivery fee.</p>
+                                </div>
+
+                                <div class="field is-wide">
+                                    <label>How the fees divide</label>
+                                    <div class="seg" id="splitFeeSplit" data-value="even">
+                                        <button type="button" data-val="even" class="is-on">Evenly</button>
+                                        <button type="button" data-val="order">By what each ordered</button>
+                                    </div>
+                                    <p class="hint">A flat fee is not bigger because somebody ordered more &mdash; the person who added a drink did not use less of the delivery. Switch it if your table would rather it rode on the shares.</p>
+                                </div>
+                            </div>
+                        </div>
                     </details>
 
                     <div class="tally">
@@ -842,6 +903,18 @@
                         <div class="tally-cell" id="splitRowTax" hidden>
                             <span id="splitTallyTaxLabel">SST</span>
                             <b id="splitTallyTax">RM 0.00</b>
+                        </div>
+                        <div class="tally-cell" id="splitRowDelivery" hidden>
+                            <span>Delivery fee</span>
+                            <b id="splitTallyDelivery">RM 0.00</b>
+                        </div>
+                        <div class="tally-cell" id="splitRowPlatform" hidden>
+                            <span>Platform fee</span>
+                            <b id="splitTallyPlatform">RM 0.00</b>
+                        </div>
+                        <div class="tally-cell" id="splitRowVoucher" hidden>
+                            <span id="splitTallyVoucherLabel">Voucher</span>
+                            <b id="splitTallyVoucher" class="is-minus">RM 0.00</b>
                         </div>
                         <div class="tally-cell is-total">
                             <span>Bill total</span>

@@ -333,6 +333,16 @@ function newBill() {
         payments: [],
         service: '0', tax: '0', discount: '', discountUnit: 'pct', round: false,
         itemDiscounts: false, offUnit: 'pct',
+        // Ordered in rather than sat down: two flat fees that are not food,
+        // and a voucher that comes off once everything else is on the order.
+        // Off by default, because most bills are not a delivery and four more
+        // fields on every one of them is a lot to carry for the ones that are.
+        delivery: false,
+        deliveryFee: '', platformFee: '',
+        voucher: '', voucherUnit: 'rm',
+        // 'even'  — a flat fee is not bigger because somebody ordered more
+        // 'order' — unless the table would rather it rode on the shares
+        feeSplit: 'even',
         settled: {},
         account: '',
         // 'full' — the whole bill went into Expenses, the way the bank
@@ -404,6 +414,13 @@ function readSplitState() {
     bill.itemDiscounts = !!($('splitItemOff') || {}).checked;
     bill.discountUnit = (($('splitDiscountUnit') || {}).dataset || {}).value === 'rm' ? 'rm' : 'pct';
     bill.offUnit      = (($('splitItemOffUnit')  || {}).dataset || {}).value === 'rm' ? 'rm' : 'pct';
+
+    bill.delivery    = !!($('splitDelivery') || {}).checked;
+    bill.deliveryFee = ($('splitDeliveryFee') || {}).value || '';
+    bill.platformFee = ($('splitPlatformFee') || {}).value || '';
+    bill.voucher     = ($('splitVoucher') || {}).value || '';
+    bill.voucherUnit = (($('splitVoucherUnit') || {}).dataset || {}).value === 'pct' ? 'pct' : 'rm';
+    bill.feeSplit    = (($('splitFeeSplit') || {}).dataset || {}).value === 'order' ? 'order' : 'even';
 
     const paidBy = ($('splitPaidBy') || {}).value;
     if (bill.people.some((p) => p.id === paidBy)) bill.paidBy = paidBy;
@@ -843,10 +860,46 @@ function splitCompute(source) {
     // — RM1.23 on that bill — and every share with it.
     const taxSen      = Math.round(netSen * taxRate / 100);
 
-    let grandSen = netSen + serviceSen + taxSen;
+    // What the food comes to once the place has had its say. This is the part
+    // that divides by what each person actually ordered.
+    const foodPoolSen = netSen + serviceSen + taxSen;
+
+    // --- delivery ---------------------------------------------------------
+    // Two flat fees, neither of them food: one for the ride, one for the app.
+    // Neither gets bigger because somebody ordered more, which is why they
+    // divide evenly by default instead of riding on the shares — the person
+    // who ordered a drink did not use less of the delivery.
+    const deliverySen = bill.delivery ? Math.max(0, toSen(parseFloat(bill.deliveryFee) || 0)) : 0;
+    const platformSen = bill.delivery ? Math.max(0, toSen(parseFloat(bill.platformFee) || 0)) : 0;
+    const feesSen = deliverySen + platformSen;
+
+    // The voucher comes off the order once everything is on it — the food,
+    // the charges and the fees — because that is where the app takes it off,
+    // and because "free delivery" has to be able to reach the delivery fee.
+    // Like the bill discount it scales every share by the same factor, so it
+    // moves nobody's position against anybody else, and it is capped at the
+    // order so no share can go negative.
+    const orderSen = foodPoolSen + feesSen;
+    const voucherTyped = bill.delivery ? Math.max(0, parseFloat(bill.voucher) || 0) : 0;
+    const voucherSen = Math.min(bill.voucherUnit === 'pct'
+        ? Math.round(orderSen * voucherTyped / 100)
+        : toSen(voucherTyped), orderSen);
+
+    let grandSen = orderSen - voucherSen;
     if (bill.round) grandSen = Math.round(grandSen / 5) * 5;
 
-    const paysSen = allocateSen(grandSen, weights);
+    // How the total lands on each person: their food, plus their cut of the
+    // fees, and then the voucher off the lot in proportion.
+    //
+    // With no fees there is nothing to add to the weights, so the division is
+    // literally the one it always was — which is what keeps a saved bill
+    // reading the same to the sen rather than to the ringgit.
+    const feeWeights = bill.feeSplit === 'order' ? weights : bill.people.map(() => 1);
+    const feeParts   = allocateSen(feesSen, feeWeights);
+    const foodParts  = allocateSen(foodPoolSen, weights);
+    const spread = feesSen > 0 ? foodParts.map((sen, index) => sen + feeParts[index]) : weights;
+
+    const paysSen = allocateSen(grandSen, spread);
     const payer   = payerIndex(bill);
 
     // --- who put the money down -------------------------------------------
@@ -890,6 +943,8 @@ function splitCompute(source) {
     return {
         bill, weights, ownSen, sharedSen, sharedSplits, sharedParts, foodSen, discountSen, serviceSen, taxSen, grandSen,
         serviceRate, taxRate, payer,
+        // Delivery: what was added on, what came off, and whose it was.
+        deliverySen, platformSen, feesSen, feeParts, orderSen, voucherSen, voucherTyped,
         // What the menu said, and what came off it dish by dish. Both zero
         // for every method but item-based, which has no dishes to discount.
         listedSen, itemOffSen,
@@ -948,6 +1003,13 @@ function syncSplitForm() {
     const asPct = bill.discountUnit !== 'rm';
     if ($('splitDiscountBox')) $('splitDiscountBox').classList.toggle('is-suffix', asPct);
     set('splitDiscountAffix', asPct ? '%' : 'RM');
+
+    // The fees and the voucher only exist on an order that was delivered.
+    if ($('splitDeliveryCard')) $('splitDeliveryCard').hidden = !bill.delivery;
+
+    const voucherPct = bill.voucherUnit === 'pct';
+    if ($('splitVoucherBox')) $('splitVoucherBox').classList.toggle('is-suffix', voucherPct);
+    set('splitVoucherAffix', voucherPct ? '%' : 'RM');
 }
 
 /**
@@ -1029,11 +1091,21 @@ function paintSplit(bill) {
     set('splitTallyServiceLabel', 'Service charge ' + pct(bill.serviceRate, 0));
     set('splitTallyTaxLabel', 'SST ' + pct(bill.taxRate, 0));
 
+    set('splitTallyDelivery', money(fromSen(bill.deliverySen)));
+    set('splitTallyPlatform', money(fromSen(bill.platformSen)));
+    set('splitTallyVoucher', '− ' + money(fromSen(bill.voucherSen)));
+    set('splitTallyVoucherLabel', b.voucherUnit === 'pct' && bill.voucherTyped
+        ? 'Voucher ' + pct(bill.voucherTyped, bill.voucherTyped % 1 ? 1 : 0)
+        : 'Voucher');
+
     const showRow = (id, show) => { const row = $(id); if (row) row.hidden = !show; };
     showRow('splitRowItemOff', bill.itemOffSen > 0);
     showRow('splitRowDiscount', bill.discountSen > 0);
     showRow('splitRowService', bill.serviceRate > 0);
     showRow('splitRowTax', bill.taxRate > 0);
+    showRow('splitRowDelivery', bill.deliverySen > 0);
+    showRow('splitRowPlatform', bill.platformSen > 0);
+    showRow('splitRowVoucher', bill.voucherSen > 0);
 
     const chargeBits = [
         bill.serviceRate ? 'service ' + pct(bill.serviceRate, 0) : '',
@@ -1043,6 +1115,10 @@ function paintSplit(bill) {
             ' off the bill' : '',
         bill.itemOffSen ? '− ' + money(fromSen(bill.itemOffSen)) + ' off dishes' : '',
         b.itemDiscounts && !bill.itemOffSen ? 'per-dish discounts on' : '',
+        bill.deliverySen ? 'delivery ' + money(fromSen(bill.deliverySen)) : '',
+        bill.platformSen ? 'platform ' + money(fromSen(bill.platformSen)) : '',
+        bill.voucherSen ? '− ' + money(fromSen(bill.voucherSen)) + ' voucher' : '',
+        b.delivery && bill.feesSen > 0 && b.feeSplit === 'order' ? 'fees by what each ordered' : '',
         b.round ? 'rounded' : '',
     ].filter(Boolean);
     set('splitChargeSummary', chargeBits.length ? chargeBits.join(' · ') : 'None');
@@ -1092,7 +1168,14 @@ function paintSplit(bill) {
               (portions === 1 ? ' portion shared' : ' portions shared')
             : (bill.sharedParts || [])[index] > 0 ? ' + a share of the table' : '';
 
-        const detail = (lines ? lines + (lines === 1 ? ' item' : ' items') : 'Nothing ordered') + sharedNote;
+        // A flat fee divided evenly is the one figure in the row that has
+        // nothing to do with what they ordered, so it is named rather than
+        // left to look like a share of something they had.
+        const feeShare = (bill.feeParts || [])[index] || 0;
+
+        const detail = (lines ? lines + (lines === 1 ? ' item' : ' items') : 'Nothing ordered') +
+            sharedNote +
+            (feeShare > 0 ? ' + ' + money(fromSen(feeShare)) + ' of the fees' : '');
 
         // What they put down at the till, which is a different question from
         // what they owe — and with several people paying it is the only place
@@ -1118,11 +1201,17 @@ function paintSplit(bill) {
         body.appendChild(tr);
     });
 
+    // A voucher can take more off than the fees and charges put on, so this
+    // cell can be a minus — and it has to say so the way the rows above it do.
+    const totalCharge = bill.grandSen - bill.foodSen;
+
     const totalRow = document.createElement('tr');
     totalRow.className = 'total-row';
     totalRow.appendChild(cell('Bill total'));
     totalRow.appendChild(cell(fmt(fromSen(bill.foodSen))));
-    totalRow.appendChild(cell(fmt(fromSen(bill.grandSen - bill.foodSen))));
+    totalRow.appendChild(cell(
+        (totalCharge < 0 ? '− ' : totalCharge > 0 ? '+ ' : '') + fmt(Math.abs(fromSen(totalCharge))),
+        totalCharge < 0 ? 'is-minus' : ''));
     totalRow.appendChild(cell(fmt(fromSen(bill.grandSen))));
     body.appendChild(totalRow);
 }
@@ -1430,7 +1519,18 @@ function splitSummaryText() {
     if (bill.discountSen) parts.push('less ' + money(fromSen(bill.discountSen)) + ' discount');
     if (bill.serviceSen)  parts.push('service ' + pct(bill.serviceRate, 0) + ' ' + money(fromSen(bill.serviceSen)));
     if (bill.taxSen)      parts.push('SST ' + pct(bill.taxRate, 0) + ' ' + money(fromSen(bill.taxSen)));
+    if (bill.deliverySen) parts.push('delivery ' + money(fromSen(bill.deliverySen)));
+    if (bill.platformSen) parts.push('platform fee ' + money(fromSen(bill.platformSen)));
+    if (bill.voucherSen)  parts.push('less ' + money(fromSen(bill.voucherSen)) + ' voucher');
     lines.push('(' + parts.join(', ') + ')');
+
+    // Whose the fees were is not something the shares above can be read back
+    // to, so a delivery says how they were divided.
+    if (bill.feesSen > 0) {
+        lines.push('Fees ' + money(fromSen(bill.feesSen)) + (b.feeSplit === 'order'
+            ? ' divided by what each ordered.'
+            : ' divided evenly between ' + b.people.length + '.'));
+    }
 
     // Who hands what to whom. With one payer that is every line above said
     // backwards, so it is only worth printing once more than one person paid.
@@ -1824,9 +1924,17 @@ function paintSplitForm() {
     if ($('splitDiscountUnit')) setSegment($('splitDiscountUnit'), bill.discountUnit);
     if ($('splitItemOffUnit'))  setSegment($('splitItemOffUnit'), bill.offUnit);
 
+    if ($('splitDelivery'))    $('splitDelivery').checked = !!bill.delivery;
+    if ($('splitDeliveryFee')) $('splitDeliveryFee').value = bill.deliveryFee;
+    if ($('splitPlatformFee')) $('splitPlatformFee').value = bill.platformFee;
+    if ($('splitVoucher'))     $('splitVoucher').value = bill.voucher;
+    if ($('splitVoucherUnit')) setSegment($('splitVoucherUnit'), bill.voucherUnit);
+    if ($('splitFeeSplit'))    setSegment($('splitFeeSplit'), bill.feeSplit);
+
     const fold = $('splitChargeFold');
     if (fold) fold.open = (parseFloat(bill.service) || 0) > 0 || (parseFloat(bill.tax) || 0) > 0
-        || (parseFloat(bill.discount) || 0) > 0 || !!bill.round || !!bill.itemDiscounts;
+        || (parseFloat(bill.discount) || 0) > 0 || !!bill.round || !!bill.itemDiscounts
+        || !!bill.delivery;
 
     buildSplitPeople();
     buildSplitShared();
@@ -2232,6 +2340,17 @@ function loadSplit() {
                 discountUnit: b.discountUnit === 'pct' ? 'pct' : 'rm',
                 itemDiscounts: !!b.itemDiscounts,
                 offUnit: b.offUnit === 'rm' ? 'rm' : 'pct',
+                // A bill saved before the module knew about delivery has none
+                // of these, which reads as a bill nobody delivered — which it
+                // was. Nothing to migrate.
+                delivery: !!b.delivery,
+                deliveryFee: String(b.deliveryFee || ''),
+                platformFee: String(b.platformFee || ''),
+                voucher: String(b.voucher || ''),
+                // Unlike the bill discount, this one has never been anything
+                // but ringgit, so an absent unit is the ringgit it always was.
+                voucherUnit: b.voucherUnit === 'pct' ? 'pct' : 'rm',
+                feeSplit: b.feeSplit === 'order' ? 'order' : 'even',
                 settled,
                 entryId: String(b.entryId || ''),
                 account: String(b.account || ''),
@@ -12252,7 +12371,7 @@ function startApp() {
             setSegment(seg, btn.dataset.val);
             if (seg.id === 'splitCharges') { applyChargePreset(btn.dataset.val); renderSplit(); }
             if (seg.id === 'splitFilter') { splitState.filter = btn.dataset.val; saveSplit(); paintBills(); }
-            if (seg.id === 'splitDiscountUnit') onSplitFormEdit();
+            if (['splitDiscountUnit', 'splitVoucherUnit', 'splitFeeSplit'].includes(seg.id)) onSplitFormEdit();
             // The unit lives in each dish row's affix, so the rows are rebuilt.
             if (seg.id === 'splitItemOffUnit') {
                 readSplitState();

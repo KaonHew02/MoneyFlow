@@ -892,6 +892,19 @@ input[type="date"]:hover::-webkit-calendar-picker-indicator { opacity: .85; }
 .money-input-sm.is-off input { color: var(--red); }
 .money-input-sm.is-off:focus-within { border-color: var(--red); }
 
+/* The delivery block sits inside the charges fold and only appears once the
+   bill says it was one — boxed off, because its four fields answer a
+   different question from the percentages above them. */
+.split-delivery {
+    margin-top: 12px;
+    padding: 14px 15px;
+    border: 1px solid var(--line-2);
+    border-radius: 14px;
+    background: var(--paper-2);
+}
+
+.split-delivery .field-grid { gap: 12px 14px; }
+
 /* --------------------------------------------------------------------
    Who put the money down
    --------------------------------------------------------------------
