@@ -9653,7 +9653,10 @@ function buildSubOptions() {
     });
 
     if (subs.some((sub) => sub.id === previous)) select.value = previous;
-    if (field) field.hidden = !subs.length;
+    // A transfer has no category at all, so it can have no sub-category either:
+    // syncLedgerForm() hides the pair and then rebuilds the options, and without
+    // this the second picker would come back on its own.
+    if (field) field.hidden = !subs.length || ledgerFormType() === 'transfer';
 }
 
 /**
