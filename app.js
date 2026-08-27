@@ -849,6 +849,7 @@ function settleTransfers(bill, netSen) {
                 fromPerson, toPerson,
                 amount,
                 settled: !!bill.settled[key],
+                waived: !!(bill.settled[key] || {}).waived,
             });
         }
         owes[i].left -= amount;
@@ -904,6 +905,7 @@ function tillTransfers(bill, lines, pieces, ownerOf) {
                 amount: 0,
                 parts: [],
                 settled: !!bill.settled[key],
+                waived: !!(bill.settled[key] || {}).waived,
             };
             move.amount += sen;
             move.parts.push({ label: line.label, amount: sen });
@@ -947,6 +949,7 @@ function tillTransfers(bill, lines, pieces, ownerOf) {
             parts: wins.parts.concat((loses ? loses.parts : [])
                 .map((part) => ({ label: part.label, amount: part.amount, back: true }))),
             settled: !!bill.settled[key],
+            waived: !!(bill.settled[key] || {}).waived,
         });
     });
 
@@ -1310,10 +1313,14 @@ function paintSplit(bill) {
     set('splitOwedLabel', iAmOwed ? 'Owed to you' : 'You owe');
     if (iAmOwed) {
         const mine = bill.transfers.filter((t) => t.to === 0);
-        const done = mine.filter((t) => t.settled).length;
+        // Waived is closed, but nobody paid it — counting it as paid would
+        // read as money that arrived.
+        const done  = mine.filter((t) => t.settled && !t.waived).length;
+        const gone  = mine.filter((t) => t.waived).length;
         set('splitOwed', money(fromSen(bill.owedToMeSen)));
         set('splitOwedFoot', mine.length
-            ? done + ' of ' + mine.length + ' paid you back'
+            ? done + ' of ' + mine.length + ' paid you back' +
+              (gone ? ' · ' + gone + ' waived' : '')
             : 'Nobody owes you anything');
     } else {
         const mine = bill.transfers.filter((t) => t.from === 0);
@@ -1594,6 +1601,14 @@ function paintSettle(bill) {
                     '<span class="settle-who">' + sentence + parts + '</span>' +
                     '<b>' + money(fromSen(move.amount)) + '</b>' +
                     (!saved ? ''
+                        // A waived debt is closed the same way a paid one is —
+                        // it stops counting against the total — but no money
+                        // ever moved, so there is no account to name and
+                        // nothing was written into the ledger.
+                        : move.waived
+                        ? '<span class="settle-done is-waived">' +
+                              '<i class="bi bi-slash-circle-fill"></i> Waived</span>' +
+                          '<button type="button" class="ghost-btn is-small" data-unsettle="' + escapeHtml(move.key) + '">Undo</button>'
                         : move.settled
                         ? '<span class="settle-done"><i class="bi bi-check-circle-fill"></i> Settled' +
                               // "into" for money arriving, "from" for money leaving.
@@ -1608,7 +1623,10 @@ function paintSettle(bill) {
                               '">' + settleAccountOptions(iOwe ? '' : billPaidFromAccount(b)) + '</select></label>'
                             : '') +
                           '<button type="button" class="ghost-btn is-small" data-settle="' + escapeHtml(move.key) + '">' +
-                          '<i class="bi bi-check-lg"></i> Mark settled</button>');
+                          '<i class="bi bi-check-lg"></i> Mark settled</button>' +
+                          '<button type="button" class="ghost-btn is-small is-waive" data-waive="' + escapeHtml(move.key) + '" ' +
+                          'title="' + (iOwe ? 'They let you off this one' : 'Write this off — nobody pays it') + '">' +
+                          '<i class="bi bi-slash-circle"></i> Waive</button>');
                 list.appendChild(row);
             });
 
@@ -1915,7 +1933,7 @@ function splitSummaryFor(source) {
         bill.transfers.forEach((move) => {
             lines.push(personName(move.fromPerson, move.from) + ' → ' +
                 personName(move.toPerson, move.to) + ' ' + money(fromSen(move.amount)) +
-                (move.settled ? ' (settled)' : ''));
+                (move.waived ? ' (waived)' : move.settled ? ' (settled)' : ''));
         });
 
         return lines.join('\n');
@@ -2057,14 +2075,34 @@ function settleAccountOptions(fromId) {
 }
 
 function onSettleClick(event) {
-    const btn = event.target.closest('button[data-settle], button[data-unsettle]');
+    const btn = event.target.closest('button[data-settle], button[data-unsettle], button[data-waive]');
     if (!btn) return;
 
     readSplitState();
     const bill = draft();
-    const id = btn.dataset.settle || btn.dataset.unsettle;
+    const id = btn.dataset.settle || btn.dataset.unsettle || btn.dataset.waive;
 
-    if (btn.dataset.settle) {
+    if (btn.dataset.waive) {
+        // Forgiven, not paid. The debt stops counting against the bill exactly
+        // as a settled one does, but no money changed hands — so no account is
+        // named and nothing is written into the ledger. Undo takes it back,
+        // and finds nothing to unwind because nothing was ever written.
+        const sums = splitCompute(bill);
+        const debt = sums.transfers.find((move) => move.key === id);
+        bill.settled[id] = { account: '', entryId: '', date: todayIso(), waived: true };
+
+        if (debt) {
+            const owed = money(fromSen(debt.amount));
+            splitHint(debt.from === 0
+                ? 'Waived ' + owed + ' — ' + personName(debt.toPerson, debt.to) +
+                  ' let you off, so nothing was recorded as spent.'
+                : debt.to === 0
+                    ? 'Waived ' + owed + ' — ' + personName(debt.fromPerson, debt.from) +
+                      ' no longer owes it, and nothing came back into an account.'
+                    : 'Waived ' + owed + ' between ' + personName(debt.fromPerson, debt.from) +
+                      ' and ' + personName(debt.toPerson, debt.to) + '.');
+        }
+    } else if (btn.dataset.settle) {
         const row = btn.closest('.settle-row');
         const select = row && row.querySelector('.settle-into');
         const into = select ? select.value : '';
@@ -2798,8 +2836,11 @@ function loadSplit() {
                         account: String(held.account || ''),
                         entryId: String(held.entryId || ''),
                         date: /^\d{4}-\d{2}-\d{2}$/.test(held.date || '') ? String(held.date) : '',
+                        // Absent on every tick written before waiving existed,
+                        // which is what a plain settlement reads as anyway.
+                        waived: !!held.waived,
                     }
-                    : { account: '', entryId: '', date: '' };
+                    : { account: '', entryId: '', date: '', waived: false };
             });
 
             return {
@@ -9653,10 +9694,7 @@ function buildSubOptions() {
     });
 
     if (subs.some((sub) => sub.id === previous)) select.value = previous;
-    // A transfer has no category at all, so it can have no sub-category either:
-    // syncLedgerForm() hides the pair and then rebuilds the options, and without
-    // this the second picker would come back on its own.
-    if (field) field.hidden = !subs.length || ledgerFormType() === 'transfer';
+    if (field) field.hidden = !subs.length;
 }
 
 /**
@@ -9880,8 +9918,11 @@ function paintLedgerList(book) {
 
             // Notes and account names are user-typed, so they go in as text.
             row.querySelector('.led-meta b').textContent = entry.note.trim() || cat.label;
+            // A transfer names both ends; its category, when one was filed, reads
+            // ahead of them the same way it does on every other kind of entry.
             row.querySelector('.led-meta small').textContent = entry.type === 'transfer'
-                ? accountName(entry.account) + ' → ' + accountName(entry.toAccount)
+                ? (entry.category ? cat.label + ' · ' : '') +
+                  accountName(entry.account) + ' → ' + accountName(entry.toAccount)
                 : cat.label + ' · ' + accountName(entry.account);
 
             host.appendChild(row);
@@ -10323,11 +10364,11 @@ function syncLedgerForm() {
     const type = ledgerFormType();
     const transfer = type === 'transfer';
 
-    // Money back keeps its category: that is the whole point of it — the
-    // amount comes off whatever it was spent on in the first place.
-    if ($('ledgerFieldCategory')) $('ledgerFieldCategory').hidden = transfer;
-    if ($('ledgerFieldSub'))      $('ledgerFieldSub').hidden = transfer;
-    if ($('ledgerFieldTo'))       $('ledgerFieldTo').hidden = !transfer;
+    // Every kind keeps its category. Money back needs one because the amount
+    // comes off whatever it was spent on in the first place; a transfer keeps
+    // one purely as a label — nothing about moving your own money between your
+    // own accounts reaches a spending total, whatever it is filed under.
+    if ($('ledgerFieldTo')) $('ledgerFieldTo').hidden = !transfer;
 
     set('ledgerAccountLabel',
         transfer ? 'Out of'
@@ -10402,8 +10443,8 @@ function ledgerSubmit() {
         base:      currency === BASE_CURRENCY ? '' : String(base),
         rate:      currency === BASE_CURRENCY || !base ? '' : String(amount / base),
         date:      ($('ledgerDate') || {}).value || todayIso(),
-        category:  type === 'transfer' ? '' : ($('ledgerCategory') || {}).value,
-        sub:       type === 'transfer' ? '' : ($('ledgerSub') || {}).value || '',
+        category:  ($('ledgerCategory') || {}).value,
+        sub:       ($('ledgerSub') || {}).value || '',
         account:   from,
         toAccount: type === 'transfer' ? into : '',
         note:      ($('ledgerNote') || {}).value || '',

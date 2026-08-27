@@ -1332,6 +1332,13 @@ input[type="date"]:hover::-webkit-calendar-picker-indicator { opacity: .85; }
     color: var(--jade);
 }
 
+/* Forgiven, not paid. It reads as closed like a settlement does, but in the
+   muted ink rather than the jade — no money arrived, so nothing here should
+   look like money arriving. */
+.settle-done.is-waived { color: var(--ink-3); }
+.ghost-btn.is-waive { color: var(--ink-3); }
+.ghost-btn.is-waive:hover { color: var(--ink); }
+
 .ghost-btn.is-small { padding: 5px 10px; font-size: 11.5px; border-radius: 8px; }
 
 /* --------------------------------------------------------------------------
