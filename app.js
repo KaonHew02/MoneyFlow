@@ -209,7 +209,15 @@ function paintStoreAlert() {
 }
 
 // Money is counted in sen so the shares can never drift by a fraction of a cent.
-const toSen   = (x) => Math.round((Number(x) || 0) * 100);
+/**
+ * `Number('1e400')` is Infinity, and `Infinity || 0` is Infinity — so an
+ * amount nobody could actually spend used to travel into the arithmetic as a
+ * real figure. It divides into Infinity shares, which subtract to NaN at the
+ * settle-up, and the loop that clears the table then never finishes. One typo
+ * froze the whole tab with nothing on screen to say why. Anything that is not
+ * a finite number is worth nothing here.
+ */
+const toSen   = (x) => { const n = Number(x); return Number.isFinite(n) ? Math.round(n * 100) : 0; };
 const fromSen = (s) => s / 100;
 
 /**
@@ -221,19 +229,31 @@ const fromSen = (s) => s / 100;
  * the whole charge on one head.
  */
 function allocateSen(totalSen, weights) {
-    if (!weights.length || totalSen <= 0) return weights.map(() => 0);
+    // `!(x > 0)` rather than `x <= 0`, so a total that is NaN or Infinity
+    // leaves here rather than being divided up. Splitting a figure that is not
+    // a number gives every person a share that is not a number, and those go
+    // on to freeze the settle-up.
+    if (!weights.length || !Number.isFinite(totalSen) || !(totalSen > 0)) return weights.map(() => 0);
 
-    const totalWeight = weights.reduce((sum, w) => sum + w, 0);
+    const safe = weights.map((w) => (Number.isFinite(w) ? w : 0));
+    const totalWeight = safe.reduce((sum, w) => sum + w, 0);
     const exact = totalWeight > 0
-        ? weights.map((w) => totalSen * w / totalWeight)
-        : weights.map(() => totalSen / weights.length);
+        ? safe.map((w) => totalSen * w / totalWeight)
+        : safe.map(() => totalSen / safe.length);
 
     const parts = exact.map(Math.floor);
     const order = exact
         .map((value, index) => ({ index, remainder: value - Math.floor(value) }))
         .sort((a, b) => b.remainder - a.remainder);
 
-    let leftover = totalSen - parts.reduce((sum, p) => sum + p, 0);
+    // Flooring each share loses less than a sen apiece, so the gap to make up
+    // is always smaller than the number of shares. Capping it says so out
+    // loud: a figure that has gone wrong somewhere upstream stops here instead
+    // of being handed out one sen at a time for as long as the number is big.
+    let leftover = totalSen - parts.reduce((sum, part) => sum + part, 0);
+    if (!Number.isFinite(leftover) || leftover < 0) leftover = 0;
+    leftover = Math.min(leftover, order.length);
+
     for (let k = 0; leftover > 0; k++, leftover--) parts[order[k % order.length].index]++;
     return parts;
 }
@@ -842,6 +862,13 @@ function settleTransfers(bill, netSen) {
     const owes = [];
     const owed = [];
     netSen.forEach((sen, index) => {
+        // Only real figures are matched. `net` adds to zero, so an Infinity on
+        // one side of the table comes with a -Infinity on the other; the two
+        // meet below, subtract to NaN, and neither ever reaches zero. The loop
+        // then runs until the tab is killed — no error, no message, just a
+        // page that stops. There is nothing to hand over on a share nobody can
+        // count, so it does not enter the matching at all.
+        if (!Number.isFinite(sen)) return;
         if (sen > 0) owes.push({ index, left: sen });
         else if (sen < 0) owed.push({ index, left: -sen });
     });
@@ -857,19 +884,26 @@ function settleTransfers(bill, netSen) {
     let j = 0;
     while (i < owes.length && j < owed.length) {
         const amount = Math.min(owes[i].left, owed[j].left);
-        if (amount > 0) {
-            const fromPerson = bill.people[owes[i].index];
-            const toPerson   = bill.people[owed[j].index];
-            const key = fromPerson.id + '>' + toPerson.id;
-            out.push({
-                key,
-                from: owes[i].index, to: owed[j].index,
-                fromPerson, toPerson,
-                amount,
-                settled: !!bill.settled[key],
-                waived: !!(bill.settled[key] || {}).waived,
-            });
-        }
+
+        // Every pass has to move one of the two along. Both sides are finite
+        // and positive, so `amount` is as well and one of them lands on zero
+        // below — but a loop that can stand still takes the whole page with it
+        // and leaves nothing to report, and one comparison is a cheap way to
+        // be certain it cannot.
+        if (!(amount > 0)) { i++; j++; continue; }
+
+        const fromPerson = bill.people[owes[i].index];
+        const toPerson   = bill.people[owed[j].index];
+        const key = fromPerson.id + '>' + toPerson.id;
+        out.push({
+            key,
+            from: owes[i].index, to: owed[j].index,
+            fromPerson, toPerson,
+            amount,
+            settled: !!bill.settled[key],
+            waived: !!(bill.settled[key] || {}).waived,
+        });
+
         owes[i].left -= amount;
         owed[j].left -= amount;
         if (owes[i].left <= 0) i++;
