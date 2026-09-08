@@ -20,7 +20,7 @@
          one, which is merely out of date rather than broken.
          Bump this on any change to the files below. It is the one thing here
          that has to be remembered by hand. -->
-    <link rel="stylesheet" href="style.css?v=5">
+    <link rel="stylesheet" href="style.css?v=7">
 </head>
 <body>
 
@@ -2280,10 +2280,60 @@
      working store and every screen runs without a network. The three below it
      add the Drive copy on top, and are allowed to fail without taking the app
      with them — which is why they load last. -->
-<script src="store.js?v=5"></script>
-<script src="app.js?v=5"></script>
+<!-- Before any script that can fail, because a half-started app is worse than
+     a stopped one: the buttons wired before the throw keep working, the ones
+     after it do nothing whatever you press, and the page looks completely
+     normal the whole time. Nothing else in here would ever have said so. -->
+<script>
+(function () {
+    var shown = false;
+
+    function say(what) {
+        // The first one is the cause. Everything after it is an echo, and a
+        // stack of red bars helps nobody.
+        if (shown) return;
+        shown = true;
+
+        var bar = document.createElement('div');
+        bar.setAttribute('role', 'alert');
+        bar.style.cssText = 'position:fixed;z-index:99999;left:0;right:0;top:0;padding:12px 16px;'
+            + 'background:#7f1d1d;color:#fff;font:14px/1.45 system-ui,-apple-system,sans-serif;'
+            + 'box-shadow:0 2px 12px rgba(0,0,0,.4);-webkit-user-select:text;user-select:text';
+        bar.textContent = 'MoneyFlow hit an error, so part of this page will not respond: '
+            + what + ' — your records are untouched. Reload the page, and quote that line to '
+            + 'whoever maintains this.';
+
+        var put = function () { (document.body || document.documentElement).appendChild(bar); };
+        if (document.body) put(); else document.addEventListener('DOMContentLoaded', put);
+    }
+
+    // app.js reports a module that failed to load through the same bar: one
+    // place on the page where "this is broken" is said, whoever noticed it.
+    window.MFTrouble = say;
+
+    window.addEventListener('error', function (event) {
+        // A script from another origin is reported as a bare "Script error."
+        // with nothing usable attached — Google's sign-in library, most often.
+        // There is nothing to tell anyone, and it is not this app's fault.
+        if (/^script error/i.test(event.message || '')) return;
+        var file = (event.filename || '').split('/').pop().split('?')[0];
+        say((event.message || 'an unnamed error')
+            + (file ? ' (' + file + (event.lineno ? ':' + event.lineno : '') + ')' : ''));
+    });
+
+    // Work that failed with nobody waiting on it — the shape every hang in
+    // this app has taken so far.
+    window.addEventListener('unhandledrejection', function (event) {
+        var why = event.reason;
+        say('a background step failed — ' + ((why && why.message) || String(why)));
+    });
+})();
+</script>
+
+<script src="store.js?v=7"></script>
+<script src="app.js?v=7"></script>
 <script src="https://accounts.google.com/gsi/client" async defer></script>
-<script src="drive-config.js?v=5"></script>
-<script src="drive.js?v=5"></script>
+<script src="drive-config.js?v=7"></script>
+<script src="drive.js?v=7"></script>
 </body>
 </html>

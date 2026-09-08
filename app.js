@@ -12929,54 +12929,116 @@ document.addEventListener('DOMContentLoaded', () => {
     else MFStore.init(storeReport).then(startApp);
 });
 
+/**
+ * --------------------------------------------------------------------
+ * One module falling over is not eleven
+ * --------------------------------------------------------------------
+ * `startApp` used to be one straight run of calls. A throw anywhere in it —
+ * a bill in a shape the new code did not expect, an instalment pointing at an
+ * entry that is no longer there — stopped the run dead, and every control
+ * below the throw was left unwired on a page that looked entirely normal.
+ * Nothing said so. The buttons simply did nothing, for ever, and it read as a
+ * frozen app rather than as one record being wrong.
+ *
+ * So each step is run on its own. A failure is reported, by name, in the bar
+ * across the top, and the next step still runs — because the module you need
+ * when something has gone wrong is usually Export, and it is the last one to
+ * load.
+ */
+function attempt(what, run) {
+    try {
+        run();
+        return true;
+    } catch (err) {
+        // The console keeps the stack, which is the only thing that says which
+        // record did it. The bar carries the sentence a person can act on.
+        if (window.console && console.error) console.error('MoneyFlow — ' + what + ' failed to load', err);
+        if (typeof window.MFTrouble === 'function') {
+            window.MFTrouble(what + ' could not load — ' + errorText(err));
+        }
+        return false;
+    }
+}
+
 function startApp() {
 
-    // Before any of it: every date box on the page says dd-mm-yyyy, whatever
-    // the browser's own locale would have written, and opens this app's own
-    // calendar rather than whichever one the browser felt like drawing.
-    enhanceDateInputs();
-    wireDatePop();
+    // First of everything, and deliberately so. This wires Export, Import and
+    // the one dialog in the app — the things you reach for when the rest of it
+    // is misbehaving. It used to be wired eight hundred lines down, past every
+    // feature on the page, so a throw in any of them left the dialog on screen
+    // with dead buttons and no way to get your records out.
+    wireBackup();
 
-    loadNav();
-    loadRates();
+    // Every step below reads a book off the disk, and a record written by an
+    // older version — or by a version with a bug in it — can be a shape this
+    // code did not expect. `attempt` is what stops one of them taking the
+    // other ten with it. The order is unchanged and still matters.
+    attempt('The date fields', () => {
+        // Before any of it: every date box on the page says dd-mm-yyyy, whatever
+        // the browser's own locale would have written, and opens this app's own
+        // calendar rather than whichever one the browser felt like drawing.
+        enhanceDateInputs();
+        wireDatePop();
+    });
+
+    attempt('Your settings', () => {
+        loadNav();
+        loadRates();
+    });
 
     // --- categories: everything below names one, so they load first ---
-    loadCategories();
+    attempt('The categories', loadCategories);
 
     // --- financial planner: the plan first, then the rows it fills ---
-    loadBudget();
-    buildBudgetRows();
-    fillBudgetForm();
-    loadGoals();
-    buildGoals();
+    attempt('The planner', () => {
+        loadBudget();
+        buildBudgetRows();
+        fillBudgetForm();
+        loadGoals();
+        buildGoals();
+    });
 
     // --- daily ledger: accounts first, they are what entries point at ---
-    buildStaticOptions();
-    loadLedger();
+    attempt('The ledger', () => {
+        buildStaticOptions();
+        loadLedger();
+    });
 
     // --- bill split: the bills are entries now, so this is the moment any
     //     left over from when they were not are moved onto one ---
-    migrateBillsIntoLedger();
-    paintSplitForm();
+    attempt('The bill splits', () => {
+        migrateBillsIntoLedger();
+        paintSplitForm();
+    });
 
-    buildLedgerAccounts();
-    buildCategoryManager();
-    buildAccountOptions();
-    syncLedgerForm();
+    attempt('The accounts', () => {
+        buildLedgerAccounts();
+        buildCategoryManager();
+        buildAccountOptions();
+        syncLedgerForm();
+    });
 
     // --- instalment tracker and card payoff: strictly after the ledger. Both
     //     check their payments' entry links against the entries that actually
     //     exist, and against an empty book every link looks broken. ---
-    loadCommit();
-    fillCommitForm();
-    loadCard();
-    fillCardForm();
+    attempt('The instalments', () => {
+        loadCommit();
+        fillCommitForm();
+    });
+
+    attempt('The card payoff', () => {
+        loadCard();
+        fillCardForm();
+    });
 
     // --- savings & investment: last, because it reads the ledger, the goals
     //     and its own contributions together ---
-    loadGrow();
-    fillGrowForm();
-    ledgerClearForm();
+    attempt('Savings & investment', () => {
+        loadGrow();
+        fillGrowForm();
+    });
+
+    attempt('The entry form', ledgerClearForm);
 
     document.querySelectorAll('.seg').forEach((seg) => {
         seg.addEventListener('click', (event) => {
@@ -13736,8 +13798,6 @@ function startApp() {
         });
     }
 
-    wireBackup();
-
     // A chevron on every card heading, and whichever ones were folded away last
     // time folded again. Before the modules paint, so nothing flashes open.
     wireFolds();
@@ -13750,15 +13810,15 @@ function startApp() {
     if (storeAlertExport) storeAlertExport.addEventListener('click', () => backupExport(storeAlertExport));
     paintStoreAlert();
 
-    renderLedger();
-    renderSplit();
-    renderBudget();
-    renderCommit();
-    renderCard();
-    renderGrow();
+    attempt('Expenses', renderLedger);
+    attempt('Bill split', renderSplit);
+    attempt('The planner', renderBudget);
+    attempt('Instalments', renderCommit);
+    attempt('Card payoff', renderCard);
+    attempt('Savings & investment', renderGrow);
 
     // Last, because it reads what every other module has just put on screen.
-    renderDash();
+    attempt('The dashboard', renderDash);
 
     // Ask the browser how much room it is actually offering, then repaint the
     // usage line with the real ceiling rather than the five-megabyte guess.
