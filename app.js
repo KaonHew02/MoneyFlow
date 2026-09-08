@@ -12235,6 +12235,13 @@ function backupRead(file) {
  * puts all of them back before anyone is told. A restore either happened or it
  * did not.
  */
+/**
+ * How long the reload waits on the flush before calling it a failure. Long
+ * enough for a big book on a slow disk, short enough that nobody sits looking
+ * at a page wondering whether they pressed the button.
+ */
+const RESTORE_PATIENCE = 10000;
+
 function backupApply(envelope) {
     const held = {};
     BACKUP_STORES.forEach((key) => { held[key] = storedRaw(key); });
@@ -12246,36 +12253,84 @@ function backupApply(envelope) {
         });
     };
 
-    const gaveUp = () => {
+    const gaveUp = (why) => {
         rollback();
         MFStore.flush();
         storeBroken = false;
         storeBrokenWhy = '';
         paintStoreAlert();
-        backupSay('Could not restore that backup',
-            'It did not fit in this browser, so everything has been put back exactly as it was — '
+        backupSay('Could not restore that backup', why
+            || 'It did not fit in this browser, so everything has been put back exactly as it was — '
             + 'nothing of yours was lost. Try it in a browser holding fewer records, or export what '
             + 'is here first and prune it.');
     };
 
+    // The confirm button has already taken the dialog away, and everything
+    // after this point takes a moment and can fail. Saying so is the whole
+    // difference between "it is working on it" and a screen that looks exactly
+    // like a button that did nothing.
+    backupSay('Restoring…',
+        'Writing the records into this browser. The page reloads by itself the moment they land.');
+
     let failed = false;
-    BACKUP_STORES.forEach((key) => {
-        if (Object.prototype.hasOwnProperty.call(envelope.stores, key)) {
-            if (!storeWrite(key, JSON.stringify(envelope.stores[key]))) failed = true;
-        } else {
-            // Absent from the backup means absent afterwards. Leaving the old
-            // value would blend two books, which is the one thing replacing is
-            // meant to prevent.
-            MFStore.remove(key);
-        }
-    });
+    try {
+        BACKUP_STORES.forEach((key) => {
+            if (Object.prototype.hasOwnProperty.call(envelope.stores, key)) {
+                if (!storeWrite(key, JSON.stringify(envelope.stores[key]))) failed = true;
+            } else {
+                // Absent from the backup means absent afterwards. Leaving the old
+                // value would blend two books, which is the one thing replacing is
+                // meant to prevent.
+                MFStore.remove(key);
+            }
+        });
+    } catch (err) {
+        // A malformed backup used to throw out of here into nothing at all:
+        // dialog gone, page unchanged, no reason given.
+        return gaveUp('That backup could not be written — ' + errorText(err)
+            + ' Everything has been put back exactly as it was.');
+    }
 
     if (failed) return gaveUp();
 
     // On IndexedDB the writes are still in flight, and reloading onto a
     // half-written book would be the very thing the rollback exists to
     // prevent — so the reload waits for the flush to say it landed.
-    MFStore.flush().then((ok) => { if (ok) location.reload(); else gaveUp(); });
+    //
+    // It does not wait forever. A transaction that neither completes nor errors
+    // is rare but real — a second tab holding the database, a browser that has
+    // stopped answering — and the reward for it used to be a page that simply
+    // sat there for good. A restore has to end in an outcome either way.
+    let settled = false;
+    let watchdog = null;
+    const finish = (run) => {
+        if (settled) return;
+        settled = true;
+        clearTimeout(watchdog);
+        run();
+    };
+
+    watchdog = setTimeout(() => finish(() => gaveUp(
+        'This browser’s database stopped answering, so nothing was changed and everything is exactly '
+        + 'as it was. Close any other MoneyFlow tab or window — a restore needs this to be the only '
+        + 'one open — then try again.')), RESTORE_PATIENCE);
+
+    MFStore.flush().then(
+        (ok) => finish(() => {
+            if (!ok) return gaveUp();
+            // Reloading is the last thing that can quietly refuse: inside a
+            // frame a browser may forbid it outright, and the records would be
+            // written but the screen would never show them.
+            try { location.reload(); } catch (err) { location.href = location.pathname; }
+        }),
+        (err) => finish(() => gaveUp('The write failed — ' + errorText(err)
+            + ' Everything has been put back exactly as it was.')));
+}
+
+/** What to show a person about a thrown thing, ending in a full stop. */
+function errorText(err) {
+    const said = String((err && err.message) || err || 'the browser did not say why').trim();
+    return /[.!?]$/.test(said) ? said : said + '.';
 }
 
 /* ------------------------------- dialog ------------------------------ */

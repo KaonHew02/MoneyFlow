@@ -166,16 +166,27 @@ const MFStore = (() => {
         const found = await readAll(db);
         Object.keys(found).forEach((key) => { mirror[key] = found[key]; });
 
+        // The localStorage copy is only ever the book from before the move, and
+        // it is read once — while this database is still empty. After that the
+        // database is the live one, and a key missing from it means the key is
+        // gone.
+        //
+        // Reading the old copy on every load instead would quietly undo a
+        // restore: a backup that does not carry, say, the bill splits removes
+        // them here, and the stale localStorage copy walks them straight back
+        // in on the next load. That is the two books blended, which is the one
+        // thing "replace, never merge" exists to prevent.
         let migrated = 0;
-        RECORD_KEYS.forEach((key) => {
-            if (mirror[key] !== undefined) return;
-            const held = fromLocal(key);
-            if (held === null || held === undefined) return;
-            mirror[key] = held;
-            dirty.add(key);
-            migrated++;
-        });
-        if (migrated) await flush();
+        if (!Object.keys(found).length) {
+            RECORD_KEYS.forEach((key) => {
+                const held = fromLocal(key);
+                if (held === null || held === undefined) return;
+                mirror[key] = held;
+                dirty.add(key);
+                migrated++;
+            });
+            if (migrated) await flush();
+        }
 
         return { backend: 'indexedDB', migrated };
     }
