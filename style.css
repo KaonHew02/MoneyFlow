@@ -2075,7 +2075,6 @@ tr.is-locked { animation: nudge .3s ease; }
 }
 
 .data-table .row-actions { white-space: nowrap; text-align: right; }
-.data-table .row-actions .ghost-btn + .ghost-btn { margin-left: 6px; }
 .data-table .row-actions .split-x { width: 28px; height: 28px; }
 .data-table .row-actions .split-x:hover { background: var(--jade-soft); color: var(--jade); }
 .data-table .row-actions .split-x:last-child:hover { background: var(--red-soft); color: var(--red); }
@@ -2817,13 +2816,6 @@ tr.is-locked { animation: nudge .3s ease; }
 .commit-month.is-red  { border-color: var(--red-line); background: var(--red-soft); }
 .commit-month.is-amber { border-color: var(--amber); }
 
-/* Forgiven, not paid. It reads as closed the way a settled month does, but in
-   the muted ink rather than the jade — no money arrived, and nothing here
-   should look like money arriving. */
-.commit-month.is-waived { background: transparent; border-style: dashed; }
-.commit-month.is-waived .commit-month-id b { color: var(--ink-2); }
-.commit-month.is-waived .commit-tick { color: var(--ink-3); }
-
 .commit-tick {
     display: inline-flex;
     align-items: center;
@@ -2882,8 +2874,13 @@ tr.is-locked { animation: nudge .3s ease; }
 .commit-flag.is-amber { color: var(--amber); }
 .commit-flag.is-red   { color: var(--red); }
 
-/* What the month is doing, and the one button that can close it without money
-   moving. They share the end of the row because they answer the same question. */
+/* A waived month is closed, but nothing arrived — so it is drawn as an
+   outline rather than filled in, and its figures step back into the quiet ink.
+   Paid and forgiven must never look like the same thing. */
+.commit-month.is-waived { background: transparent; border-style: dashed; }
+.commit-month.is-waived .commit-month-id b { color: var(--ink-2); }
+.commit-month.is-waived .commit-tick { color: var(--ink-3); }
+
 .commit-end {
     display: flex;
     align-items: center;
@@ -4071,76 +4068,4 @@ tr.is-locked { animation: nudge .3s ease; }
     .kpi-grid { grid-template-columns: minmax(0, 1fr); }
     .kpi { padding: 13px 14px; }
     .kpi-band-head { margin-bottom: 7px; }
-}
-
-/* ==========================================================================
-   The bill inside an entry
-
-   Bill Split was a module of its own: a form, a list of saved bills, and a
-   settlement card underneath. It is one thing with Expenses now — the bill
-   *is* the entry — so its parts are sections of the entry form rather than
-   cards of their own. Same headings, one rule lighter, and no card sitting
-   inside a card.
-   ========================================================================== */
-.split-part { margin-top: 24px; }
-
-.split-part-head {
-    display: flex;
-    align-items: baseline;
-    justify-content: space-between;
-    gap: 16px;
-    margin-bottom: 14px;
-    padding-bottom: 10px;
-    border-bottom: 1px solid var(--line-2);
-}
-
-.split-part-head h3 { margin: 0; font-size: 14px; font-weight: 700; letter-spacing: -.01em; }
-
-/* While a bill is on, the amount is a readout: the lines are the figure, and
-   a box that could be typed into would give the entry two answers. */
-#ledgerAmount[readonly] { background: var(--track); color: var(--ink-2); cursor: not-allowed; }
-
-/* --------------------------------------------------------------------------
-   Settle up — one group per bill
-
-   The card answers the same question it always did, of the whole book at
-   once rather than of one bill: has anybody paid you back yet. So each bill
-   keeps a heading of its own, and the rows under it are the rows that were
-   always there.
-   -------------------------------------------------------------------------- */
-.settle-bill { padding-top: 18px; margin-top: 18px; border-top: 1px solid var(--line-2); }
-.settle-bill:first-child { padding-top: 0; margin-top: 0; border-top: 0; }
-.settle-bill.is-done { opacity: .74; }
-
-.settle-bill-head {
-    display: flex;
-    align-items: center;
-    flex-wrap: wrap;
-    gap: 8px 10px;
-    margin-bottom: 12px;
-}
-
-.settle-bill-head b { font-size: 14.5px; font-weight: 700; letter-spacing: -.01em; }
-.settle-bill-head > span { font-size: 12.5px; color: var(--ink-3); font-variant-numeric: tabular-nums; }
-.settle-bill-head > button:nth-last-of-type(2) { margin-left: auto; }
-
-.settle-bill-head .tag,
-.led-meta .tag {
-    padding: 2px 7px;
-    border-radius: 6px;
-    background: var(--amber-soft);
-    font-size: 10.5px;
-    font-weight: 700;
-    letter-spacing: .01em;
-    color: var(--amber);
-    white-space: nowrap;
-}
-
-.settle-bill-head .tag.is-done,
-.led-meta .tag.is-done { background: var(--track-2); color: var(--ink-3); }
-
-.led-meta .tag { margin-left: 8px; vertical-align: 1px; }
-
-@media (max-width: 620px) {
-    .settle-bill-head > button:nth-last-of-type(2) { margin-left: 0; }
 }
