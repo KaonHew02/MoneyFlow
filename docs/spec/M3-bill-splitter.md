@@ -1,5 +1,17 @@
 # M3 — SHARE → Bill Splitter
 
+> **Since 3 September 2026 this is not a screen of its own.** A bill is an
+> expense, so it lives inside one: tick *Split it between people* on an entry
+> in M2 and everything below appears under the form, with the entry's Amount
+> read off the lines. Who still owes what is a **Settle up** card under the
+> month's list, covering every bill in the book rather than the one on screen.
+> Bills saved while this was its own module are moved onto entries the first
+> time the app opens; a bill that had never been recorded becomes the entry it
+> always should have been, dated the day of the bill.
+>
+> Everything else below still holds — the arithmetic, the two settlement
+> styles, and what a repayment writes into the ledger are unchanged.
+
 Expenses shared with other people: restaurant meals, group trips, hotels,
 activities, group shopping, family expenses.
 

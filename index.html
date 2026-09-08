@@ -44,9 +44,6 @@
             <button type="button" data-module="ledger">
                 <i class="bi bi-journal-text"></i><span>Expenses</span>
             </button>
-            <button type="button" data-module="split">
-                <i class="bi bi-people-fill"></i><span>Bill Split</span>
-            </button>
             <button type="button" data-module="budget">
                 <i class="bi bi-pie-chart-fill"></i><span>Planner</span>
             </button>
@@ -512,6 +509,318 @@
                         </div>
                     </div>
 
+                    <!-- ----------------------------------------------------
+                         One entry, or one evening.
+
+                         An expense somebody splits is not a different kind of
+                         record from an expense they did not — it is the same
+                         money out of the same account, with the working shown.
+                         So the bill lives inside the entry rather than beside
+                         it: the lines below add up to the Amount above, and
+                         what everyone else owes hangs off the same row in the
+                         book. There is nothing to keep in step, because there
+                         is only one record.
+                         ---------------------------------------------------- -->
+                    <div class="check-row" id="ledgerSplitLine">
+                        <label class="check-line">
+                            <input type="checkbox" id="ledgerSplit">
+                            <span>Split it between people</span>
+                        </label>
+                        <span class="card-note" id="ledgerSplitNote" hidden>&mdash;</span>
+                    </div>
+
+                    <div id="ledgerSplitPanel" hidden>
+
+                        <div class="split-part">
+                            <div class="split-part-head">
+                                <h3>Who was there</h3>
+                                <div class="card-actions">
+                                    <span class="card-note" id="splitPeopleNote">&mdash;</span>
+                                    <button type="button" class="ghost-btn" id="splitAddPerson">
+                                        <i class="bi bi-person-plus"></i> Add person
+                                    </button>
+                                </div>
+                            </div>
+                            <div id="splitPeople"></div>
+                            <p class="hint" id="splitPeopleHint">One line per thing somebody had, under the person who had it &mdash; a name on the line is optional, so a single figure for someone who does not want it itemised works too. Anything the table shared goes in the card below. The first person is you: your share, what you are owed and the expense entry are all measured from that row.</p>
+                        </div>
+
+                        <div class="split-part" id="splitSharedCard">
+                            <div class="split-part-head">
+                                <h3>Shared by everyone</h3>
+                                <div class="card-actions">
+                                    <span class="card-note">Shared <b id="splitSharedTotal">RM 0.00</b></span>
+                                    <button type="button" class="ghost-btn" id="splitAddShared">
+                                        <i class="bi bi-plus-lg"></i> Add item
+                                    </button>
+                                </div>
+                            </div>
+                            <div id="splitShared"></div>
+                            <p class="hint"><b>Only know the total?</b> Put it here as one line &mdash; RM&nbsp;240 across four people is RM&nbsp;60 each. There is no total field on this page because the total is added up from the lines; typing one as well would give the bill two answers.</p>
+                            <p class="hint">Everyone, equally, by default. Tap a name off <b>Shared by</b> when somebody did not have that dish &mdash; four at the table but only two on the plate &mdash; and press <b>Split by portions</b> when they did not have the same amount of it: three of the five pao, two of the three beers. The price follows.</p>
+                        </div>
+
+                        <div class="split-part">
+                            <div class="split-part-head">
+                                <h3>Who paid</h3>
+                                <span class="card-note" id="splitPaidNote">&mdash;</span>
+                            </div>
+
+                            <div class="field-grid">
+                                <div class="field">
+                                    <label for="splitPaidBy" id="splitPaidByLabel">Paid by</label>
+                                    <select id="splitPaidBy"></select>
+                                </div>
+
+                                <!-- Two honest ways to keep this, and the one you pick
+                                     decides what a repayment is later: your share alone,
+                                     and money coming back is a transfer between your own
+                                     accounts; or the whole bill, matching your bank
+                                     statement, and a repayment comes back off it. -->
+                                <div class="field">
+                                    <label for="splitExpMode">Record as</label>
+                                    <div class="seg is-compact" id="splitExpMode" data-value="full">
+                                        <button type="button" data-val="full" class="is-on">What I paid</button>
+                                        <button type="button" data-val="share">My share only</button>
+                                    </div>
+                                    <p class="hint" id="splitExpHint">&mdash;</p>
+                                </div>
+                            </div>
+
+                            <div class="check-row" id="splitPayLine">
+                                <label class="check-line">
+                                    <input type="checkbox" id="splitMultiPay">
+                                    <span>More than one person paid</span>
+                                </label>
+                                <span class="card-note" id="splitPayNote" hidden>&mdash;</span>
+                            </div>
+
+                            <div class="split-pay-card" id="splitPayCard" hidden>
+                                <div id="splitPayments"></div>
+                                <button type="button" class="split-add" id="splitAddPayment">
+                                    <i class="bi bi-plus-lg"></i> Add a payment
+                                </button>
+                                <p class="hint" id="splitPayHint">&mdash;</p>
+
+                                <!-- Two honest ways to clear the same debts. Netting is
+                                     the fewest handovers; paying each till back is the
+                                     one nobody has to check, because every figure in it
+                                     is somebody's own share of one thing one person
+                                     bought. Which is right depends on the table, not on
+                                     the arithmetic — so the table picks. -->
+                                <div class="field is-wide" id="splitSettleStyleField">
+                                    <label>Settle up</label>
+                                    <div class="seg" id="splitSettleStyle" data-value="net">
+                                        <button type="button" data-val="net" class="is-on">Fewest handovers</button>
+                                        <button type="button" data-val="till">Pay back whoever paid</button>
+                                    </div>
+                                    <p class="hint">Tick the lines each payment covered above, then <b>Pay back whoever paid</b> settles it till by till &mdash; everyone on the NSK bill pays whoever paid at NSK. <b>Fewest handovers</b> nets it all off instead: the same money, fewer transfers, but some of it goes to somebody other than whoever bought that dish.</p>
+                                </div>
+                            </div>
+                        </div>
+
+                        <details class="fold" id="splitChargeFold">
+                            <summary>
+                                <span><i class="bi bi-receipt"></i> Service charge, SST &amp; discount</span>
+                                <b id="splitChargeSummary">None</b>
+                            </summary>
+
+                            <div class="field-grid">
+                                <div class="field is-wide">
+                                    <label>What the place charges</label>
+                                    <div class="seg" id="splitCharges" data-value="none">
+                                        <button type="button" data-val="none" class="is-on">None</button>
+                                        <button type="button" data-val="tax">6%</button>
+                                        <button type="button" data-val="svc">10%</button>
+                                        <button type="button" data-val="both">10% + 6%</button>
+                                    </div>
+                                    <p class="hint">Service charge goes on first, then SST is charged on top of it &mdash; same order as the receipt.</p>
+                                </div>
+
+                                <div class="field">
+                                    <label for="splitService">Service charge</label>
+                                    <div class="money-input is-suffix">
+                                        <span class="affix">%</span>
+                                        <input type="number" id="splitService" min="0" max="100" step="1" value="0" inputmode="decimal">
+                                    </div>
+                                </div>
+
+                                <div class="field">
+                                    <label for="splitTax">SST</label>
+                                    <div class="money-input is-suffix">
+                                        <span class="affix">%</span>
+                                        <input type="number" id="splitTax" min="0" max="100" step="1" value="0" inputmode="decimal">
+                                    </div>
+                                </div>
+
+                                <div class="field">
+                                    <label for="splitDiscount">Discount <span class="per">off the whole bill</span></label>
+                                    <div class="field-pair">
+                                        <div class="money-input is-suffix" id="splitDiscountBox">
+                                            <span class="affix" id="splitDiscountAffix">%</span>
+                                            <input type="number" id="splitDiscount" min="0" step="1" placeholder="0" inputmode="decimal">
+                                        </div>
+                                        <!-- Most discounts are a percentage; a voucher is
+                                             the exception, so ringgit is the second button
+                                             rather than the only one. -->
+                                        <div class="seg is-compact" id="splitDiscountUnit" data-value="pct">
+                                            <button type="button" data-val="pct" class="is-on">%</button>
+                                            <button type="button" data-val="rm">RM</button>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+
+                            <!-- A promo on one dish is a different thing from a
+                                 promo on the bill: it belongs to whoever ate that
+                                 dish, so it comes off before anyone's share is
+                                 worked out. Off by default — most bills have none,
+                                 and a column per dish is a lot to carry for a rare
+                                 case. -->
+                            <div class="check-row" id="splitItemOffLine">
+                                <label class="check-line">
+                                    <input type="checkbox" id="splitItemOff">
+                                    <span>Some dishes have their own discount</span>
+                                </label>
+                                <div class="seg is-compact" id="splitItemOffUnit" data-value="pct" hidden>
+                                    <button type="button" data-val="pct" class="is-on">%</button>
+                                    <button type="button" data-val="rm">RM</button>
+                                </div>
+                            </div>
+
+                            <label class="check-line">
+                                <input type="checkbox" id="splitRound">
+                                <span>Round the total to 5 sen (paying cash)</span>
+                            </label>
+
+                            <!-- ------------------------------------------------
+                                 Ordered in. A delivery receipt has two lines that
+                                 are not food — the ride and the app — and a
+                                 voucher that comes off once both are on it. All
+                                 three are flat ringgit, which is why they cannot
+                                 be said with the percentages above.
+                                 ------------------------------------------------ -->
+                            <label class="check-line">
+                                <input type="checkbox" id="splitDelivery">
+                                <span>This was a delivery (foodpanda, Grab, ShopeeFood&hellip;)</span>
+                            </label>
+
+                            <div class="split-delivery" id="splitDeliveryCard" hidden>
+                                <div class="field-grid">
+                                    <div class="field">
+                                        <label for="splitDeliveryFee">Delivery fee</label>
+                                        <div class="money-input">
+                                            <span class="affix">RM</span>
+                                            <input type="number" id="splitDeliveryFee" min="0" step="0.10" placeholder="0.00" inputmode="decimal">
+                                        </div>
+                                    </div>
+
+                                    <div class="field">
+                                        <label for="splitPlatformFee">Platform fee</label>
+                                        <div class="money-input">
+                                            <span class="affix">RM</span>
+                                            <input type="number" id="splitPlatformFee" min="0" step="0.10" placeholder="0.00" inputmode="decimal">
+                                        </div>
+                                        <p class="hint">Whatever the app charges on top of the ride &mdash; service fee, platform fee, small-order fee. Add them together.</p>
+                                    </div>
+
+                                    <div class="field">
+                                        <label for="splitVoucher">Voucher <span class="per">off the order</span></label>
+                                        <div class="field-pair">
+                                            <div class="money-input" id="splitVoucherBox">
+                                                <span class="affix" id="splitVoucherAffix">RM</span>
+                                                <input type="number" id="splitVoucher" min="0" step="0.10" placeholder="0" inputmode="decimal">
+                                            </div>
+                                            <!-- A delivery promo is nearly always a
+                                                 flat amount, so ringgit leads here
+                                                 where the bill discount leads with a
+                                                 percentage. -->
+                                            <div class="seg is-compact" id="splitVoucherUnit" data-value="rm">
+                                                <button type="button" data-val="rm" class="is-on">RM</button>
+                                                <button type="button" data-val="pct">%</button>
+                                            </div>
+                                        </div>
+                                        <p class="hint">Taken off after the fees, the way the app takes it off &mdash; so a free-delivery promo can reach the delivery fee.</p>
+                                    </div>
+
+                                    <div class="field is-wide">
+                                        <label>How the fees divide</label>
+                                        <div class="seg" id="splitFeeSplit" data-value="even">
+                                            <button type="button" data-val="even" class="is-on">Evenly</button>
+                                            <button type="button" data-val="order">By what each ordered</button>
+                                        </div>
+                                        <p class="hint">A flat fee is not bigger because somebody ordered more &mdash; the person who added a drink did not use less of the delivery. Switch it if your table would rather it rode on the shares.</p>
+                                    </div>
+                                </div>
+                            </div>
+                        </details>
+
+                        <div class="tally">
+                            <div class="tally-cell">
+                                <span>Ordered</span>
+                                <b id="splitTallyFood">RM 0.00</b>
+                            </div>
+                            <div class="tally-cell" id="splitRowItemOff" hidden>
+                                <span>Dish discounts</span>
+                                <b id="splitTallyItemOff" class="is-minus">RM 0.00</b>
+                            </div>
+                            <div class="tally-cell" id="splitRowDiscount" hidden>
+                                <span id="splitTallyDiscountLabel">Discount</span>
+                                <b id="splitTallyDiscount" class="is-minus">RM 0.00</b>
+                            </div>
+                            <div class="tally-cell" id="splitRowService" hidden>
+                                <span id="splitTallyServiceLabel">Service charge</span>
+                                <b id="splitTallyService">RM 0.00</b>
+                            </div>
+                            <div class="tally-cell" id="splitRowTax" hidden>
+                                <span id="splitTallyTaxLabel">SST</span>
+                                <b id="splitTallyTax">RM 0.00</b>
+                            </div>
+                            <div class="tally-cell" id="splitRowDelivery" hidden>
+                                <span>Delivery fee</span>
+                                <b id="splitTallyDelivery">RM 0.00</b>
+                            </div>
+                            <div class="tally-cell" id="splitRowPlatform" hidden>
+                                <span>Platform fee</span>
+                                <b id="splitTallyPlatform">RM 0.00</b>
+                            </div>
+                            <div class="tally-cell" id="splitRowVoucher" hidden>
+                                <span id="splitTallyVoucherLabel">Voucher</span>
+                                <b id="splitTallyVoucher" class="is-minus">RM 0.00</b>
+                            </div>
+                            <div class="tally-cell is-total">
+                                <span>Bill total</span>
+                                <b id="splitTallyTotal">RM 0.00</b>
+                            </div>
+                        </div>
+
+                        <div class="split-part">
+                            <div class="split-part-head">
+                                <h3>Everyone pays</h3>
+                                <div class="card-actions">
+                                    <span class="card-note" id="splitEvenNote">&mdash;</span>
+                                    <button type="button" class="ghost-btn" id="splitCopy">
+                                        <i class="bi bi-clipboard"></i> Copy summary
+                                    </button>
+                                </div>
+                            </div>
+                            <div class="table-wrap">
+                                <table class="data-table">
+                                    <thead>
+                                        <tr>
+                                            <th>Person</th>
+                                            <th>Had</th>
+                                            <th>Share of charges</th>
+                                            <th>Pays</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody id="splitBody"></tbody>
+                                </table>
+                            </div>
+                        </div>
+
+                    </div>
+
                     <div class="form-foot">
                         <button type="button" class="primary-btn" id="ledgerSubmit">
                             <i class="bi bi-plus-lg"></i> Add entry
@@ -536,6 +845,23 @@
                     </div>
                     <p class="rate-warn" id="ledgerRateWarn" hidden></p>
                     <div id="ledgerList"></div>
+                </section>
+
+<section class="card" id="splitSettleCard">
+                    <div class="card-head">
+                        <h2>Settle up</h2>
+                        <div class="card-actions">
+                            <span class="card-note" id="splitSettleNote">&mdash;</span>
+                            <div class="seg is-compact" id="splitFilter" data-value="open">
+                                <button type="button" data-val="open" class="is-on">Open</button>
+                                <button type="button" data-val="settled">Settled</button>
+                                <button type="button" data-val="all">All</button>
+                            </div>
+                        </div>
+                    </div>
+                    <p class="split-settle-lead" id="splitSettleLead">&mdash;</p>
+                    <div id="splitSettleList"></div>
+
                 </section>
 
                 <!-- The three cards that read the list, and none of which grows without
@@ -664,442 +990,6 @@
                     <p class="hint" id="categoryMethodHint" hidden>A payment method is an account: choosing one is what moves its balance, which is why cash and a credit card cannot be the same entry. Opening balance, kind and currency live on the Accounts card above &mdash; this is for naming them.</p>
                 </section>
                 </div>
-
-            </div>
-        </section>
-
-        <!-- ==============================================================
-             BILL SPLIT
-             ==============================================================
-             A bill here is a record, not a sum. It is saved, it keeps the
-             people who were at the table, and it keeps track of who has
-             actually paid back — which is the part a calculator cannot do,
-             and the only part anyone is still thinking about a week later.
-             ============================================================== -->
-        <section class="module" id="module-split" hidden>
-
-            <div class="hero">
-                <div class="hero-main">
-                    <span class="hero-label">Bill total</span>
-                    <span class="hero-value" id="splitTotal">RM 0.00</span>
-                    <span class="hero-foot" id="splitPaxFoot">&mdash;</span>
-                </div>
-                <div class="hero-stats">
-                    <div class="hero-stat">
-                        <span class="hero-stat-label">Your share</span>
-                        <span class="hero-stat-value" id="splitYourShare">RM 0.00</span>
-                        <span class="hero-stat-foot" id="splitYourShareFoot">&mdash;</span>
-                    </div>
-                    <div class="hero-stat">
-                        <span class="hero-stat-label" id="splitOwedLabel">Owed to you</span>
-                        <span class="hero-stat-value" id="splitOwed">RM 0.00</span>
-                        <span class="hero-stat-foot" id="splitOwedFoot">&mdash;</span>
-                    </div>
-                </div>
-            </div>
-
-            <div class="stack">
-
-                <form class="card" id="split-form" autocomplete="off" onsubmit="return false;">
-                    <div class="card-head">
-                        <h2 id="splitFormTitle">New bill</h2>
-                        <div class="card-actions">
-                            <span class="card-note" id="splitDirtyNote" hidden>Unsaved</span>
-                            <!-- Duplicating lives here rather than in the saved
-                                 list, where its icon read as "copy this to the
-                                 clipboard" to everybody who has used a phone.
-                                 Under a word it cannot be mistaken for one. -->
-                            <button type="button" class="ghost-btn" id="splitDuplicate" hidden>
-                                <i class="bi bi-files"></i> Duplicate
-                            </button>
-                            <button type="button" class="ghost-btn" data-reset="split">
-                                <i class="bi bi-arrow-counterclockwise"></i> Start over
-                            </button>
-                        </div>
-                    </div>
-
-                    <div class="field-grid">
-                        <div class="field">
-                            <label for="splitTitle">What for</label>
-                            <input type="text" id="splitTitle" placeholder="Dinner, Langkawi trip, groceries&hellip;">
-                        </div>
-
-                        <div class="field">
-                            <label for="splitDate">When</label>
-                            <input type="date" id="splitDate">
-                        </div>
-
-                        <div class="field">
-                            <label for="splitPaidBy" id="splitPaidByLabel">Paid by</label>
-                            <select id="splitPaidBy"></select>
-                        </div>
-
-
-                    </div>
-
-                    <!-- ----------------------------------------------------
-                         One evening is often three tills: JK put the pork
-                         down at the hotpot, you paid at NSK, Lavelle bought
-                         the drinks at Chagee. One line per handover, and
-                         whatever the lines do not account for stays with the
-                         person named above — which is why a bill with no
-                         lines at all is still one person paying the lot.
-                         ---------------------------------------------------- -->
-                    <div class="check-row" id="splitPayLine">
-                        <label class="check-line">
-                            <input type="checkbox" id="splitMultiPay">
-                            <span>More than one person paid</span>
-                        </label>
-                        <span class="card-note" id="splitPayNote" hidden>&mdash;</span>
-                    </div>
-
-                    <div class="split-pay-card" id="splitPayCard" hidden>
-                        <div id="splitPayments"></div>
-                        <button type="button" class="split-add" id="splitAddPayment">
-                            <i class="bi bi-plus-lg"></i> Add a payment
-                        </button>
-                        <p class="hint" id="splitPayHint">&mdash;</p>
-
-                        <!-- Two honest ways to clear the same debts. Netting is
-                             the fewest handovers; paying each till back is the
-                             one nobody has to check, because every figure in it
-                             is somebody's own share of one thing one person
-                             bought. Which is right depends on the table, not on
-                             the arithmetic — so the table picks. -->
-                        <div class="field is-wide" id="splitSettleStyleField">
-                            <label>Settle up</label>
-                            <div class="seg" id="splitSettleStyle" data-value="net">
-                                <button type="button" data-val="net" class="is-on">Fewest handovers</button>
-                                <button type="button" data-val="till">Pay back whoever paid</button>
-                            </div>
-                            <p class="hint">Tick the lines each payment covered above, then <b>Pay back whoever paid</b> settles it till by till &mdash; everyone on the NSK bill pays whoever paid at NSK. <b>Fewest handovers</b> nets it all off instead: the same money, fewer transfers, but some of it goes to somebody other than whoever bought that dish.</p>
-                        </div>
-                    </div>
-
-                    <!-- ----------------------------------------------------
-                         What the place adds on top. These scale every share by
-                         the same factor, so they never change who owes more
-                         than whom — but they are still part of what each
-                         person hands over.
-                         ---------------------------------------------------- -->
-                    <details class="fold" id="splitChargeFold">
-                        <summary>
-                            <span><i class="bi bi-receipt"></i> Service charge, SST &amp; discount</span>
-                            <b id="splitChargeSummary">None</b>
-                        </summary>
-
-                        <div class="field-grid">
-                            <div class="field is-wide">
-                                <label>What the place charges</label>
-                                <div class="seg" id="splitCharges" data-value="none">
-                                    <button type="button" data-val="none" class="is-on">None</button>
-                                    <button type="button" data-val="tax">6%</button>
-                                    <button type="button" data-val="svc">10%</button>
-                                    <button type="button" data-val="both">10% + 6%</button>
-                                </div>
-                                <p class="hint">Service charge goes on first, then SST is charged on top of it &mdash; same order as the receipt.</p>
-                            </div>
-
-                            <div class="field">
-                                <label for="splitService">Service charge</label>
-                                <div class="money-input is-suffix">
-                                    <span class="affix">%</span>
-                                    <input type="number" id="splitService" min="0" max="100" step="1" value="0" inputmode="decimal">
-                                </div>
-                            </div>
-
-                            <div class="field">
-                                <label for="splitTax">SST</label>
-                                <div class="money-input is-suffix">
-                                    <span class="affix">%</span>
-                                    <input type="number" id="splitTax" min="0" max="100" step="1" value="0" inputmode="decimal">
-                                </div>
-                            </div>
-
-                            <div class="field">
-                                <label for="splitDiscount">Discount <span class="per">off the whole bill</span></label>
-                                <div class="field-pair">
-                                    <div class="money-input is-suffix" id="splitDiscountBox">
-                                        <span class="affix" id="splitDiscountAffix">%</span>
-                                        <input type="number" id="splitDiscount" min="0" step="1" placeholder="0" inputmode="decimal">
-                                    </div>
-                                    <!-- Most discounts are a percentage; a voucher is
-                                         the exception, so ringgit is the second button
-                                         rather than the only one. -->
-                                    <div class="seg is-compact" id="splitDiscountUnit" data-value="pct">
-                                        <button type="button" data-val="pct" class="is-on">%</button>
-                                        <button type="button" data-val="rm">RM</button>
-                                    </div>
-                                </div>
-                            </div>
-                        </div>
-
-                        <!-- A promo on one dish is a different thing from a
-                             promo on the bill: it belongs to whoever ate that
-                             dish, so it comes off before anyone's share is
-                             worked out. Off by default — most bills have none,
-                             and a column per dish is a lot to carry for a rare
-                             case. -->
-                        <div class="check-row" id="splitItemOffLine">
-                            <label class="check-line">
-                                <input type="checkbox" id="splitItemOff">
-                                <span>Some dishes have their own discount</span>
-                            </label>
-                            <div class="seg is-compact" id="splitItemOffUnit" data-value="pct" hidden>
-                                <button type="button" data-val="pct" class="is-on">%</button>
-                                <button type="button" data-val="rm">RM</button>
-                            </div>
-                        </div>
-
-                        <label class="check-line">
-                            <input type="checkbox" id="splitRound">
-                            <span>Round the total to 5 sen (paying cash)</span>
-                        </label>
-
-                        <!-- ------------------------------------------------
-                             Ordered in. A delivery receipt has two lines that
-                             are not food — the ride and the app — and a
-                             voucher that comes off once both are on it. All
-                             three are flat ringgit, which is why they cannot
-                             be said with the percentages above.
-                             ------------------------------------------------ -->
-                        <label class="check-line">
-                            <input type="checkbox" id="splitDelivery">
-                            <span>This was a delivery (foodpanda, Grab, ShopeeFood&hellip;)</span>
-                        </label>
-
-                        <div class="split-delivery" id="splitDeliveryCard" hidden>
-                            <div class="field-grid">
-                                <div class="field">
-                                    <label for="splitDeliveryFee">Delivery fee</label>
-                                    <div class="money-input">
-                                        <span class="affix">RM</span>
-                                        <input type="number" id="splitDeliveryFee" min="0" step="0.10" placeholder="0.00" inputmode="decimal">
-                                    </div>
-                                </div>
-
-                                <div class="field">
-                                    <label for="splitPlatformFee">Platform fee</label>
-                                    <div class="money-input">
-                                        <span class="affix">RM</span>
-                                        <input type="number" id="splitPlatformFee" min="0" step="0.10" placeholder="0.00" inputmode="decimal">
-                                    </div>
-                                    <p class="hint">Whatever the app charges on top of the ride &mdash; service fee, platform fee, small-order fee. Add them together.</p>
-                                </div>
-
-                                <div class="field">
-                                    <label for="splitVoucher">Voucher <span class="per">off the order</span></label>
-                                    <div class="field-pair">
-                                        <div class="money-input" id="splitVoucherBox">
-                                            <span class="affix" id="splitVoucherAffix">RM</span>
-                                            <input type="number" id="splitVoucher" min="0" step="0.10" placeholder="0" inputmode="decimal">
-                                        </div>
-                                        <!-- A delivery promo is nearly always a
-                                             flat amount, so ringgit leads here
-                                             where the bill discount leads with a
-                                             percentage. -->
-                                        <div class="seg is-compact" id="splitVoucherUnit" data-value="rm">
-                                            <button type="button" data-val="rm" class="is-on">RM</button>
-                                            <button type="button" data-val="pct">%</button>
-                                        </div>
-                                    </div>
-                                    <p class="hint">Taken off after the fees, the way the app takes it off &mdash; so a free-delivery promo can reach the delivery fee.</p>
-                                </div>
-
-                                <div class="field is-wide">
-                                    <label>How the fees divide</label>
-                                    <div class="seg" id="splitFeeSplit" data-value="even">
-                                        <button type="button" data-val="even" class="is-on">Evenly</button>
-                                        <button type="button" data-val="order">By what each ordered</button>
-                                    </div>
-                                    <p class="hint">A flat fee is not bigger because somebody ordered more &mdash; the person who added a drink did not use less of the delivery. Switch it if your table would rather it rode on the shares.</p>
-                                </div>
-                            </div>
-                        </div>
-                    </details>
-
-                    <div class="tally">
-                        <div class="tally-cell">
-                            <span>Ordered</span>
-                            <b id="splitTallyFood">RM 0.00</b>
-                        </div>
-                        <div class="tally-cell" id="splitRowItemOff" hidden>
-                            <span>Dish discounts</span>
-                            <b id="splitTallyItemOff" class="is-minus">RM 0.00</b>
-                        </div>
-                        <div class="tally-cell" id="splitRowDiscount" hidden>
-                            <span id="splitTallyDiscountLabel">Discount</span>
-                            <b id="splitTallyDiscount" class="is-minus">RM 0.00</b>
-                        </div>
-                        <div class="tally-cell" id="splitRowService" hidden>
-                            <span id="splitTallyServiceLabel">Service charge</span>
-                            <b id="splitTallyService">RM 0.00</b>
-                        </div>
-                        <div class="tally-cell" id="splitRowTax" hidden>
-                            <span id="splitTallyTaxLabel">SST</span>
-                            <b id="splitTallyTax">RM 0.00</b>
-                        </div>
-                        <div class="tally-cell" id="splitRowDelivery" hidden>
-                            <span>Delivery fee</span>
-                            <b id="splitTallyDelivery">RM 0.00</b>
-                        </div>
-                        <div class="tally-cell" id="splitRowPlatform" hidden>
-                            <span>Platform fee</span>
-                            <b id="splitTallyPlatform">RM 0.00</b>
-                        </div>
-                        <div class="tally-cell" id="splitRowVoucher" hidden>
-                            <span id="splitTallyVoucherLabel">Voucher</span>
-                            <b id="splitTallyVoucher" class="is-minus">RM 0.00</b>
-                        </div>
-                        <div class="tally-cell is-total">
-                            <span>Bill total</span>
-                            <b id="splitTallyTotal">RM 0.00</b>
-                        </div>
-                    </div>
-
-                    <div class="form-foot">
-                        <button type="button" class="primary-btn" id="splitSave">
-                            <i class="bi bi-check-lg"></i> Save bill
-                        </button>
-                        <button type="button" class="ghost-btn" id="splitCancel" hidden>
-                            <i class="bi bi-x-lg"></i> Cancel
-                        </button>
-                        <span class="hint" id="splitSaveHint">
-                            <i class="bi bi-hdd"></i> Saved on this device only &mdash; nothing leaves your browser.
-                        </span>
-                    </div>
-                </form>
-
-                <section class="card">
-                    <div class="card-head">
-                        <h2>Who was there</h2>
-                        <div class="card-actions">
-                            <span class="card-note" id="splitPeopleNote">&mdash;</span>
-                            <button type="button" class="ghost-btn" id="splitAddPerson">
-                                <i class="bi bi-person-plus"></i> Add person
-                            </button>
-                        </div>
-                    </div>
-                    <div id="splitPeople"></div>
-                    <p class="hint" id="splitPeopleHint">One line per thing somebody had, under the person who had it &mdash; a name on the line is optional, so a single figure for someone who does not want it itemised works too. Anything the table shared goes in the card below. The first person is you: your share, what you are owed and the expense entry are all measured from that row.</p>
-                </section>
-
-                <section class="card" id="splitSharedCard">
-                    <div class="card-head">
-                        <h2>Shared by everyone</h2>
-                        <div class="card-actions">
-                            <span class="card-note">Shared <b id="splitSharedTotal">RM 0.00</b></span>
-                            <button type="button" class="ghost-btn" id="splitAddShared">
-                                <i class="bi bi-plus-lg"></i> Add item
-                            </button>
-                        </div>
-                    </div>
-                    <div id="splitShared"></div>
-                    <p class="hint"><b>Only know the total?</b> Put it here as one line &mdash; RM&nbsp;240 across four people is RM&nbsp;60 each. There is no total field on this page because the total is added up from the lines; typing one as well would give the bill two answers.</p>
-                    <p class="hint">Everyone, equally, by default. Tap a name off <b>Shared by</b> when somebody did not have that dish &mdash; four at the table but only two on the plate &mdash; and press <b>Split by portions</b> when they did not have the same amount of it: three of the five pao, two of the three beers. The price follows.</p>
-                </section>
-
-                <section class="card">
-                    <div class="card-head">
-                        <h2>Everyone pays</h2>
-                        <div class="card-actions">
-                            <span class="card-note" id="splitEvenNote">&mdash;</span>
-                            <button type="button" class="ghost-btn" id="splitCopy">
-                                <i class="bi bi-clipboard"></i> Copy summary
-                            </button>
-                        </div>
-                    </div>
-                    <div class="table-wrap">
-                        <table class="data-table">
-                            <thead>
-                                <tr>
-                                    <th>Person</th>
-                                    <th>Had</th>
-                                    <th>Share of charges</th>
-                                    <th>Pays</th>
-                                </tr>
-                            </thead>
-                            <tbody id="splitBody"></tbody>
-                        </table>
-                    </div>
-                </section>
-
-                <!-- ------------------------------------------------------
-                     The half a calculator never reaches: the money has been
-                     worked out, and now it has to actually move.
-                     ------------------------------------------------------ -->
-                <section class="card" id="splitSettleCard">
-                    <div class="card-head">
-                        <h2>Settle up</h2>
-                        <span class="card-note" id="splitSettleNote">&mdash;</span>
-                    </div>
-                    <p class="split-settle-lead" id="splitSettleLead">&mdash;</p>
-                    <div id="splitSettleList"></div>
-
-                    <!-- Only the reader's own share is ever an expense. The
-                         rest was lent for the length of a dinner. -->
-                    <div class="split-expense" id="splitExpense">
-                        <div class="split-expense-head">
-                            <span><i class="bi bi-journal-plus"></i> Add <b id="splitExpAmount">RM 0.00</b> to your expenses</span>
-                            <span class="split-expense-state" id="splitExpState" hidden></span>
-                        </div>
-                        <div class="split-expense-body" id="splitExpBody">
-                            <!-- Two honest ways to keep this, and the one you pick decides what a
-                                 repayment is later: your share alone, and money coming back is a
-                                 transfer between your own accounts; or the whole bill, matching
-                                 your bank statement, and a repayment comes back off it. -->
-                            <div class="field">
-                                <label for="splitExpMode">Record</label>
-                                <div class="seg is-compact" id="splitExpMode" data-value="full">
-                                    <button type="button" data-val="full" class="is-on">The whole bill</button>
-                                    <button type="button" data-val="share">My share only</button>
-                                </div>
-                            </div>
-                            <div class="field">
-                                <label for="splitExpCategory">Category</label>
-                                <select id="splitExpCategory"></select>
-                            </div>
-                            <div class="field">
-                                <label for="splitExpAccount">Paid from</label>
-                                <select id="splitExpAccount"></select>
-                            </div>
-                            <button type="button" class="primary-btn" id="splitExpAdd">
-                                <i class="bi bi-plus-lg"></i> Record my share
-                            </button>
-                        </div>
-                        <p class="hint is-block" id="splitDropNote" hidden></p>
-                        <p class="hint" id="splitExpHint">Your share only. The rest of the bill was never your money, so recording all of it would tell every total in the app that you spent far more than you did.</p>
-                    </div>
-                </section>
-
-                <section class="card is-wide">
-                    <div class="card-head">
-                        <h2>Saved bills</h2>
-                        <div class="card-actions">
-                            <div class="seg is-compact" id="splitFilter" data-value="open">
-                                <button type="button" data-val="open" class="is-on">Open</button>
-                                <button type="button" data-val="settled">Settled</button>
-                                <button type="button" data-val="all">All</button>
-                            </div>
-                            <span class="card-note" id="splitBillsNote">&mdash;</span>
-                        </div>
-                    </div>
-                    <div class="table-wrap" id="splitBillsWrap">
-                        <table class="data-table">
-                            <thead>
-                                <tr>
-                                    <th>When</th>
-                                    <th>Bill</th>
-                                    <th>Total</th>
-                                    <th>Your share</th>
-                                    <th>Settled</th>
-                                    <th></th>
-                                </tr>
-                            </thead>
-                            <tbody id="splitBills"></tbody>
-                        </table>
-                    </div>
-                </section>
 
             </div>
         </section>
@@ -1476,6 +1366,10 @@
                             <span>Paid so far</span>
                             <b id="commitTallyPaid">RM 0.00</b>
                         </div>
+                        <div class="tally-cell" id="commitTallyWaivedCell" hidden>
+                            <span>Waived</span>
+                            <b id="commitTallyWaived">RM 0.00</b>
+                        </div>
                         <div class="tally-cell is-total">
                             <span id="commitTallyLeftLabel">Still to pay</span>
                             <b id="commitTallyLeft">RM 0.00</b>
@@ -1551,6 +1445,7 @@
                                     <th>Which</th>
                                     <th>Amount</th>
                                     <th>Status</th>
+                                    <th></th>
                                 </tr>
                             </thead>
                             <tbody id="commitUpcoming"></tbody>

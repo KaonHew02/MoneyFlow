@@ -10,7 +10,7 @@ collection of temporary calculators.
 |---|------|--------|
 | 1 | Understand | Financial Dashboard |
 | 2 | Track | Expense Recorder |
-| 3 | Share | Bill Splitter |
+| 3 | Share | Bill Splitter — inside the Expense Recorder since 3 Sep 2026 |
 | 4 | Plan | Financial Planner |
 | 5 | Commit | Instalment Tracker |
 | 6 | Reduce | Credit Card Payoff |
