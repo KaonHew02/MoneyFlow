@@ -2367,7 +2367,7 @@ const readBillItem = (item) => ({
 /** A shared dish may also carry portions. Absent means the bill predates
  *  them, which is an even split — exactly what it always was. */
 const readBillShared = (item, known) => {
-    const row = readItem(item);
+    const row = readBillItem(item);
     const units = {};
     Object.entries((item && item.units) || {}).forEach(([id, value]) => {
         if (known.has(id)) units[id] = String(value || '');
