@@ -11156,7 +11156,7 @@ function dashBreakdown(entries, dim) {
 }
 
 /** The daylight values, used only if the stylesheet cannot be read. */
-const TONE_FALLBACK = { jade: '#0e7c66', amber: '#b8800f', indigo: '#4f46c9', red: '#cc3a34' };
+const TONE_FALLBACK = { jade: '#09855f', amber: '#b07d0a', indigo: '#5147cf', red: '#d2423a' };
 
 /**
  * A bucket's colour, taken from the stylesheet rather than repeated here —
@@ -12069,13 +12069,15 @@ function dashSummaryText() {
  * THEME
  * ====================================================================
  * There is no theme code any more, and that is the whole design: MoneyFlow
- * is a dark app, the same one for everybody. `data-theme="dark"` is written
- * on <html> in the markup, so the palette is settled before the first byte
- * of this file is parsed — nothing to resolve, nothing to flash, and no
- * preference to lose when the browser is cleared.
+ * wears daylight, the same one for everybody. <html> carries no `data-theme`
+ * at all, so the palette is settled before the first byte of this file is
+ * parsed — nothing to resolve, nothing to flash, and no preference to lose
+ * when the browser is cleared.
  *
- * The light tokens still sit at the top of the stylesheet as the base layer
- * the dark ones are written against; nothing selects them.
+ * The dark tokens still sit at the top of the stylesheet, kept in step with
+ * the daylight ones; nothing selects them. Turning the app over is one
+ * attribute on <html> plus swapping the sidebar's logo.svg for
+ * logo-dark.svg, which is why both wordmark files are still shipped.
  * ====================================================================
  */
 

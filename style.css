@@ -1,13 +1,18 @@
 /* ==========================================================================
    MoneyFlow — design tokens
 
-   Its own identity, deliberately not the sibling calculator app's: jade
-   instead of corporate blue, a sage-white page instead of ivory, a top bar
-   and a full-bleed hero band instead of a sidebar and stat tiles.
+   Its own identity, deliberately not the sibling calculator app's: emerald
+   instead of corporate blue, a mint page instead of ivory, a sidebar the
+   cards float beside rather than a panel they queue under.
 
-   Jade / amber / indigo are the three budget buckets, and they mean the same
-   thing everywhere they appear — the logo wedges, the stacked bar, the row
-   icons, the legend dots and the tables.
+   The palette is the one the user chose from two expense-tracker designs on
+   2026-09-11: a pale mint page, white cards with a generous radius, one deep
+   emerald band carrying the figure the screen exists to answer, and soft
+   tinted tiles marking what each row is.
+
+   Emerald / amber / indigo are the three budget buckets, and they mean the
+   same thing everywhere they appear — the stacked bar, the row icons, the
+   legend dots and the tables.
    ========================================================================== */
 /* --------------------------------------------------------------------------
    `hidden` has to actually hide.
@@ -25,72 +30,89 @@
    -------------------------------------------------------------------------- */
 [hidden] { display: none !important; }
 
+/* --------------------------------------------------------------------------
+   Daylight — the theme the app actually wears.
+
+   Every value here was picked against white or against the mint page, and
+   measured rather than eyeballed: --jade is 4.6:1 on paper, --red 4.6:1 and
+   --indigo 6.6:1, so a label in a bucket colour is readable and not merely
+   visible. --mint is the bright emerald from the reference and is the one
+   colour here that carries no text — it is for fills, chart strokes and the
+   pills that sit on the hero's dark ground.
+   -------------------------------------------------------------------------- */
 :root {
     color-scheme: light;
 
-    --canvas:      #eff3f0;
+    --canvas:      #e8f4ee;   /* the pale mint page everything floats on */
     --paper:       #ffffff;
-    --paper-2:     #f7faf8;   /* nested rows, sitting inside a card */
+    --paper-2:     #f4faf7;   /* nested rows, sitting inside a card */
 
-    --ink:         #16211d;   /* warm near-black with a green cast */
-    --ink-2:       #566761;
-    --ink-3:       #8fa099;
-    --ink-4:       #b8c5bf;   /* placeholders, and the quietest table cell */
+    --ink:         #0c1f18;   /* near-black with a green cast */
+    --ink-2:       #49605a;
+    --ink-3:       #7c938c;
+    --ink-4:       #a7bdb5;   /* placeholders, and the quietest table cell */
 
-    --line:        #e0e8e3;
-    --line-2:      #edf2ef;
-    --line-strong: #d8e2dd;   /* the rule above a total */
-    --row-line:    #f4f7f5;   /* between rows of a list or table */
-    --field-line:  #d9e2dd;
+    --line:        #dbeae3;
+    --line-2:      #e9f4ef;
+    --line-strong: #c9dfd5;   /* the rule above a total */
+    --row-line:    #eef7f2;   /* between rows of a list or table */
+    --field-line:  #d4e6dd;
 
-    --track:       #e6ece9;   /* the empty part of a bar */
-    --track-2:     #d3ded8;   /* and the leftover slice of a stacked one */
+    --track:       #e3f1eb;   /* the empty part of a bar */
+    --track-2:     #c4e0d3;   /* and the leftover slice of a stacked one */
 
-    --jade:        #0e7c66;   /* brand, and the "needs" bucket */
-    --jade-2:      #0a6553;
-    --jade-soft:   #e3f2ee;
-    --jade-line:   #bfe0d7;
-    --jade-ink:    #0a5545;
+    --jade:        #09855f;   /* brand, and the "needs" bucket */
+    --jade-2:      #066b4c;
+    --jade-soft:   #ddf5ec;
+    --jade-line:   #b0e5d2;
+    --jade-ink:    #05654a;
 
-    --amber:       #b8800f;   /* "wants" — the part you could cut */
-    --amber-soft:  #fbf2dc;
+    /* The reference's bright emerald. Fills and strokes only — white on it is
+       2.3:1, so it never carries text. */
+    --mint:        #2ecc9b;
 
-    --indigo:      #4f46c9;   /* "savings & debt" — still your money */
-    --indigo-soft: #ecebfb;
+    --amber:       #b07d0a;   /* "wants" — the part you could cut */
+    --amber-soft:  #fcf3dc;
 
-    --red:         #cc3a34;
-    --red-soft:    #fdecea;
+    --indigo:      #5147cf;   /* "savings & debt" — still your money */
+    --indigo-soft: #ecebfc;
+
+    --red:         #d2423a;
+    --red-soft:    #fdeceb;
 
     /* Four more, for categories only. A bucket still has exactly one colour —
        these tint a category disc so a list of twenty is scannable, and carry
        no meaning of their own. */
     --violet:      #7a3fc4;
-    --violet-soft: #f2eafc;
-    --sky:         #1c74a8;
-    --sky-soft:    #e3f1f9;
+    --violet-soft: #f3ebfc;
+    --sky:         #1372a6;
+    --sky-soft:    #e2f1fa;
     --rose:        #bf3a70;
-    --rose-soft:   #fbe9f0;
-    --slate:       #5b6b72;
-    --slate-soft:  #eceff0;
-    --red-line:    #f3ccc8;
-    --red-ink:     #8c2723;
-    --red-2:       #b8322d;   /* the hover of a destructive button */
+    --rose-soft:   #fce9f1;
+    --slate:       #55696f;
+    --slate-soft:  #ebf0f0;
+    --red-line:    #f5ccc8;
+    --red-ink:     #92271f;
+    --red-2:       #bb372f;   /* the hover of a destructive button */
 
     --on-jade:     #ffffff;   /* text sitting ON a jade or red fill, not beside it */
     --on-red:      #ffffff;
 
-    --topbar:        rgba(255, 255, 255, .88);
-    --backdrop:      rgba(9, 30, 26, .55);
-    --scroll-shadow: rgba(22, 33, 29, .13);
+    --topbar:        rgba(255, 255, 255, .86);
+    --backdrop:      rgba(6, 38, 29, .48);
+    --scroll-shadow: rgba(12, 45, 36, .12);
 
-    --hero-a:   #13907a;      /* the three stops of the hero band */
-    --hero-mid: #0e7c66;
-    --hero-b:   #0a5545;
+    /* The three stops of the hero band: bright emerald in the corner the eye
+       starts from, deep forest by the far one. The lightest stop is 3.6:1
+       under white, which is the 44px figure's floor and no lower. */
+    --hero-a:   #0f9a72;
+    --hero-mid: #0b7d5f;
+    --hero-b:   #064b3a;
 
-    --radius:      20px;
-    --radius-sm:   12px;
-    --shadow:      0 1px 2px rgba(22, 33, 29, .04), 0 10px 28px rgba(22, 33, 29, .05);
-    --shadow-hero: 0 2px 6px rgba(7, 60, 49, .18), 0 18px 40px rgba(7, 60, 49, .20);
+    --radius:      22px;
+    --radius-sm:   14px;
+    --shadow:      0 1px 2px rgba(10, 45, 35, .045), 0 12px 30px rgba(10, 45, 35, .07);
+    --shadow-hero: 0 2px 8px rgba(5, 62, 48, .18), 0 20px 44px rgba(5, 62, 48, .22);
 }
 
 /* --------------------------------------------------------------------------
@@ -98,47 +120,48 @@
 
    Only the tokens move — every rule below this block is written against them,
    which is the whole reason the literals were worth hunting down first. The
-   ground is a green-cast near-black rather than a neutral grey, so the jade
-   still looks like it belongs to the same app.
+   ground is a green-cast near-black rather than a neutral grey, so the
+   emerald still looks like it belongs to the same app.
 
-   Jade, amber and indigo are all lifted: the daylight versions were chosen to
-   carry weight against white, and against a dark ground they read as mud. The
-   meanings do not move — jade is still needs, amber still wants, indigo still
-   savings and debt, and red is still reserved for being over budget.
+   Emerald, amber and indigo are all lifted: the daylight versions were chosen
+   to carry weight against white, and against a dark ground they read as mud.
+   The meanings do not move — emerald is still needs, amber still wants,
+   indigo still savings and debt, and red is still reserved for being over
+   budget.
 
-   There is one selector here rather than the usual pair, and no
-   `prefers-color-scheme` query: `data-theme="dark"` is written on <html> in
-   index.html itself, so this block is simply always on. MoneyFlow is a dark
-   app — there is no toggle, no stored preference, and nothing to resolve
-   before the first paint. The light tokens above stay as the base layer this
-   one is written against.
+   Nothing selects this block today. MoneyFlow wears daylight: the <html> tag
+   carries no `data-theme`, and there is no toggle and no stored preference to
+   resolve before the first paint. The block is kept in step with the palette
+   above so that turning it back on is one attribute rather than a re-do.
    -------------------------------------------------------------------------- */
 :root[data-theme="dark"] {
     color-scheme: dark;
 
-    --canvas:      #0f1613;
-    --paper:       #16201c;
-    --paper-2:     #1b2622;
+    --canvas:      #0d1613;
+    --paper:       #14201b;
+    --paper-2:     #192621;
 
-    --ink:         #e8efeb;
-    --ink-2:       #a9bab3;
-    --ink-3:       #7d8f88;
-    --ink-4:       #5f716a;
+    --ink:         #e6efea;
+    --ink-2:       #a6bab2;
+    --ink-3:       #7a8f87;
+    --ink-4:       #5c716a;
 
-    --line:        #27352f;
-    --line-2:      #202c27;
-    --line-strong: #35463e;
-    --row-line:    #1f2a25;
-    --field-line:  #35463e;
+    --line:        #25352e;
+    --line-2:      #1e2c26;
+    --line-strong: #33463d;
+    --row-line:    #1d2a24;
+    --field-line:  #33463d;
 
-    --track:       #24312b;
-    --track-2:     #35463f;
+    --track:       #22312a;
+    --track-2:     #33463e;
 
-    --jade:        #2fa88c;
-    --jade-2:      #38bd9e;
-    --jade-soft:   #12332b;
-    --jade-line:   #1d4a3f;
-    --jade-ink:    #86dcc3;
+    --jade:        #2ec99e;
+    --jade-2:      #3ddcae;
+    --jade-soft:   #0f3329;
+    --jade-line:   #1b4c3d;
+    --jade-ink:    #8ee2c6;
+
+    --mint:        #4fe0b3;
 
     --amber:       #d9a02a;
     --amber-soft:  #33280f;
@@ -161,22 +184,22 @@
     --red-ink:     #f2aca7;
     --red-2:       #c9453f;
 
-    /* White on the lifted jade is about 2.8:1 — legible enough to look fine
+    /* White on the lifted emerald is about 2.6:1 — legible enough to look fine
        and not enough to read comfortably. A filled pill in the dark theme
        carries near-black text instead, which puts it back over 5:1. */
-    --on-jade:     #05231c;
+    --on-jade:     #04241b;
     --on-red:      #2b0b0a;
 
-    --topbar:        rgba(15, 22, 19, .86);
+    --topbar:        rgba(13, 22, 19, .86);
     --backdrop:      rgba(0, 0, 0, .66);
     --scroll-shadow: rgba(0, 0, 0, .42);
 
-    --hero-a:   #12735f;
-    --hero-mid: #0d6553;
-    --hero-b:   #06342c;
+    --hero-a:   #0e7f62;
+    --hero-mid: #0a6650;
+    --hero-b:   #04322a;
 
-    --shadow:      0 1px 2px rgba(0, 0, 0, .3), 0 10px 28px rgba(0, 0, 0, .34);
-    --shadow-hero: 0 2px 6px rgba(0, 0, 0, .38), 0 18px 40px rgba(0, 0, 0, .44);
+    --shadow:      0 1px 2px rgba(0, 0, 0, .3), 0 12px 30px rgba(0, 0, 0, .34);
+    --shadow-hero: 0 2px 8px rgba(0, 0, 0, .38), 0 20px 44px rgba(0, 0, 0, .44);
 }
 
 * { box-sizing: border-box; }
@@ -229,7 +252,7 @@ body {
     font-size: 12px;
     font-weight: 600;
     letter-spacing: .04em;
-    color: var(--muted);
+    color: var(--ink-3);
 }
 
 /* The gap above the first module used to be the tagline's bottom margin, so
@@ -266,7 +289,7 @@ body {
 .tabs button.is-on {
     background: var(--jade);
     color: var(--on-jade);
-    box-shadow: 0 2px 10px rgba(14, 124, 102, .3);
+    box-shadow: 0 2px 10px rgba(9, 133, 95, .3);
 }
 
 .tabs button.is-on i { opacity: 1; }
@@ -282,7 +305,7 @@ body {
 .app.is-rail .sidebar { flex-basis: 76px; padding-left: 12px; padding-right: 12px; }
 .app.is-rail .tagline { display: none; }
 .app.is-rail .brand { display: flex; justify-content: center; padding: 0; }
-.app.is-rail .brand img { width: 34px; content: url(logo-icon.svg); }
+.app.is-rail .brand img { width: 34px; content: url(logo-icon.svg?v=11); }
 .app.is-rail .tabs button { justify-content: center; padding: 12px 0; }
 .app.is-rail .tabs button i { font-size: 17px; }
 
@@ -356,7 +379,7 @@ body {
         padding: 0;
         border-radius: 50%;
         background: var(--paper);
-        color: var(--muted);
+        color: var(--ink-3);
         box-shadow: 0 1px 5px rgba(0, 0, 0, .16);
     }
 
@@ -482,7 +505,7 @@ body {
     align-items: center;
     margin-bottom: 20px;
     padding: 30px 34px;
-    border-radius: 24px;
+    border-radius: 26px;
     background: linear-gradient(128deg, var(--hero-a) 0%, var(--hero-mid) 48%, var(--hero-b) 100%);
     box-shadow: var(--shadow-hero);
     color: #fff;
@@ -681,7 +704,7 @@ input::placeholder { color: var(--ink-4); }
 input:focus, select:focus {
     outline: none;
     border-color: var(--jade);
-    box-shadow: 0 0 0 3px rgba(14, 124, 102, .13);
+    box-shadow: 0 0 0 3px rgba(9, 133, 95, .13);
 }
 
 /* strip the spinner so the field reads as a figure, not a stepper */
@@ -760,7 +783,7 @@ input[type="date"]:hover::-webkit-calendar-picker-indicator { opacity: .85; }
 }
 
 .seg button:hover { color: var(--ink); }
-.seg button.is-on { background: var(--jade); color: var(--on-jade); box-shadow: 0 2px 6px rgba(14, 124, 102, .24); }
+.seg button.is-on { background: var(--jade); color: var(--on-jade); box-shadow: 0 2px 6px rgba(9, 133, 95, .24); }
 
 /* A view switch living in a card head, beside the note — not a form field. */
 .seg.is-compact { flex: 0 0 auto; padding: 3px; }
@@ -2265,11 +2288,11 @@ tr.is-locked { animation: nudge .3s ease; }
     font-weight: 700;
     color: var(--on-jade);
     cursor: pointer;
-    box-shadow: 0 2px 8px rgba(14, 124, 102, .28);
+    box-shadow: 0 2px 8px rgba(9, 133, 95, .28);
     transition: background .16s ease, box-shadow .16s ease, transform .1s ease;
 }
 
-.primary-btn:hover { background: var(--jade-2); box-shadow: 0 4px 14px rgba(14, 124, 102, .34); }
+.primary-btn:hover { background: var(--jade-2); box-shadow: 0 4px 14px rgba(9, 133, 95, .34); }
 .primary-btn:active { transform: translateY(1px); }
 
 /* Nothing to save is not a failure, so the button goes quiet rather than
@@ -2325,10 +2348,11 @@ tr.is-locked { animation: nudge .3s ease; }
    edited, without nesting anything clickable inside anything else clickable. */
 .led-entry {
     display: grid;
-    grid-template-columns: 34px minmax(0, 1fr) auto 30px;
-    gap: 12px;
+    grid-template-columns: 38px minmax(0, 1fr) auto 30px;
+    gap: 13px;
     align-items: center;
-    padding: 9px 4px;
+    padding: 11px 8px;
+    border-radius: 14px;
     border-bottom: 1px solid var(--row-line);
 }
 
@@ -2339,14 +2363,24 @@ tr.is-locked { animation: nudge .3s ease; }
     display: inline-flex;
     align-items: center;
     justify-content: center;
-    width: 34px;
-    height: 34px;
-    border-radius: 11px;
-    background: var(--red-soft);
-    color: var(--red);
-    font-size: 14px;
+    width: 38px;
+    height: 38px;
+    border-radius: 13px;
+    background: var(--track);
+    color: var(--ink-2);
+    font-size: 15px;
 }
 
+/* --------------------------------------------------------------------------
+   Why the tile for an expense is not red.
+
+   It used to be `--red-soft`, which put an alarm colour on every row of a
+   list whose whole content is expenses — so the one row that is genuinely
+   wrong had nothing left to say it with. The tile answers "what kind of
+   thing is this", and the amount beside it already answers "which way did
+   the money go", in red, once. Money arriving is the exception worth a
+   colour, because it is the rare row.
+   -------------------------------------------------------------------------- */
 .led-icon.led-income   { background: var(--jade-soft);   color: var(--jade); }
 .led-icon.led-transfer { background: var(--indigo-soft); color: var(--indigo); }
 
@@ -2362,8 +2396,9 @@ tr.is-locked { animation: nudge .3s ease; }
 
 .led-meta b {
     display: block;
-    font-size: 14px;
-    font-weight: 650;
+    font-size: 14.5px;
+    font-weight: 680;
+    letter-spacing: -.01em;
     color: var(--ink);
     overflow: hidden;
     text-overflow: ellipsis;
@@ -2372,7 +2407,8 @@ tr.is-locked { animation: nudge .3s ease; }
 
 .led-meta small {
     display: block;
-    font-size: 11.5px;
+    margin-top: 1px;
+    font-size: 12px;
     color: var(--ink-3);
     overflow: hidden;
     text-overflow: ellipsis;
@@ -2382,8 +2418,9 @@ tr.is-locked { animation: nudge .3s ease; }
 .led-meta:hover b { color: var(--jade); text-decoration: underline; }
 
 .led-amount {
-    font-size: 14.5px;
-    font-weight: 700;
+    font-size: 15.5px;
+    font-weight: 750;
+    letter-spacing: -.015em;
     font-variant-numeric: tabular-nums;
     white-space: nowrap;
 }

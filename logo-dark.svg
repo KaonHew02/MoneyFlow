@@ -1,22 +1,119 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 186 56" width="186" height="56" role="img" aria-label="MoneyFlow">
     <!--
-        The dark-ground wordmark. Same mark, same true 50 / 30 / 20 — but
-        "Money" is set in near-black in the daylight file, which vanishes
-        against a dark topbar, so it and the three wedges are lifted to the
-        dark theme's own jade, amber and indigo.
+        The dark-ground wordmark. Same mark — the horse is outlined and carries its own
+        ground, so only the word moves: "Money" is lifted off near-black and
+        "Flow" takes the dark theme's emerald.
+
+        The mark is the same file as logo-icon.svg, transplanted whole and
+        scaled to .72 so its 64 units land in the 56 the wordmark line is
+        tall. Edit the icon, then re-run the generator that wrote these two —
+        do not patch a horse by hand in three places and hope.
     -->
-    <g transform="translate(2 6) scale(.6875)">
-        <!-- 50% — the right half, from the top round to the bottom -->
-        <path d="M 34.30 32.00 L 34.30 12.00 A 20 20 0 0 1 34.30 52.00 Z" fill="#2fa88c"/>
-        <!-- 30% — bottom round to the left shoulder -->
-        <path d="M 30.14 33.35 L 30.14 53.35 A 20 20 0 0 1 11.12 27.17 Z" fill="#d9a02a"/>
-        <!-- 20% — the left shoulder back up to the top -->
-        <path d="M 30.65 30.14 L 11.63 23.96 A 20 20 0 0 1 30.65 10.14 Z" fill="#8b83ec"/>
+    <!--
+        The mark: a horse hugging a coin.
+
+        Asked for on 2026-09-11 — the reference was a lucky-cat charm holding
+        a gold coin, with the cat swapped for a horse.
+
+        Three shapes are doing the work of saying "horse", and the first draft
+        got all three wrong, which is why it read as a bear cub:
+
+          - the muzzle is wide and sits low, nearly the width of the head. A
+            small round snout is a bear. This is the strongest cue and it is
+            worth the room it takes.
+          - the ears are tall almonds standing clear of the skull, not
+            triangles tucked behind it.
+          - the mane is a forelock over the top quarter of the head, not a
+            cap. Covering the brow hides the blaze, and the blaze is the other
+            half of "horse".
+
+        Everything is circles, ellipses and short arcs on a 64 grid so it
+        survives being drawn at 20px in a browser tab: nothing is thinner than
+        about 2px, the outline is one weight throughout, and the coin is a
+        third of the mark's width so the "$" is still a "$" six pixels across.
+
+        Drawing order is the hug: body, then the coin in front of the chest,
+        then the two forelegs closing over the coin's face. Reorder any of
+        those three and it reads as a horse standing behind a coin.
+
+        Limbs are stroked twice — a dark pass, then a narrower tan pass on the
+        same path — rather than outlined as filled shapes. Two numbers move a
+        limb's thickness that way instead of eight.
+    -->
+    <g transform="translate(2 3) scale(.72)">
+        <g stroke="#4a3222" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round">
+            <!-- Ears: tall almonds, clear of the skull -->
+            <path d="M20.6 13.5 C 18.4 8.6 19.2 3.6 21.8 3.4 C 24.4 3.6 26.4 8.2 25.8 13.2 Z" fill="#d6a16a"/>
+            <path d="M43.4 13.5 C 45.6 8.6 44.8 3.6 42.2 3.4 C 39.6 3.6 37.6 8.2 38.2 13.2 Z" fill="#d6a16a"/>
+            <path d="M21.6 11.8 C 20.6 8.6 21.0 6.0 22.1 5.9 C 23.2 6.0 24.1 8.6 23.9 11.6 Z" fill="#f0a0a8" stroke="none"/>
+            <path d="M42.4 11.8 C 43.4 8.6 43.0 6.0 41.9 5.9 C 40.8 6.0 39.9 8.6 40.1 11.6 Z" fill="#f0a0a8" stroke="none"/>
+
+            <!-- Body: seated, wider than tall, so the hug has somewhere to happen -->
+            <path d="M32 31 C 43.5 31 50 38 50 46 C 50 54 42.5 58.6 32 58.6
+                     C 21.5 58.6 14 54 14 46 C 14 38 20.5 31 32 31 Z" fill="#d6a16a"/>
+
+            <!-- Hind feet, tucked under -->
+            <ellipse cx="19.4" cy="54" rx="4.6" ry="3.6" fill="#b9834f"/>
+            <ellipse cx="44.6" cy="54" rx="4.6" ry="3.6" fill="#b9834f"/>
+
+            <!-- Chest, the same cream as the blaze -->
+            <path d="M32 34 C 37.5 34 41 39 41 45 C 41 51 37 54.4 32 54.4
+                     C 27 54.4 23 51 23 45 C 23 39 26.5 34 32 34 Z"
+                  fill="#fdf6ec" stroke="none"/>
+
+            <!-- Head -->
+            <ellipse cx="32" cy="21.8" rx="15.5" ry="13.6" fill="#d6a16a"/>
+
+            <!-- Blaze: forehead to muzzle, drawn before the forelock covers its top -->
+            <path d="M32 10.5 C 34.2 10.5 35.2 13.2 35.2 17 C 35.2 21 33.9 23.4 32 23.4
+                     C 30.1 23.4 28.8 21 28.8 17 C 28.8 13.2 29.8 10.5 32 10.5 Z"
+                  fill="#fdf6ec" stroke="none"/>
+
+            <!-- Forelock: the top quarter of the head only -->
+            <path d="M19.5 17.2 C 19.9 11.4 25.2 8.2 32 8.2 C 38.8 8.2 44.1 11.4 44.5 17.2
+                     C 42.2 13.8 39.4 13.2 37.4 15.2 C 36 11.6 34.1 10.4 32 10.4
+                     C 29.9 10.4 28 11.6 26.6 15.2 C 24.6 13.2 21.8 13.8 19.5 17.2 Z"
+                  fill="#6b4227" stroke="none"/>
+            <path d="M32 10.4 C 34.1 10.4 36 11.6 37.4 15.2 C 35.6 13.6 33.8 13 32 13 Z"
+                  fill="#82522f" stroke="none"/>
+
+            <!-- Eyes: closed and happy — the one expression that survives being tiny -->
+            <path d="M22.2 21.2 C 23.3 18.9 25.6 18.9 26.7 21.2" fill="none" stroke-width="2.3"/>
+            <path d="M37.3 21.2 C 38.4 18.9 40.7 18.9 41.8 21.2" fill="none" stroke-width="2.3"/>
+
+            <!-- Muzzle: wide and low. The horse lives or dies here. -->
+            <ellipse cx="32" cy="28.4" rx="10" ry="6.4" fill="#c08d57"/>
+            <ellipse cx="28.4" cy="26.4" rx="1.4" ry="1.9" fill="#4a3222" stroke="none"/>
+            <ellipse cx="35.6" cy="26.4" rx="1.4" ry="1.9" fill="#4a3222" stroke="none"/>
+            <path d="M28.6 30.2 C 30.2 32.9 33.8 32.9 35.4 30.2 Z" fill="#4a3222" stroke="none"/>
+            <path d="M30.8 32.1 C 31.5 32.8 32.5 32.8 33.2 32.1 C 32.6 31.5 31.4 31.5 30.8 32.1 Z"
+                  fill="#f0a0a8" stroke="none"/>
+
+            <!-- Coin: in front of the chest, behind the forelegs -->
+            <circle cx="32" cy="45.8" r="10.6" fill="#f4bd2c"/>
+            <circle cx="32" cy="45.8" r="7.5" fill="none" stroke="#cf9412" stroke-width="1.5"/>
+            <g fill="none" stroke="#8a5a12" stroke-width="1.9">
+                <path d="M34.5 43 C 34.5 41.5 33.4 40.8 32 40.8 C 30.6 40.8 29.5 41.5 29.5 42.8
+                         C 29.5 45.4 34.6 44.7 34.6 47.6 C 34.6 48.9 33.4 49.8 32 49.8
+                         C 30.6 49.8 29.4 49.1 29.4 47.7"/>
+                <path d="M32 39.1 V 51.5"/>
+            </g>
+
+            <!-- Forelegs, closing over the coin -->
+            <g fill="none" stroke-linecap="round">
+                <path d="M19.8 37.4 C 15.8 43.4 18.4 51 26 52.8" stroke="#4a3222" stroke-width="9.8"/>
+                <path d="M44.2 37.4 C 48.2 43.4 45.6 51 38 52.8" stroke="#4a3222" stroke-width="9.8"/>
+                <path d="M19.8 37.4 C 15.8 43.4 18.4 51 26 52.8" stroke="#c2915a" stroke-width="6.6"/>
+                <path d="M44.2 37.4 C 48.2 43.4 45.6 51 38 52.8" stroke="#c2915a" stroke-width="6.6"/>
+            </g>
+            <circle cx="26.1" cy="52.6" r="3.7" fill="#82522f"/>
+            <circle cx="37.9" cy="52.6" r="3.7" fill="#82522f"/>
+        </g>
     </g>
 
     <text x="56" y="37"
           font-family="Inter, 'Segoe UI', system-ui, -apple-system, Arial, sans-serif"
           font-size="23" letter-spacing="-.6">
-        <tspan fill="#e8efeb" font-weight="600">Money</tspan><tspan fill="#2fa88c" font-weight="800">Flow</tspan>
+        <tspan fill="#e6efea" font-weight="600">Money</tspan><tspan fill="#2ec99e" font-weight="800">Flow</tspan>
     </text>
 </svg>
