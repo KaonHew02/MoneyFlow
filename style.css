@@ -102,12 +102,32 @@
     --backdrop:      rgba(6, 38, 29, .48);
     --scroll-shadow: rgba(12, 45, 36, .12);
 
-    /* The three stops of the hero band: bright emerald in the corner the eye
-       starts from, deep forest by the far one. The lightest stop is 3.6:1
-       under white, which is the 44px figure's floor and no lower. */
-    --hero-a:   #0f9a72;
-    --hero-mid: #0b7d5f;
-    --hero-b:   #064b3a;
+    /* --------------------------------------------------------------------
+       The dark half.
+
+       The reference is not a light app and not a dark one: it is a pale mint
+       page carrying two near-black-green surfaces — the nav, and the panel
+       holding the figure the screen exists to answer. The green is *in* the
+       black rather than beside it, which is why these are desaturated forest
+       greens and not greys.
+
+       These tokens exist because the nav no longer wants `--paper` and
+       `--ink-2`: a column that is dark in the light theme has to name its own
+       ink, or every rule in it becomes a special case.
+       -------------------------------------------------------------------- */
+    --nav:        #10241b;
+    --nav-2:      #1a3529;   /* the hover, one step up from the column */
+    --nav-ink:    #e7f3ec;
+    --nav-ink-2:  #9db9ad;
+    --nav-line:   #1d3a2c;
+
+    /* The three stops of the hero band. Dark, with the green still legible in
+       it — `--hero-a` is a forest that reads as green rather than as black,
+       and the fall to `--hero-b` is what keeps the band from looking flat.
+       White sits at about 13:1 on the middle stop. */
+    --hero-a:   #1c5340;
+    --hero-mid: #12382a;
+    --hero-b:   #0b241a;
 
     --radius:      22px;
     --radius-sm:   14px;
@@ -194,9 +214,17 @@
     --backdrop:      rgba(0, 0, 0, .66);
     --scroll-shadow: rgba(0, 0, 0, .42);
 
-    --hero-a:   #0e7f62;
-    --hero-mid: #0a6650;
-    --hero-b:   #04322a;
+    /* Already a dark app, so the column only has to separate itself from the
+       page behind it rather than invert against it. */
+    --nav:        #111d18;
+    --nav-2:      #1b2b23;
+    --nav-ink:    #e6efea;
+    --nav-ink-2:  #a6bab2;
+    --nav-line:   #25352e;
+
+    --hero-a:   #164636;
+    --hero-mid: #0e2f24;
+    --hero-b:   #071c15;
 
     --shadow:      0 1px 2px rgba(0, 0, 0, .3), 0 12px 30px rgba(0, 0, 0, .34);
     --shadow-hero: 0 2px 8px rgba(0, 0, 0, .38), 0 20px 44px rgba(0, 0, 0, .44);
@@ -239,8 +267,8 @@ body {
     gap: 4px;
     height: 100vh;
     padding: 22px 16px;
-    background: var(--paper);
-    border-right: 1px solid var(--line);
+    background: var(--nav);
+    border-right: 1px solid var(--nav-line);
 }
 
 .brand { display: block; flex: 0 0 auto; padding: 0 8px; }
@@ -252,7 +280,7 @@ body {
     font-size: 12px;
     font-weight: 600;
     letter-spacing: .04em;
-    color: var(--ink-3);
+    color: var(--nav-ink-2);
 }
 
 /* The gap above the first module used to be the tagline's bottom margin, so
@@ -275,7 +303,7 @@ body {
     font: inherit;
     font-size: 13.5px;
     font-weight: 650;
-    color: var(--ink-2);
+    color: var(--nav-ink-2);
     text-align: left;
     cursor: pointer;
     white-space: nowrap;
@@ -283,13 +311,18 @@ body {
 }
 
 .tabs button i { font-size: 15px; opacity: .7; }
-.tabs button:hover { background: var(--paper-2); color: var(--ink); }
+.tabs button:hover { background: var(--nav-2); color: var(--nav-ink); }
 
-/* Filled, not a tint — the live module should be the loudest thing here. */
+/* Filled, not a tint — the live module should be the loudest thing here.
+
+   This is the one place `--mint` carries text, and it can: the bright emerald
+   was too weak for white, but against near-black it is 8:1 the other way
+   round. It is also the only bright thing in the column, which is the whole
+   job of a nav — one row saying "here", eight saying "not here". */
 .tabs button.is-on {
-    background: var(--jade);
-    color: var(--on-jade);
-    box-shadow: 0 2px 10px rgba(9, 133, 95, .3);
+    background: var(--mint);
+    color: #05231a;
+    box-shadow: 0 2px 12px rgba(46, 204, 155, .22);
 }
 
 .tabs button.is-on i { opacity: 1; }
@@ -305,7 +338,7 @@ body {
 .app.is-rail .sidebar { flex-basis: 76px; padding-left: 12px; padding-right: 12px; }
 .app.is-rail .tagline { display: none; }
 .app.is-rail .brand { display: flex; justify-content: center; padding: 0; }
-.app.is-rail .brand img { width: 34px; content: url(logo-icon.svg?v=11); }
+.app.is-rail .brand img { width: 34px; content: url(logo-icon.svg?v=12); }
 .app.is-rail .tabs button { justify-content: center; padding: 12px 0; }
 .app.is-rail .tabs button i { font-size: 17px; }
 
