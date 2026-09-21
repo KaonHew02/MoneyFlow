@@ -8871,7 +8871,8 @@ const DAY_NAMES = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
 let ledgerSeq = 0;
 const ledgerId = (prefix) => prefix + (++ledgerSeq);
 
-let ledgerState = { entries: [], accounts: [], types: [], purposes: [], month: '', editing: null };
+let ledgerState = { entries: [], accounts: [], types: [], purposes: [], month: '', editing: null,
+                    statement: null };
 
 /**
  * --------------------------------------------------------------------
@@ -9845,6 +9846,19 @@ function resolveCategory(id, type) {
 const categoryOf = (entry) => resolveCategory(entry.category, entry.type);
 
 /**
+ * What to call an entry in a list. The note is the reader's own wording, so it
+ * wins. With nothing typed the sub-category is the most specific thing the
+ * entry knows about itself, and the category is the last resort — every entry
+ * has one of those, so there is always something to print.
+ */
+function entryTitle(entry) {
+    const cat = categoryOf(entry);
+    return (entry.note || '').trim() ||
+        subLabelOf(entry.category, entry.sub) ||
+        (cat ? cat.label : 'Entry');
+}
+
+/**
  * --------------------------------------------------------------------
  * Reading the book
  * --------------------------------------------------------------------
@@ -10048,7 +10062,7 @@ function paintLedgerList(book) {
                     '<i class="bi bi-x-lg"></i></button>';
 
             // Notes and account names are user-typed, so they go in as text.
-            row.querySelector('.led-meta b').textContent = entry.note.trim() || cat.label;
+            row.querySelector('.led-meta b').textContent = entryTitle(entry);
             // A transfer names both ends; its category, when one was filed, reads
             // ahead of them the same way it does on every other kind of entry.
             row.querySelector('.led-meta small').textContent = entry.type === 'transfer'
@@ -10177,14 +10191,129 @@ function paintLedgerBalances(book) {
 
         inGroup.forEach((account, index) => {
             const balance = book.balances[account.id] || 0;
-            const row = document.createElement('div');
-            row.className = 'acct-row';
+            const row = document.createElement('button');
+            row.type = 'button';
+            row.className = 'acct-pick' + (ledgerState.statement === account.id ? ' is-on' : '');
+            row.dataset.account = account.id;
             row.innerHTML = '<span></span><b class="' + (balance < 0 ? 'is-minus' : '') + '">' +
-                signed(balance) + '</b>';
+                signed(balance) + '</b><i class="bi bi-chevron-right"></i>';
             row.querySelector('span').textContent = account.name.trim() || 'Account ' + (index + 1);
             host.appendChild(row);
         });
     });
+
+    paintLedgerStatement();
+}
+
+/**
+ * One account's whole history, newest first, carrying the balance after every
+ * line: the shape of a bank statement, because checking this against a bank
+ * app is the whole reason to open it.
+ *
+ * It ignores the month in view on purpose. The balances above it are all-time
+ * figures counted from the opening balance, and a statement that stopped at a
+ * month boundary would not add up to the number it sits under.
+ */
+function paintLedgerStatement() {
+    const panel = $('ledgerStatement');
+    const list  = $('ledgerStatementList');
+    if (!panel || !list) return;
+
+    // The open account can be deleted, or renamed away, while it is open.
+    const account = ledgerState.statement ? accountById(ledgerState.statement) : null;
+    if (!account) {
+        ledgerState.statement = null;
+        panel.hidden = true;
+        list.innerHTML = '';
+        return;
+    }
+
+    panel.hidden = false;
+    set('ledgerStatementTitle', (account.name.trim() || 'Account') + ' — statement');
+
+    // What each entry did to *this* account, which is not what it did to the
+    // book: a transfer is a minus on one side and a plus on the other, and
+    // only one of those sides is being read here.
+    const effect = (entry) => {
+        const sen = entrySen(entry);
+        if (entry.type === 'income' || entry.type === 'refund') return sen;
+        if (entry.type === 'expense') return -sen;
+        return entry.toAccount === account.id ? sen : -sen;
+    };
+
+    const openingSen = toSen(parseFloat(account.opening) || 0);
+
+    // Oldest first to count the running balance up; the list is turned round
+    // afterwards, because the newest line is the one being checked.
+    const touching = ledgerState.entries
+        .filter((entry) => entry.account === account.id || entry.toAccount === account.id)
+        .sort((a, b) => (a.date === b.date ? a.seq - b.seq : (a.date < b.date ? -1 : 1)));
+
+    let running = openingSen;
+    const lines = touching.map((entry) => {
+        const moved = effect(entry);
+        running += moved;
+        return { entry, moved, balanceSen: running };
+    });
+
+    const unrated = touching.filter(entryNeedsRate).length;
+    set('ledgerStatementNote', (touching.length
+        ? touching.length + (touching.length === 1 ? ' entry' : ' entries') +
+          ' · opened with ' + signedMoney(openingSen) + ' · now ' + signedMoney(running)
+        : 'Nothing against this account yet · opened with ' + signedMoney(openingSen)) +
+        (unrated ? ' · ' + unrated + ' without a ringgit figure' : ''));
+
+    list.innerHTML = '';
+
+    lines.reverse().forEach(({ entry, moved, balanceSen }) => {
+        const cat = categoryOf(entry);
+
+        // A transfer's other end is the only thing worth naming here — this
+        // account is already in the heading.
+        const other = entry.type !== 'transfer' ? ''
+            : entry.toAccount === account.id
+                ? 'From ' + accountName(entry.account)
+                : 'To ' + accountName(entry.toAccount);
+
+        const title = entry.type === 'transfer'
+            ? ((entry.note || '').trim() || other)
+            : entryTitle(entry);
+
+        const sub = subLabelOf(entry.category, entry.sub);
+        const under = entry.type === 'transfer'
+            ? [entry.category && cat ? cat.label : '', title === other ? '' : other]
+                  .filter(Boolean).join(' · ') || 'Transfer'
+            : [cat ? cat.label : '', sub && sub !== title ? sub : '']
+                  .filter(Boolean).join(' · ');
+
+        const row = document.createElement('div');
+        row.className = 'stmt-row' + (entryNeedsRate(entry) ? ' needs-rate' : '');
+        row.innerHTML =
+            '<span class="stmt-date">' + escapeHtml(dayLabel(entry.date)) + '</span>' +
+            '<span class="stmt-what"><b></b><small></small></span>' +
+            '<span class="stmt-amount ' + (moved < 0 ? 'is-out' : 'is-in') + '">' +
+                diffMoney(moved) +
+                (isForeign(entry) ? '<em>' + escapeHtml(entryFaceValue(entry)) + '</em>' : '') +
+            '</span>' +
+            '<span class="stmt-bal' + (balanceSen < 0 ? ' is-minus' : '') + '">' +
+                signedMoney(balanceSen) + '</span>';
+
+        // Notes and account names are user-typed, so they go in as text.
+        row.querySelector('.stmt-what b').textContent = title;
+        row.querySelector('.stmt-what small').textContent = under;
+        list.appendChild(row);
+    });
+
+    // The opening balance closes the list, because the list runs backwards.
+    const opening = document.createElement('div');
+    opening.className = 'stmt-row is-opening';
+    opening.innerHTML =
+        '<span class="stmt-date">Start</span>' +
+        '<span class="stmt-what"><b>Opening balance</b><small>What it held before the first entry here</small></span>' +
+        '<span class="stmt-amount"></span>' +
+        '<span class="stmt-bal' + (openingSen < 0 ? ' is-minus' : '') + '">' +
+            signedMoney(openingSen) + '</span>';
+    list.appendChild(opening);
 }
 
 function paintLedger(book) {
@@ -13736,6 +13865,25 @@ function startApp() {
 
     const ledgerList = $('ledgerList');
     if (ledgerList) ledgerList.addEventListener('click', onLedgerListClick);
+
+    const ledgerBalances = $('ledgerBalances');
+    if (ledgerBalances) {
+        ledgerBalances.addEventListener('click', (event) => {
+            const row = event.target.closest('button[data-account]');
+            if (!row) return;
+            // Clicking the account already open closes it, so the same row is
+            // both the way in and the way out.
+            ledgerState.statement =
+                ledgerState.statement === row.dataset.account ? null : row.dataset.account;
+            renderLedger();
+        });
+    }
+
+    const ledgerStatementClose = $('ledgerStatementClose');
+    if (ledgerStatementClose) ledgerStatementClose.addEventListener('click', () => {
+        ledgerState.statement = null;
+        renderLedger();
+    });
 
     const ledgerCategories = $('ledgerCategories');
     const categoryList = $('categoryList');

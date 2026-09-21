@@ -591,6 +591,29 @@
                         </div>
                     </div>
                     <div id="ledgerBalances"></div>
+                    <p class="hint">Pick an account to read its statement &mdash; every entry against it, whatever month, with the balance after each one.</p>
+
+                    <!-- Everything one account ever did, to be read against a bank app.
+                         It counts from the opening balance, so it ignores the month in
+                         view the same way the balances above it do. -->
+                    <div class="hist" id="ledgerStatement" hidden>
+                        <div class="card-head">
+                            <h3 id="ledgerStatementTitle">&mdash;</h3>
+                            <div class="card-actions">
+                                <span class="card-note" id="ledgerStatementNote">&mdash;</span>
+                                <button type="button" class="ghost-btn" id="ledgerStatementClose">
+                                    <i class="bi bi-x-lg"></i> Close
+                                </button>
+                            </div>
+                        </div>
+                        <div class="stmt-head">
+                            <span>Date</span>
+                            <span>What</span>
+                            <span>In / out</span>
+                            <span>Balance</span>
+                        </div>
+                        <div class="stmt-list" id="ledgerStatementList"></div>
+                    </div>
 
                     <!-- Every account was on this card twice: once as a balance and again
                          as a row of inputs directly underneath it. The editable copy is

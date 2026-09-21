@@ -2494,20 +2494,6 @@ tr.is-locked { animation: nudge .3s ease; }
 .acct-group:first-child { margin-top: 0; }
 .acct-group b { font-size: 12.5px; letter-spacing: 0; text-transform: none; color: var(--ink-2); font-variant-numeric: tabular-nums; }
 
-.acct-row {
-    display: flex;
-    align-items: baseline;
-    justify-content: space-between;
-    gap: 12px;
-    padding: 9px 4px;
-    border-bottom: 1px solid var(--row-line);
-    font-size: 13.5px;
-    color: var(--ink-2);
-}
-
-.acct-row b { font-weight: 700; color: var(--ink); font-variant-numeric: tabular-nums; }
-.acct-row b.is-minus { color: var(--red); }
-
 /* The ringgit figure leads, because it is what every total was built from;
    what was actually handed over sits under it, so the receipt still matches. */
 .led-amount em {
@@ -3785,6 +3771,76 @@ tr.is-locked { animation: nudge .3s ease; }
 .hist-amount.is-in  { color: var(--jade); }
 .hist-amount.is-out { color: var(--ink); }
 
+/* An account's statement, in the same nested panel. The running balance down
+   the right is the column that makes it a statement rather than a list, so it
+   keeps a fixed width and tabular figures: the digits have to line up to be
+   read against a bank app. */
+.stmt-head,
+.stmt-row {
+    display: grid;
+    grid-template-columns: 84px minmax(0, 1fr) auto 106px;
+    align-items: center;
+    gap: 12px;
+    padding: 9px 4px;
+    border-bottom: 1px solid var(--row-line);
+}
+
+.stmt-head {
+    padding-bottom: 7px;
+    border-bottom-color: var(--line);
+    font-size: 10.5px;
+    font-weight: 700;
+    letter-spacing: .06em;
+    text-transform: uppercase;
+    color: var(--ink-3);
+}
+
+.stmt-head span:nth-child(3),
+.stmt-head span:nth-child(4) { text-align: right; }
+
+/* Years of one account do not belong at full height inside a card. */
+.stmt-list { max-height: 460px; overflow-y: auto; }
+
+.stmt-date { font-size: 11.5px; font-weight: 700; color: var(--ink-3); }
+.stmt-what b { display: block; font-size: 13.5px; font-weight: 650; color: var(--ink); }
+.stmt-what small { display: block; font-size: 11.5px; color: var(--ink-3); }
+
+.stmt-amount {
+    font-size: 13.5px;
+    font-weight: 700;
+    text-align: right;
+    font-variant-numeric: tabular-nums;
+}
+
+.stmt-amount.is-in  { color: var(--jade); }
+.stmt-amount.is-out { color: var(--ink); }
+.stmt-amount em {
+    display: block;
+    font-style: normal;
+    font-size: 11px;
+    font-weight: 600;
+    color: var(--ink-3);
+}
+
+.stmt-bal {
+    font-size: 13px;
+    font-weight: 700;
+    text-align: right;
+    color: var(--ink-2);
+    font-variant-numeric: tabular-nums;
+}
+
+.stmt-bal.is-minus { color: var(--red); }
+
+/* A line with no ringgit figure moved the balance by nothing, so the balance
+   beside it is wrong until it is filled in. It says so in the same amber the
+   day list uses. */
+.stmt-row.needs-rate { background: var(--amber-soft); border-radius: 10px; }
+.stmt-row.needs-rate .stmt-amount { color: var(--amber); }
+
+.stmt-row.is-opening { border-bottom: 0; }
+.stmt-row.is-opening .stmt-what b { font-weight: 600; color: var(--ink-2); }
+
 /* --------------------------------------------------------------------------
    Charts. Hand-drawn SVG, no library — the app is still a folder you copy.
    -------------------------------------------------------------------------- */
@@ -3884,6 +3940,14 @@ tr.is-locked { animation: nudge .3s ease; }
     .dash-bar { grid-template-columns: minmax(72px, 1fr) 2fr auto; }
     .dash-bar small { display: none; }
     .trend { height: 210px; }
+
+    /* The date shortens and the balance narrows before the description gives
+       up any width — the description is what identifies the line. */
+    .stmt-head,
+    .stmt-row { grid-template-columns: 72px minmax(0, 1fr) auto 86px; gap: 8px; }
+    .stmt-date { font-size: 11px; }
+    .stmt-amount { font-size: 12.5px; }
+    .stmt-bal { font-size: 12px; }
 }
 
 /* ==========================================================================
