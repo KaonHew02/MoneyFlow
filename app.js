@@ -10286,8 +10286,11 @@ function paintLedgerStatement() {
             : [cat ? cat.label : '', sub && sub !== title ? sub : '']
                   .filter(Boolean).join(' · ');
 
-        const row = document.createElement('div');
+        const row = document.createElement('button');
+        row.type = 'button';
         row.className = 'stmt-row' + (entryNeedsRate(entry) ? ' needs-rate' : '');
+        row.dataset.entry = entry.id;
+        row.setAttribute('data-edit-entry', '');
         row.innerHTML =
             '<span class="stmt-date">' + escapeHtml(dayLabel(entry.date)) + '</span>' +
             '<span class="stmt-what"><b></b><small></small></span>' +
@@ -10300,7 +10303,9 @@ function paintLedgerStatement() {
 
         // Notes and account names are user-typed, so they go in as text.
         row.querySelector('.stmt-what b').textContent = title;
-        row.querySelector('.stmt-what small').textContent = under;
+        // "Others" over "Others" is a line saying nothing twice: the entry
+        // named itself after its category because it had nothing else.
+        row.querySelector('.stmt-what small').textContent = under === title ? '' : under;
         list.appendChild(row);
     });
 
@@ -10764,6 +10769,32 @@ function ledgerEdit(id) {
 
     const field = $('ledgerAmount');
     if (field) { field.focus(); field.select(); }
+}
+
+/**
+ * A statement line opens its entry in the form above, with the figure
+ * selected — reading a statement is how a wrong number gets noticed, so
+ * fixing it should not mean hunting the entry down in the day list.
+ */
+function onLedgerStatementClick(event) {
+    const row = event.target.closest('button[data-edit-entry]');
+    if (!row) return;
+
+    const entry = ledgerState.entries.find((e) => e.id === row.dataset.entry);
+    if (!entry) return;
+
+    // A statement runs across months and the day list shows one. Follow the
+    // entry to its own month before opening it, the way saving one does:
+    // editing a line that nothing on the page can show is how an edit goes
+    // in somewhere unintended.
+    if (ledgerState.month !== monthOf(entry.date)) {
+        ledgerState.month = monthOf(entry.date);
+        // Ahead of the form being filled — a rebuild would empty the pickers
+        // straight back out again.
+        renderLedger();
+    }
+
+    ledgerEdit(entry.id);
 }
 
 function ledgerDelete(id) {
@@ -13878,6 +13909,9 @@ function startApp() {
             renderLedger();
         });
     }
+
+    const ledgerStatementList = $('ledgerStatementList');
+    if (ledgerStatementList) ledgerStatementList.addEventListener('click', onLedgerStatementClick);
 
     const ledgerStatementClose = $('ledgerStatementClose');
     if (ledgerStatementClose) ledgerStatementClose.addEventListener('click', () => {

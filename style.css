@@ -3785,6 +3785,24 @@ tr.is-locked { animation: nudge .3s ease; }
     border-bottom: 1px solid var(--row-line);
 }
 
+/* Every line but the opening balance opens its entry, so it is a button —
+   stripped back to the row it already was, and given something to say it
+   can be pressed. */
+button.stmt-row {
+    width: 100%;
+    border-width: 0 0 1px 0;
+    border-radius: 8px;
+    background: none;
+    font: inherit;
+    color: inherit;
+    text-align: left;
+    cursor: pointer;
+    transition: background .16s ease;
+}
+
+button.stmt-row:hover { background: var(--paper-2); }
+button.stmt-row:hover .stmt-what b { color: var(--jade); }
+
 .stmt-head {
     padding-bottom: 7px;
     border-bottom-color: var(--line);
