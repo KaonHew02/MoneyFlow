@@ -15,7 +15,7 @@
  * Setup is five minutes of clicking, once. See docs/DRIVE.md.
  */
 
-const MF_DRIVE = {
+const MF_DRIVE = Object.freeze({
 
     /**
      * Google Cloud → APIs & Services → Credentials → OAuth client ID (Web
@@ -37,4 +37,4 @@ const MF_DRIVE = {
 
     /** The one file MoneyFlow writes. Renaming it in Drive starts a new one. */
     filename: 'moneyflow-data.json',
-};
+});

@@ -16,6 +16,24 @@
  * ====================================================================
  */
 /**
+ * Everything below lives inside this one function, so none of it is on
+ * `window`: the console cannot type `ledgerState` and change a balance, or
+ * call `backupApply` with a book of its own. What store.js and guard.js
+ * offer is taken off the shelf guard.js keeps, and what drive.js needs is put
+ * back on it at the very end — see `MFHandoff` in guard.js.
+ */
+(() => {
+
+const MFStore = window.MFHandoff.take('store');
+const troubleBar = window.MFHandoff.take('trouble');
+
+/** Filled in by drive.js through `connectDrive`, and empty when it did not load. */
+const drive = { touch: null, stamp: null };
+
+/** True once every record is in memory. drive.js asks, through `isReady`. */
+let ready = false;
+
+/**
  * Read a saved blob. Anything written before the app was renamed sits under
  * the old "moneysplitor." prefix, so a missing key falls back to it once —
  * the next save writes it back under the current name.
@@ -24,6 +42,34 @@
  *  synchronous whatever it is sitting on. See store.js. */
 function storedRaw(key) {
     return MFStore.get(key);
+}
+
+/**
+ * A saved record, parsed — which is how every module reads its own. Throws on
+ * text that is not JSON, and each loader already catches that.
+ *
+ * Ids are the one thing checked here rather than in the loaders, because ids
+ * are the one thing the page writes straight into its HTML: data-open-card="…",
+ * id="bar_…", and forty-odd more like them. The app only ever makes ids from
+ * letters, digits, - and _ ("food", "cc3", "food-s2"), but a backup file can
+ * hold anything, and an id of `x"><img src=x onerror=…>` would step out of its
+ * attribute and into the page. So an id of any other shape is dropped before a
+ * module sees it — and every loader already treats a record with no id the way
+ * it should: it skips it, or gives it a fresh one.
+ */
+const SAFE_ID = /^[\w-]{1,64}$/;
+
+/** "__proto__", "constructor" and "toString" fit the shape, and every object
+ *  answers to them — `byCategory[id]` would hand back a function. */
+const safeId = (value) => (typeof value === 'string' || typeof value === 'number')
+    && SAFE_ID.test(String(value)) && !(String(value) in Object.prototype);
+
+function storedJson(key) {
+    // A "__proto__" key goes too. JSON.parse makes it a plain property, but
+    // `Object.assign` and spreads read it as the prototype, and the budget
+    // copies its lines that way.
+    return JSON.parse(storedRaw(key) || 'null', (name, value) =>
+        (name === '__proto__' || (name === 'id' && !safeId(value))) ? undefined : value);
 }
 
 /**
@@ -58,7 +104,7 @@ function storeWrite(key, value) {
     // not load — so this stays a one-way nudge. A write that did not land must
     // not trigger one, or Drive would be sent a copy that is already stale.
     stampSaved();
-    if (typeof window.MFDriveTouch === 'function') window.MFDriveTouch();
+    if (drive.touch) drive.touch();
     return true;
 }
 
@@ -270,9 +316,28 @@ const pct   = (x, dp = 1) => fmt(x, dp) + '%';
 const set   = (id, text) => { const el = $(id); if (el) el.textContent = text; };
 const num   = (id) => parseFloat(($(id) || {}).value) || 0;
 
-/** Names come from the keyboard, so they are escaped before going near innerHTML. */
-const escapeHtml = (text) => text.replace(/[&<>"']/g, (ch) =>
+/** Names come from the keyboard, so they are escaped before going near innerHTML.
+ *  `String()` first: a crafted file can put a number or an array where a name
+ *  goes, and a module that throws on it stops drawing altogether. */
+const escapeHtml = (text) => String(text).replace(/[&<>"']/g, (ch) =>
     ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[ch]));
+
+/**
+ * A record read back from storage is only as trustworthy as the file it came
+ * from — and a backup file, or the copy in Drive, can be written by anyone.
+ * The loaders check what they read with these.
+ *
+ * `isKnown` is for a value that picks a row out of a table: a bucket, a rule,
+ * a status. `TABLE[value]` alone says yes to "constructor" and "toString",
+ * because every object inherits those, and the row it hands back is a
+ * function.
+ *
+ * `isIsoDate` is for a date. The regex alone lets `["2026-01-01"]` through —
+ * `.test()` turns an array into its text first — and every date helper here
+ * then throws on `.split`.
+ */
+const isKnown = (table, key) => typeof key === 'string' && Object.prototype.hasOwnProperty.call(table, key);
+const isIsoDate = (value) => typeof value === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(value);
 
 /** One id counter for every row the user can add, in either module. */
 let seq = 0;
@@ -2746,7 +2811,7 @@ function saveSplit() {
 
 function loadSplit() {
     let saved = null;
-    try { saved = JSON.parse(storedRaw(SPLIT_KEY) || 'null'); } catch (err) { saved = null; }
+    try { saved = storedJson(SPLIT_KEY); } catch (err) { saved = null; }
     if (!saved || typeof saved !== 'object') saved = {};
 
     splitSeq = Number(saved.seq) || 0;
@@ -2781,7 +2846,8 @@ function loadSplit() {
     };
 
     splitState.bills = (Array.isArray(saved.bills) ? saved.bills : [])
-        .filter((b) => b && b.id && Array.isArray(b.people) && b.people.length)
+        .filter((b) => b && b.id && Array.isArray(b.people) && b.people.length
+            && b.people.every((p) => p && typeof p === 'object'))
         .map((b, index) => {
             // Every method that ever existed here, read forward into the only
             // one that still does.
@@ -2820,7 +2886,7 @@ function loadSplit() {
                 if (lumpSen && lumpSen[at]) {
                     items.unshift({ id: nextId('i'), label: '', amount: String(fromSen(lumpSen[at])), off: '' });
                 }
-                return { id: String(p.id), name: String(p.name || ''), items };
+                return { id: String(p.id || nextId('p')), name: String(p.name || ''), items };
             });
             people.forEach((p) => { if (!p.items.length) p.items.push(newItem()); });
 
@@ -2869,7 +2935,7 @@ function loadSplit() {
                     ? {
                         account: String(held.account || ''),
                         entryId: String(held.entryId || ''),
-                        date: /^\d{4}-\d{2}-\d{2}$/.test(held.date || '') ? String(held.date) : '',
+                        date: isIsoDate(held.date) ? String(held.date) : '',
                         // Absent on every tick written before waiving existed,
                         // which is what a plain settlement reads as anyway.
                         waived: !!held.waived,
@@ -2881,7 +2947,7 @@ function loadSplit() {
                 id: String(b.id),
                 seq: Number(b.seq) || index + 1,
                 title: String(b.title || ''),
-                date: /^\d{4}-\d{2}-\d{2}$/.test(b.date || '') ? String(b.date) : todayIso(),
+                date: isIsoDate(b.date) ? String(b.date) : todayIso(),
                 people,
                 shared: (Array.isArray(b.shared) ? b.shared : []).map((item) => readShared(item, known)),
                 paidBy,
@@ -3126,7 +3192,7 @@ function saveCategories() {
 
 function loadCategories() {
     let saved = null;
-    try { saved = JSON.parse(storedRaw(CATEGORY_KEY) || 'null'); } catch (err) { saved = null; }
+    try { saved = storedJson(CATEGORY_KEY); } catch (err) { saved = null; }
 
     const rows = saved && Array.isArray(saved.list) ? saved.list : null;
     categorySeq = Number(saved && saved.seq) || 0;
@@ -3136,8 +3202,8 @@ function loadCategories() {
     categoryState.list = rows.filter((c) => c && c.id).map((c) => ({
         id: String(c.id),
         label: String(c.label || ''),
-        bucket: CATEGORY_BUCKETS[c.bucket] ? c.bucket : 'wants',
-        icon: String(c.icon || 'bi-tag'),
+        bucket: isKnown(CATEGORY_BUCKETS, c.bucket) ? c.bucket : 'wants',
+        icon: /^bi-[a-z0-9-]+$/.test(String(c.icon || '')) ? String(c.icon) : 'bi-tag',
         tone: CATEGORY_TONES.includes(c.tone) ? c.tone : 'jade',
         hint: String(c.hint || ''),
         enabled: c.enabled !== false,
@@ -4122,13 +4188,13 @@ const saveBudget = persistPlan;
 
 function loadBudget() {
     let saved = null;
-    try { saved = JSON.parse(storedRaw(BUDGET_KEY) || 'null'); } catch (err) { saved = null; }
+    try { saved = storedJson(BUDGET_KEY); } catch (err) { saved = null; }
     if (!saved || typeof saved !== 'object') { planState.draft = blankPlan(); return; }
 
     if (saved.version === 2) {
         planState.seq = Number(saved.seq) || 0;
         planState.budgets = (Array.isArray(saved.budgets) ? saved.budgets : [])
-            .filter((b) => b && b.key && BUDGET_PERIODS[b.period])
+            .filter((b) => b && b.key && isKnown(BUDGET_PERIODS, b.period))
             .map((b) => ({
                 id: String(b.id || ('b' + (++planState.seq))),
                 seq: Number(b.seq) || 0,
@@ -4137,19 +4203,19 @@ function loadBudget() {
                 anchor: String(b.anchor || b.from || todayIso()),
                 from: String(b.from || ''), to: String(b.to || ''),
                 income: String(b.income || ''), extra: String(b.extra || ''),
-                rule: BUDGET_RULES[b.rule] ? b.rule : 'off',
+                rule: isKnown(BUDGET_RULES, b.rule) ? b.rule : 'off',
                 lines: (b.lines && typeof b.lines === 'object') ? b.lines : {},
                 created: String(b.created || ''), updated: String(b.updated || ''),
             }));
         planState.budgets.forEach((b) => { planState.seq = Math.max(planState.seq, b.seq); });
 
         const draft = saved.draft;
-        planState.draft = (draft && BUDGET_PERIODS[draft.period]) ? {
+        planState.draft = (draft && isKnown(BUDGET_PERIODS, draft.period)) ? {
             period: draft.period,
             anchor: String(draft.anchor || todayIso()),
             from: String(draft.from || ''), to: String(draft.to || ''),
             income: String(draft.income || ''), extra: String(draft.extra || ''),
-            rule: BUDGET_RULES[draft.rule] ? draft.rule : (draft.rule === 'off' ? 'off' : '502030'),
+            rule: isKnown(BUDGET_RULES, draft.rule) ? draft.rule : (draft.rule === 'off' ? 'off' : '502030'),
             lines: (draft.lines && typeof draft.lines === 'object') ? draft.lines : {},
         } : blankPlan();
         return;
@@ -4179,7 +4245,7 @@ function migrateBudgetV1(saved) {
         const amount = String((row && row.amount) || '');
         if (!label && !amount) return;
 
-        const bucket = BUDGET_BUCKETS[row.bucket] ? row.bucket : 'wants';
+        const bucket = isKnown(BUDGET_BUCKETS, row.bucket) ? row.bucket : 'wants';
         const id = newCategoryId('c');
         categoryState.list.push({
             id, label: label || 'Untitled', bucket,
@@ -4191,7 +4257,7 @@ function migrateBudgetV1(saved) {
     });
     saveCategories();
 
-    const rule = BUDGET_RULES[saved.rule] ? saved.rule : (saved.rule === 'off' ? 'off' : '502030');
+    const rule = isKnown(BUDGET_RULES, saved.rule) ? saved.rule : (saved.rule === 'off' ? 'off' : '502030');
     const draft = Object.assign(blankPlan(), {
         income: String(saved.income || ''),
         extra:  String(saved.extra  || ''),
@@ -4655,7 +4721,7 @@ function saveGoals() {
  *  whose dates are malformed, would put a wrong figure on screen. */
 function loadGoals() {
     let saved = null;
-    try { saved = JSON.parse(storedRaw(GOALS_KEY) || 'null'); } catch (err) { saved = null; }
+    try { saved = storedJson(GOALS_KEY); } catch (err) { saved = null; }
     if (!saved || !Array.isArray(saved.list)) return;
 
     goalState.seq = Number(saved.seq) || 0;
@@ -4666,11 +4732,11 @@ function loadGoals() {
             name: String(g.name || ''),
             kind: goalKind(g.kind).id,
             target: String(g.target || ''),
-            targetDate: /^\d{4}-\d{2}-\d{2}$/.test(g.targetDate || '') ? g.targetDate : '',
+            targetDate: isIsoDate(g.targetDate) ? g.targetDate : '',
             monthly: String(g.monthly || ''),
             created: String(g.created || ''),
             contributions: (Array.isArray(g.contributions) ? g.contributions : [])
-                .filter((c) => c && c.id && /^\d{4}-\d{2}-\d{2}$/.test(c.date || ''))
+                .filter((c) => c && c.id && isIsoDate(c.date))
                 .map((c) => ({
                     id: String(c.id), seq: Number(c.seq) || 0,
                     date: c.date, amount: String(c.amount || ''), note: String(c.note || ''),
@@ -5664,7 +5730,7 @@ function saveCommit() {
  *  wrong figure on screen, so each is dropped on the way in. */
 function loadCommit() {
     let saved = null;
-    try { saved = JSON.parse(storedRaw(COMMIT_KEY) || 'null'); } catch (err) { saved = null; }
+    try { saved = storedJson(COMMIT_KEY); } catch (err) { saved = null; }
     if (!saved || !Array.isArray(saved.plans)) { commitState.draft = newPlan(); return; }
 
     commitState.seq = Number(saved.seq) || 0;
@@ -5679,7 +5745,7 @@ function loadCommit() {
             // Three-valued on purpose: ticked, un-ticked, or never decided —
             // and only the third falls back to the "already paid" count.
             const out = {
-                date: /^\d{4}-\d{2}-\d{2}$/.test(rec.date || '') ? rec.date : '',
+                date: isIsoDate(rec.date) ? rec.date : '',
                 entryId: String(rec.entryId || ''),
             };
             if (rec.paid === true || rec.paid === false) out.paid = rec.paid;
@@ -5700,7 +5766,7 @@ function loadCommit() {
             monthly: String(p.monthly || ''),
             months: String(months || ''),
             paidAhead: String(Math.max(0, Math.floor(parseFloat(p.paidAhead) || 0)) || ''),
-            firstDue: /^\d{4}-\d{2}-\d{2}$/.test(p.firstDue || '') ? p.firstDue : todayIso(),
+            firstDue: isIsoDate(p.firstDue) ? p.firstDue : todayIso(),
             autoRecord: p.autoRecord !== false,
             account: String(p.account || ''),
             category: String(p.category || ''),
@@ -6827,7 +6893,7 @@ function saveCard() {
 
 function loadCard() {
     let saved = null;
-    try { saved = JSON.parse(storedRaw(CARD_KEY) || 'null'); } catch (err) { saved = null; }
+    try { saved = storedJson(CARD_KEY); } catch (err) { saved = null; }
     if (!saved || typeof saved !== 'object') { cardState.draft = newCard(); return; }
 
     if (saved.version !== 2) { migrateCardV1(saved); return; }
@@ -6853,7 +6919,7 @@ function loadCard() {
             category: String(c.category || ''),
             closed: !!c.closed,
             payments: (Array.isArray(c.payments) ? c.payments : [])
-                .filter((p) => p && p.id && /^\d{4}-\d{2}-\d{2}$/.test(p.date || ''))
+                .filter((p) => p && p.id && isIsoDate(p.date))
                 .map((p) => ({
                     id: String(p.id), date: p.date,
                     amount: String(p.amount || ''), note: String(p.note || ''),
@@ -8161,7 +8227,7 @@ function paintGrowList(book) {
             (f.inv.contributions.length === 1 ? ' contribution' : ' contributions') +
             (f.valued && f.inv.valueDate ? ' · valued ' + dayShort(f.inv.valueDate) : '') + '</small>'
         ));
-        tr.appendChild(cell('<i class="bi ' + f.type.icon + '"></i> ' + f.type.label, 'is-muted'));
+        tr.appendChild(cell('<i class="bi ' + f.type.icon + '"></i> ' + escapeHtml(f.type.label), 'is-muted'));
         tr.appendChild(cell(fmt(fromSen(f.investedSen)), 'is-strong'));
         tr.appendChild(cell(fmt(fromSen(f.valueSen)), f.valued ? '' : 'is-muted'));
         tr.appendChild(cell(
@@ -8530,7 +8596,7 @@ function saveGrow() {
 
 function loadGrow() {
     let saved = null;
-    try { saved = JSON.parse(storedRaw(GROW_KEY) || 'null'); } catch (err) { saved = null; }
+    try { saved = storedJson(GROW_KEY); } catch (err) { saved = null; }
     if (!saved || typeof saved !== 'object') { growState.draft = newInvestment(); return; }
 
     growState.seq = Number(saved.seq) || 0;
@@ -8559,12 +8625,12 @@ function loadGrow() {
             seq: Number(i.seq) || 0,
             name: String(i.name || ''),
             type: investmentType(i.type).id,
-            opened: /^\d{4}-\d{2}-\d{2}$/.test(i.opened || '') ? i.opened : todayIso(),
+            opened: isIsoDate(i.opened) ? i.opened : todayIso(),
             opening: String(i.opening || ''),
             // A category that has since been deleted is no link at all.
             source: categoryById(String(i.source || '')) ? String(i.source) : '',
             value: String(i.value || ''),
-            valueDate: /^\d{4}-\d{2}-\d{2}$/.test(i.valueDate || '') ? i.valueDate : '',
+            valueDate: isIsoDate(i.valueDate) ? i.valueDate : '',
             note: String(i.note || ''),
             closed: !!i.closed,
             fd: {
@@ -8577,7 +8643,7 @@ function loadGrow() {
                 years: String((i.grow && i.grow.years) || ''),
             },
             contributions: (Array.isArray(i.contributions) ? i.contributions : [])
-                .filter((c) => c && c.id && /^\d{4}-\d{2}-\d{2}$/.test(c.date || ''))
+                .filter((c) => c && c.id && isIsoDate(c.date))
                 .map((c) => ({
                     id: String(c.id), date: c.date,
                     unit: c.unit === 'pct' ? 'pct' : 'rm',
@@ -8588,7 +8654,7 @@ function loadGrow() {
             // Payouts arrived after the first holdings were written, so an
             // older record has none and reads as none rather than as broken.
             earnings: (Array.isArray(i.earnings) ? i.earnings : [])
-                .filter((e) => e && e.id && /^\d{4}-\d{2}-\d{2}$/.test(e.date || ''))
+                .filter((e) => e && e.id && isIsoDate(e.date))
                 .map((e) => ({
                     id: String(e.id), date: e.date,
                     figure: String(e.figure || ''),
@@ -10049,7 +10115,7 @@ function paintLedgerList(book) {
 
             row.innerHTML =
                 '<span class="led-icon led-' + entry.type + '"><i class="bi ' +
-                    (entry.type === 'transfer' ? 'bi-arrow-left-right' : cat.icon) + '"></i></span>' +
+                    (entry.type === 'transfer' ? 'bi-arrow-left-right' : escapeHtml(cat.icon)) + '"></i></span>' +
                 '<button type="button" class="led-meta" data-edit-entry>' +
                     '<b></b><small></small></button>' +
                 '<span class="led-amount ' + tone + '">' + sign +
@@ -10186,7 +10252,7 @@ function paintLedgerBalances(book) {
 
         const head = document.createElement('div');
         head.className = 'acct-group';
-        head.innerHTML = '<span>' + label + '</span><b>' + signed(groupSen) + '</b>';
+        head.innerHTML = '<span>' + escapeHtml(label) + '</span><b>' + signed(groupSen) + '</b>';
         host.appendChild(head);
 
         inGroup.forEach((account, index) => {
@@ -10433,7 +10499,7 @@ let fxState = { fetched: '', rates: {}, pending: false };
 
 function loadRates() {
     let saved = null;
-    try { saved = JSON.parse(storedRaw(FX_KEY) || 'null'); } catch (err) { saved = null; }
+    try { saved = storedJson(FX_KEY); } catch (err) { saved = null; }
     if (saved && saved.rates && typeof saved.rates === 'object') {
         fxState.rates = saved.rates;
         fxState.fetched = String(saved.fetched || '');
@@ -10882,11 +10948,11 @@ function saveLedger() {
 
 function loadLedger() {
     let saved = null;
-    try { saved = JSON.parse(storedRaw(LEDGER_KEY) || 'null'); } catch (err) { saved = null; }
+    try { saved = storedJson(LEDGER_KEY); } catch (err) { saved = null; }
     if (!saved || typeof saved !== 'object') saved = {};
 
     ledgerSeq = Number(saved.seq) || 0;
-    ledgerState.month = /^\d{4}-\d{2}$/.test(saved.month || '') ? saved.month : monthOf(todayIso());
+    ledgerState.month = typeof saved.month === 'string' && /^\d{4}-\d{2}$/.test(saved.month) ? saved.month : monthOf(todayIso());
 
     // The kinds are read first: an account is checked against them, and one
     // pointing at a kind that is no longer there has to land somewhere real.
@@ -10912,7 +10978,7 @@ function loadLedger() {
                 purpose: String(a.purpose || (legacy === 'savings' ? 'Savings' : '')),
                 currency: CURRENCIES.includes(a.currency) ? a.currency : BASE_CURRENCY,
                 opening: String(a.opening || ''),
-                status: ACCOUNT_STATUSES[a.status] ? a.status : 'active',
+                status: isKnown(ACCOUNT_STATUSES, a.status) ? a.status : 'active',
             };
         });
     if (!ledgerState.accounts.length) seedAccounts();
@@ -10934,7 +11000,7 @@ function loadLedger() {
 
     const known = new Set(ledgerState.accounts.map((a) => a.id));
     ledgerState.entries = (Array.isArray(saved.entries) ? saved.entries : [])
-        .filter((e) => e && e.id && /^\d{4}-\d{2}-\d{2}$/.test(e.date || '') && known.has(e.account))
+        .filter((e) => e && e.id && isIsoDate(e.date) && known.has(e.account))
         .map((e, index) => ({
             id: String(e.id),
             seq: Number(e.seq) || index + 1,
@@ -11862,7 +11928,7 @@ function paintDashAccounts(book) {
 
         const head = document.createElement('div');
         head.className = 'acct-group';
-        head.innerHTML = '<span>' + label + '</span><b>' + signedMoney(groupSen) + '</b>';
+        head.innerHTML = '<span>' + escapeHtml(label) + '</span><b>' + signedMoney(groupSen) + '</b>';
         host.appendChild(head);
 
         inGroup.forEach((account, index) => {
@@ -12572,11 +12638,61 @@ function backupExport(btn) {
 }
 
 /**
- * The chosen file, checked before anything is destroyed. Everything that can
- * be wrong with it is named, because "invalid file" does not tell you whether
- * you picked the wrong file or the right one has gone bad.
+ * A real backup is a few megabytes at most — the book lived in a five-megabyte
+ * store for most of this app's life. Anything this size is not one of ours,
+ * and reading it would only freeze the tab.
  */
+const BACKUP_MAX_BYTES = 50 * 1024 * 1024;
+
+/**
+ * A backup, checked before anything is destroyed. Everything that can be wrong
+ * with it is named, because "invalid file" does not tell you whether you picked
+ * the wrong file or the right one has gone bad.
+ *
+ * Import runs this on a chosen file and drive.js runs it on the Drive copy, so
+ * the two doors into `backupApply` hold to the same rules. They did not always:
+ * the Drive copy was only checked for its `format`, and one whose `stores` had
+ * been emptied would have replaced every record here with nothing.
+ */
+function backupCheck(data) {
+    if (!data || typeof data !== 'object' || data.format !== BACKUP_FORMAT) {
+        throw new Error('That is not a MoneyFlow backup. The file should have come from Export, '
+            + 'and its name starts with "moneyflow-".');
+    }
+    if (Number(data.version) > BACKUP_VERSION) {
+        throw new Error('That backup was made by a newer version of MoneyFlow than this one. '
+            + 'Update the app first, or it would read the file wrongly.');
+    }
+    if (!data.stores || typeof data.stores !== 'object' || Array.isArray(data.stores)) {
+        throw new Error('That backup is empty — it carries no records at all.');
+    }
+    if (!Object.keys(data.stores).some((key) => BACKUP_STORES.includes(key))) {
+        throw new Error('That backup holds nothing this version of MoneyFlow recognises.');
+    }
+
+    // Every store Export writes is an object. A list, a number or a string in
+    // one of those places was not written by this app, and it is refused here
+    // — before anything is replaced — rather than left for a module to trip
+    // over after the reload. What is *inside* each store is checked field by
+    // field when the module reads it back (see `storedJson` and the loaders).
+    const damaged = BACKUP_STORES.filter((key) => {
+        if (!Object.prototype.hasOwnProperty.call(data.stores, key)) return false;
+        const held = data.stores[key];
+        return !held || typeof held !== 'object' || Array.isArray(held);
+    });
+    if (damaged.length) {
+        throw new Error('Part of that backup is damaged ('
+            + damaged.map((key) => STORE_LABELS[key] || key).join(', ')
+            + '), so none of it was read. Nothing here has changed.');
+    }
+    return data;
+}
+
 function backupRead(file) {
+    if (file.size > BACKUP_MAX_BYTES) {
+        return Promise.reject(new Error('That file is far too big to be a MoneyFlow backup. '
+            + 'Pick the .json file MoneyFlow exported.'));
+    }
     return file.text().then((text) => {
         let data;
         try {
@@ -12584,23 +12700,7 @@ function backupRead(file) {
         } catch (err) {
             throw new Error('That file is not readable as JSON. Pick the .json file MoneyFlow exported.');
         }
-
-        if (!data || typeof data !== 'object' || data.format !== BACKUP_FORMAT) {
-            throw new Error('That is not a MoneyFlow backup. The file should have come from Export, '
-                + 'and its name starts with "moneyflow-".');
-        }
-        if (Number(data.version) > BACKUP_VERSION) {
-            throw new Error('That backup was made by a newer version of MoneyFlow than this one. '
-                + 'Update the app first, or it would read the file wrongly.');
-        }
-        if (!data.stores || typeof data.stores !== 'object') {
-            throw new Error('That backup is empty — it carries no records at all.');
-        }
-        if (!Object.keys(data.stores).some((key) => BACKUP_STORES.includes(key))) {
-            throw new Error('That backup holds nothing this version of MoneyFlow recognises.');
-        }
-
-        return data;
+        return backupCheck(data);
     });
 }
 
@@ -12789,7 +12889,7 @@ function openData() {
 
     // drive.js paints the second block itself, and is allowed not to be here
     // at all — the app is complete without it.
-    if (typeof window.MFDriveStamp === 'function') window.MFDriveStamp();
+    if (drive.stamp) drive.stamp();
     else set('driveWhen', 'The Drive copy is not set up in this browser.');
 
     const box = $('dataBox');
@@ -13031,7 +13131,7 @@ function setSegment(seg, value) {
  */
 const DATE_MASK = 'dd-mm-yyyy';
 
-const isoToDmy = (iso) => (/^\d{4}-\d{2}-\d{2}$/.test(iso || '')
+const isoToDmy = (iso) => (isIsoDate(iso)
     ? iso.slice(8, 10) + '-' + iso.slice(5, 7) + '-' + iso.slice(0, 4)
     : '');
 
@@ -13234,7 +13334,7 @@ function paintDatePop() {
         const iso = datePop.cursor + '-' + pad2(day);
         cells += '<button type="button"' +
             (iso === picked ? ' class="is-on"' : iso === now ? ' class="is-now"' : '') +
-            ' data-pick-day="' + iso + '">' + day + '</button>';
+            ' data-pick-day="' + escapeHtml(iso) + '">' + day + '</button>';
     }
 
     datePop.el.innerHTML =
@@ -13332,8 +13432,8 @@ function attempt(what, run) {
         // The console keeps the stack, which is the only thing that says which
         // record did it. The bar carries the sentence a person can act on.
         if (window.console && console.error) console.error('MoneyFlow — ' + what + ' failed to load', err);
-        if (typeof window.MFTrouble === 'function') {
-            window.MFTrouble(what + ' could not load — ' + errorText(err));
+        if (typeof troubleBar === 'function') {
+            troubleBar(what + ' could not load — ' + errorText(err));
         }
         return false;
     }
@@ -14215,6 +14315,22 @@ function startApp() {
     // The records are in memory now. Anything that needs to ask about them —
     // the Drive layer's "this browser is empty" offer — waits for this, because
     // before it the store is legitimately empty and the answer would be a lie.
-    window.MFReady = true;
+    ready = true;
     document.dispatchEvent(new Event('moneyflow:ready'));
 }
+
+/**
+ * What drive.js is allowed to call — and, with nothing of this file on
+ * `window`, the only way in. Frozen, so none of it can be swapped out.
+ */
+window.MFHandoff.put('app', Object.freeze({
+    askConfirm, backupApply, backupCheck, backupEnvelope, backupSay, backupSummary,
+    flashButton, storeIsEmpty, storeUsedBytes,
+    isReady: () => ready,
+    connectDrive: (hooks) => {
+        drive.touch = hooks.touch;
+        drive.stamp = hooks.stamp;
+    },
+}));
+
+})();

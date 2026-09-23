@@ -25,6 +25,18 @@
 
 (() => {
 
+    // What it needs from app.js, off the shelf in guard.js. None of it is on
+    // `window` any more, so it is taken once, here, while the page loads.
+    const {
+        askConfirm, backupApply, backupCheck, backupEnvelope, backupSay, backupSummary,
+        flashButton, storeIsEmpty, storeUsedBytes, isReady, connectDrive,
+    } = window.MFHandoff.take('app') || {};
+
+    // Taken as the page loads, for the same reason: a `fetch` swapped in from
+    // the console later would otherwise be handed the Drive token on the next
+    // save.
+    const fetch = window.fetch.bind(window);
+
     const $ = (id) => document.getElementById(id);
 
     const SCOPE = 'https://www.googleapis.com/auth/drive.file';
@@ -274,6 +286,13 @@
                     + 'press "To Drive" to write a fresh one.');
             }
 
+            // Every check Import makes on a chosen file. Anyone who can edit
+            // that folder can edit this file, and one with its records emptied
+            // out would otherwise replace everything here with nothing.
+            try { backupCheck(envelope); } catch (err) {
+                return backupSay('That Drive file is not readable', err.message);
+            }
+
             const modified = (await fileModified(id) || '').slice(0, 10) || 'an unknown date';
 
             askConfirm(
@@ -498,13 +517,11 @@
         const auto = $('driveAuto');
         if (auto) auto.addEventListener('click', () => setAuto(!autoOn()));
 
-        // The only way in from app.js. It is a no-op when the switch is off,
-        // so the record modules need to know nothing about any of this.
-        window.MFDriveTouch = schedule;
-
-        // The data panel asks for this when it opens, so the second block is
-        // current even if nothing has touched Drive since the page loaded.
-        window.MFDriveStamp = showStamp;
+        // The only way in from app.js. `touch` is a no-op when the switch is
+        // off, so the record modules need to know nothing about any of this;
+        // `stamp` is asked for when the data panel opens, so the second block
+        // is current even if nothing has touched Drive since the page loaded.
+        if (connectDrive) connectDrive({ touch: schedule, stamp: showStamp });
 
         const offer = $('driveOfferPull');
         if (offer) {
@@ -529,7 +546,7 @@
         // Only once app.js says the records are in memory. Either order is
         // possible: on the localStorage fallback the app is ready before this
         // runs, and on IndexedDB it is not.
-        if (window.MFReady) offerPull();
+        if (isReady && isReady()) offerPull();
         else document.addEventListener('moneyflow:ready', offerPull, { once: true });
     }
 

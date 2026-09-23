@@ -35,10 +35,14 @@
  * If IndexedDB is missing or refuses to open, this falls back to localStorage
  * and the app is exactly what it was. That path is not a rare curiosity: it is
  * what the test harness runs on.
+ *
+ * It is handed to app.js through the shelf in guard.js rather than left on
+ * `window` as `MFStore`, so nobody can call `set` on your records from the
+ * console.
  * ====================================================================
  */
 
-const MFStore = (() => {
+window.MFHandoff.put('store', (() => {
 
     const DB_NAME = 'moneyflow';
     const DB_VERSION = 1;
@@ -333,4 +337,4 @@ const MFStore = (() => {
         persist, persisted,
         backend: () => (db ? 'indexedDB' : 'localStorage'),
     };
-})();
+})());

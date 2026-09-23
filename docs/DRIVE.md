@@ -156,11 +156,11 @@ Create. Copy the client ID — it ends in `.apps.googleusercontent.com`.
 Open `drive-config.js` and replace the placeholder:
 
 ```js
-const MF_DRIVE = {
+const MF_DRIVE = Object.freeze({
     clientId: '1234567890-abcdefg.apps.googleusercontent.com',
     folderId: '125XwuaPewNzYeCTgemOAnA9j0MXOoS-I',
     filename: 'moneyflow-data.json',
-};
+});
 ```
 
 The folder ID is already filled in — it is the part of the folder's URL after
