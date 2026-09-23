@@ -2,11 +2,13 @@
 
 **Personal Financial Management System**
 
-22 September 2026 · Kaon
+23 September 2026 · Kaon · Revision 2
+
+*A formatted edition of this proposal, with a cover page, contents and diagrams, sits beside it as [MoneyFlow-Project-Proposal.docx](MoneyFlow-Project-Proposal.docx) and [MoneyFlow-Project-Proposal.pdf](MoneyFlow-Project-Proposal.pdf). This Markdown file is the source; the two are generated from it.*
 
 ## Executive summary
 
-MoneyFlow is a browser-based personal financial management system for Malaysian households: one ledger, eight modules reading from it, no server, no account and no monthly fee. A working build is already live at [kaonhew02.github.io/MoneyFlow](https://kaonhew02.github.io/MoneyFlow/), carrying seven delivered modules across roughly 21,900 lines of hand-written HTML, CSS and JavaScript with no build step and no JavaScript libraries.
+MoneyFlow is a browser-based personal financial management system for Malaysian households: one ledger, eight modules reading from it, no server, no account and no monthly fee. A working build is already live at [kaonhew02.github.io/MoneyFlow](https://kaonhew02.github.io/MoneyFlow/), carrying seven delivered modules across roughly 22,200 lines of hand-written HTML, CSS and JavaScript with no build step and no JavaScript libraries. As of 23 September 2026 it also runs under a strict Content-Security-Policy, treats every backup file as hostile until checked, and leaves nothing of itself reachable from the browser console.
 
 The product exists because the tools that already do this either want a bank login, a subscription, or both — and a household ledger is the last thing that should live on somebody else's server for RM 15 a month.
 
@@ -17,12 +19,13 @@ The product exists because the tools that already do this either want a bank log
 | Primary user | Malaysian individuals and households tracking day-to-day money in ringgit |
 | Delivered | 7 of 8 modules live; multi-currency entry built into the ledger |
 | Stack | Static site on GitHub Pages · IndexedDB · optional Google Drive copy |
+| Security | Strict Content-Security-Policy · sanitised backups · no app state on `window` |
 | Dependencies | No npm packages, no build step, no bundler, no API keys; two CDN assets |
 | Running cost | RM 0/month — hosting, storage and backup are all free tiers or the user's own disk |
-| Effort to date | 46 commits, 18 Aug 2026 – 21 Sep 2026 |
+| Effort to date | 48 commits, 18 Aug 2026 – 23 Sep 2026 |
 | Proposed next phase | 12 weeks: finish M8, harden the backup story, close the multi-device gap |
 
-**The ask.** Approval to run the twelve-week Phase 4 in [Project plan & timeline](#project-plan--timeline) at the resourcing set out in [Resources & budget](#resources--budget) — one developer, part-time, and RM 0–84 of annual infrastructure depending on whether the multi-device option is taken up.
+**The ask.** Approval to run the twelve-week Phase 4 in [Project plan and timeline](#project-plan-and-timeline) at the resourcing set out in [Resources and budget](#resources-and-budget) — one developer, part-time, and RM 0–84 of annual infrastructure depending on whether the multi-device option is taken up.
 
 ## Background and problem statement
 
@@ -97,7 +100,7 @@ Debt sits in `save`, not `needs`. Clearing a card builds net worth exactly the w
 
 - **Privacy by construction.** The records never leave the browser unless the user presses a button. There is no account, no telemetry and no key in the source.
 - **No recurring cost.** Hosting is GitHub Pages; storage is the browser; the optional backup is the user's own Google Drive.
-- **A folder you can copy.** No build step and no dependencies means the app is three files that run from any web server, forever, with no toolchain to rot.
+- **A folder you can copy.** No build step and no dependencies means the app is a handful of static files that run from any web server, forever, with no toolchain to rot.
 - **Malaysian arithmetic that is actually right** — SST on the subtotal, BNM card minimums, EPF and ASNB compounding, delivery and platform fees split apart from the food.
 
 ## Objectives and success criteria
@@ -111,13 +114,15 @@ The project succeeds if a household can run its money on MoneyFlow for a full ye
 | O3 | Money arithmetic is exact | Rounding drift across any split, schedule or payoff run | 0 sen | Met |
 | O4 | A transfer never distorts a report | Transfers appearing in income or expense totals | 0 | Met |
 | O5 | Malaysian charges match a real receipt | Service charge, SST, cash rounding vs a printed bill | Exact to the sen | Met |
-| O6 | The app runs with nothing installed | npm packages, build steps, CDN scripts, API keys | 0 of each | Met |
+| O6 | The app runs with nothing installed | npm packages, build steps, API keys, CDN scripts it needs to run | 0 of each | Met |
 | O7 | The whole book survives a new laptop | Export → Import round trip preserving every store | Byte-identical | Met |
 | O8 | A failed write is never silent | Quota or private-mode failures that reach the user | 100% surfaced | Met |
 | O9 | Storage headroom | Usable capacity for records | ≥ 500 MB | Met (\~3,034 MB via IndexedDB) |
 | O10 | All eight modules delivered | Modules with a working screen | 8 of 8 | 7 of 8 — M8 pending |
 | O11 | Records reachable from a phone | Devices that can read the same book | ≥ 2 | **Not met** — see [Risks](#risks-and-mitigations) |
 | O12 | Text is readable | WCAG AA contrast on primary text and controls | ≥ 4.5:1 | Met on all primary text |
+| O13 | A backup file cannot run code | Script payloads executed from a crafted Import or Drive file | 0 | Met (23 Sep 2026) — was 18 |
+| O14 | The records cannot be changed from the console by name | App functions or state reachable on `window` after load | 0 | Met (23 Sep 2026) |
 
 ### What "done" means for Phase 4
 
@@ -274,11 +279,12 @@ The module that argues with the minimum payment.
 
 ## System architecture
 
-MoneyFlow is a static site with no backend: three files served by GitHub Pages, a storage layer in the browser, and an optional push to the user's own Google Drive. Nothing runs on a server, so there is nothing to pay for, nothing to patch and nothing to breach.
+MoneyFlow is a static site with no backend: a handful of static files served by GitHub Pages, a storage layer in the browser, and an optional push to the user's own Google Drive. Nothing runs on a server, so there is nothing to pay for, nothing to patch and nothing to breach.
 
 ```mermaid
 flowchart TD
-  U["Browser tab"] --> A["app.js<br/>7 module renderers"]
+  U["Browser tab"] --> G["guard.js<br/>CSP-safe bootstrap"]
+  G --> A["app.js<br/>7 module renderers"]
   A --> S["store.js / MFStore<br/>in-memory mirror"]
   S --> IDB[("IndexedDB<br/>~3,034 MB")]
   S -.->|"fallback"| LS[("localStorage<br/>~5 MB")]
@@ -301,13 +307,14 @@ The persistence layer changed three times on 18 August 2026, and the reasoning m
 
 | File | Lines | Holds |
 | --- | --- | --- |
-| `app.js` | 14,220 | All seven module renderers, the arithmetic, the charts |
+| `app.js` | 14,336 | All seven module renderers, the arithmetic, the charts — in one closure |
 | `style.css` | 4,223 | Every colour as a token; two `:root` blocks and four `#fff` literals |
-| `index.html` | 2,472 | The shell, the sidebar, and every module's markup |
-| `drive.js` | 538 | OAuth, push, pull, archive, the auto switch |
-| `store.js` | 336 | `MFStore` — IndexedDB with a `localStorage` fallback |
+| `index.html` | 2,445 | The shell, the sidebar, every module's markup, and the Content-Security-Policy |
+| `drive.js` | 555 | OAuth, push, pull, archive, the auto switch |
+| `store.js` | 340 | `MFStore` — IndexedDB with a `localStorage` fallback |
+| `guard.js` | 153 | The first script: error bar, form guard, the script hand-off, console speed bumps |
 | `serve.js` | 93 | Local static server on port 4780, used for development only |
-| `drive-config.js` | 40 | Client ID, folder ID, filename — no secret, safe to commit |
+| `drive-config.js` | 40 | Client ID, folder ID, filename — frozen; no secret, safe to commit |
 
 The app runs from any static host, or from a copied folder. There is no `package.json` in the live build, no bundler and no API key. Exactly two assets come from elsewhere — the Bootstrap Icons webfont, and Google's Identity Services client, which loads only because Drive sign-in needs it. Neither is load-bearing: the app runs without both.
 
@@ -325,11 +332,11 @@ The app runs from any static host, or from a copied folder. There is no `package
 
 ### The module contract
 
-A module is a `<section class="module">` with a hero band and a stack, an entry in the `MODULES` registry (`{ render }`), an entry in `FORM_DEFAULTS`, a button in the sidebar, an input listener block, and a `render()` call at start-up. A module that persists anything must add its key to **both** `RECORD_KEYS` in `store.js` and `BACKUP_STORES` in `app.js` — miss either and the records silently do not persist, or silently do not back up.
+The scripts no longer share anything through globals. `guard.js` loads first and opens a hand-off shelf; `store.js`, `app.js` and `drive.js` each put what they offer on it and take what they need, and the shelf is thrown away at `DOMContentLoaded`. Inside that, a module is a `<section class="module">` with a hero band and a stack, an entry in the `MODULES` registry (`{ render }`), an entry in `FORM_DEFAULTS`, a button in the sidebar, an input listener block, and a `render()` call at start-up. A module that persists anything must add its key to **both** `RECORD_KEYS` in `store.js` and `BACKUP_STORES` in `app.js` — miss either and the records silently do not persist, or silently do not back up.
 
 ### Deployment and cache busting
 
-The live site is served from the `main` branch root of the public repository `KaonHew02/MoneyFlow`. Every versioned asset in `index.html` carries a `?v=` query — currently `v=13`, including the logo files. **Bumping it on every change is mandatory**: Pages will otherwise serve a cached `app.js` and a fixed bug will appear to still be there.
+The live site is served from the `main` branch root of the public repository `KaonHew02/MoneyFlow`. Every versioned asset in `index.html` carries a `?v=` query — currently `v=14`, including the logo files. **Bumping it on every change is mandatory**: Pages will otherwise serve a cached `app.js` and a fixed bug will appear to still be there.
 
 A repository being public is fine because nothing sensitive ships. There are no keys left in the tree, and `legacy-sqlite/data/` — which holds real figures — is in `.gitignore` and must stay there.
 
@@ -406,6 +413,43 @@ An optional second copy in the user's own Drive folder, scoped to `drive.file` �
 - **Auto-push is opt-in and off by default**, debounced 60 seconds after editing stops, so one evening's entries is one upload.
 - **It never opens a sign-in window.** A popup nobody asked for gets blocked, and one that is not blocked is worse. If the token cannot be renewed silently it stands down and the stamp goes red.
 - **Coming back to an empty browser**, the app offers to pull rather than pulling. Replacing records unasked, before the user has even looked at the screen, is not a decision the app gets to make.
+
+## Security and privacy
+
+A local-only app has no server to breach and no password database to leak, so its threat model is short — but it is not empty. The records are the most revealing file a household owns, and the page that shows them will run whatever code reaches it. The security work of 23 September 2026 was driven by one concrete finding: **a crafted backup file could run its own code in the page.** Ids, icons and labels from the file reached `innerHTML` unescaped; one test file ran its payload eighteen times and crashed Bill Split. That route is now closed on four separate layers, so no single mistake reopens it.
+
+### Threat model
+
+| Threat | How it would arrive | Status |
+| --- | --- | --- |
+| Script injection through a backup | A crafted file passed to **Import**, or a tampered copy pulled **From Drive** | Closed — CSP, sanitised load, escaped output, shape check |
+| Script injection through the page | Any `<script>` or `onerror=` that reaches the DOM | Refused by the Content-Security-Policy |
+| A damaged or emptied backup wiping the book | A Drive file that is valid JSON but holds no stores | Closed — the same check guards Import and Drive |
+| "Paste this into your console" | Social engineering aimed at the user, not the code | Warned against; nothing of the app is reachable by name |
+| A tampered third-party asset | The icon stylesheet changed at the CDN | Subresource Integrity hash — the browser refuses a changed file |
+| Secrets in a public repository | Keys, database URLs or real figures committed | None in the tree; `legacy-sqlite/data/` in `.gitignore` |
+| Over-broad Google access | A Drive scope that reaches the whole Drive | `drive.file` only — files the app itself created |
+| Someone at the unlocked computer | Physical access to the browser profile | **Out of scope** — the operating-system account is the lock |
+
+### Controls in place
+
+- **Content-Security-Policy** in `index.html`: scripts only from this site and Google's sign-in client; no inline `<script>`, no inline event handlers, `object-src 'none'`, `base-uri 'none'`, `form-action 'none'`, and network calls only to Google's APIs and the exchange-rate endpoint. The inline error bar and every `onsubmit="return false"` moved into `guard.js` so the policy could refuse inline script outright.
+- **Subresource Integrity** on the Bootstrap Icons stylesheet, pinned to version 1.11.3 with a `sha384` hash.
+- **Sanitised on the way in.** `storedJson()` drops every `id` that is not `[\w-]` (and prototype names) and strips `__proto__` keys before any module sees the data. Loaders check table lookups with `isKnown()`, dates with `isIsoDate()`, and category icons against the known set; a `null` person in a bill no longer crashes Bill Split.
+- **Escaped on the way out.** Every remaining label and icon going into `innerHTML` is escaped.
+- **One gate for every restore.** `backupCheck()` is shared by Import and From Drive: it refuses a file whose `format` is wrong, whose version is newer than the app, that carries no stores, that holds nothing this version recognises, or in which any store is not an object — **before** anything is replaced. Import also refuses files over 50 MB. Drive previously checked only `format`, so an emptied Drive file would have wiped every store.
+- **Nothing on `window`.** `app.js` runs in one closure; the scripts pass what they need through the `guard.js` hand-off, which is deleted once the page loads. `MF_DRIVE` is frozen and `drive.js` keeps its own `fetch`.
+- **Speed bumps, stated honestly.** A console warning against pasted code, and no right-click *Inspect* or DevTools shortcuts outside text boxes. These are not a lock — the browser menu still opens DevTools, and no web page can stop that — but they stop the casual attempt, and the warning stops the scam that works on people rather than on code. One switch in `guard.js` turns them off while developing.
+- **A visible failure, never a silent one.** `guard.js` shows a red bar on the first uncaught error or failed background step, because a half-started app looks normal while half its buttons do nothing.
+
+### Privacy by construction
+
+No account, no telemetry, no analytics and no key in the source. The only network calls the page is permitted to make are the day's exchange rates and — only after the user signs in to Google — the Drive copy. With Drive's **Auto** switch off, which is the default, nothing leaves the browser unless the user presses a button.
+
+### What is not protected, and why
+
+- **Records are not encrypted at rest.** IndexedDB is readable by anyone using the same operating-system account. Encrypting it would need a passphrase on every start and a forgotten passphrase would be a lost ledger; the proportionate answer is an optional passphrase on the *exported* file, listed in [Future roadmap](#future-roadmap).
+- **The export file is plain JSON.** That is deliberate — it is readable without this app, which is the exit guarantee — and it means the user must store it as carefully as a bank statement.
 
 ## Brand, UI and UX design
 
@@ -484,8 +528,9 @@ Every choice here was made against one constraint: **the app should still run in
 | Auth | None | There is nothing to log in to | Supabase Auth — built, then removed; see below |
 | Hosting | GitHub Pages, `main` root | Free, versioned, custom-domain capable | Render, Railway — US$5–7/month for a persistent volume |
 | Exchange rates | `open.er-api.com`, cached daily | Free, keyless, and failing is survivable | A paid FX API — a key in a public repo |
+| Security | Content-Security-Policy + SRI, no inline script | Enforced by the browser, costs nothing at runtime | A login gate — nothing on a server to protect |
 | Local dev | `node serve.js` on port 4780 | 93 lines, no install | Vite, live-server — an npm tree for a static folder |
-| Version control | Git, public repo `KaonHew02/MoneyFlow` | 46 commits; the Supabase build is recoverable from history | — |
+| Version control | Git, public repo `KaonHew02/MoneyFlow` | 48 commits; the Supabase build is recoverable from history | — |
 | Tests | jsdom + `fake-indexeddb`, in a scratchpad | Real DOM, real `app.js`, no test framework in the shipped tree | Jest, Vitest — config and a dependency tree |
 
 ### The two external assets, and why they are acceptable
@@ -500,8 +545,8 @@ It is worth re-raising for exactly one trigger: the user wanting their records o
 
 ### Development workflow
 
-1. Edit `app.js`, `style.css` or `index.html` directly — there is no build.
-2. `node serve.js`, open `http://localhost:4780`.
+1. Edit `app.js`, `style.css` or `index.html` directly — there is no build. No inline script or `on…=` attribute: the Content-Security-Policy refuses both.
+2. `node serve.js`, open `http://localhost:4780`. Set `SPEED_BUMPS = false` in `guard.js` while debugging, and back to `true` before committing.
 3. Run the jsdom suites from the scratchpad for arithmetic and behaviour.
 4. **Bump `?v=` on every versioned asset in `index.html`.**
 5. Commit and push to `main`; GitHub Pages redeploys the root.
@@ -516,19 +561,19 @@ Three phases are complete. Phase 4 is what this proposal asks approval for: twel
 | --- | --- | --- |
 | **1 · Foundation** | 17–18 Aug 2026 | Renamed from Money Splitor; re-scoped to eight modules; specs written; M1 Dashboard shipped and made the landing tab; the stack settled after three changes in one day |
 | **2 · Core modules** | 19–20 Aug 2026 | M3 rebuilt from calculator to record; M4, M5, M6 and M7 built; migration to IndexedDB; Google Drive copy with opt-in auto-push; Export/Import with all-or-nothing rollback |
-| **3 · Refinement** | 21 Aug – 21 Sep 2026 | Mint/emerald retheme and the horse mark (11 Sep); multi-currency entry with live rates; per-account statements; sub-category naming; twenty-plus rounds on the bill splitter driven by real receipts |
+| **3 · Refinement** | 21 Aug – 23 Sep 2026 | Mint/emerald retheme and the horse mark (11 Sep); multi-currency entry with live rates; per-account statements; sub-category naming; twenty-plus rounds on the bill splitter driven by real receipts; project proposal (22 Sep); security hardening — CSP, sanitised backups, sealed console (23 Sep) |
 
-Forty-six commits across those three phases. The bill splitter alone accounts for a third of them, which is the honest signal of where the difficulty was: not the arithmetic, but discovering what a real Malaysian bill actually contains.
+Forty-eight commits across those three phases. The bill splitter alone accounts for a third of them, which is the honest signal of where the difficulty was: not the arithmetic, but discovering what a real Malaysian bill actually contains.
 
 ### Phase 4 — proposed
 
 | Week | Dates | Work | Deliverable |
 | --- | --- | --- | --- |
 | 1–2 | 28 Sep – 11 Oct | **M8 Convert** — a converter screen, saved conversions as records, rate staleness surfaced | M8 live; objective O10 met |
-| 3–4 | 12–25 Oct | **Backup hardening** — integrity check on import, archive rotation, an honest "last backed up" prompt | Recovery tested from a wiped browser |
+| 3–4 | 12–25 Oct | **Backup hardening** — archive rotation, a prompt for the first Drive push, an honest "last backed up" reminder; builds on the import integrity check delivered 23 Sep | Recovery tested from a wiped browser |
 | 5–6 | 26 Oct – 8 Nov | **Multi-device spike** — cost out Supabase rebuild vs Drive-mediated sync vs a shared file; no code committed to either | A written decision, signed off |
 | 7–9 | 9–29 Nov | **Implementation** of the chosen route behind a switch, with the local path untouched as the fallback | Records readable on a second device |
-| 10 | 30 Nov – 6 Dec | Accessibility and responsive pass; contrast re-measured; phone and tablet widths | AA on every primary surface |
+| 10 | 30 Nov – 6 Dec | Accessibility and responsive pass; contrast re-measured; phone and tablet widths; security re-review of anything the sync route added | AA on every primary surface; CSP unchanged or tightened |
 | 11 | 7–13 Dec | Full regression across the browser matrix; every migration path re-run against real saved books | Test report |
 | 12 | 14–20 Dec | Release, documentation refresh, handover | v1.0 |
 
@@ -554,6 +599,7 @@ The test strategy has three layers, and none of them ships in the live tree. A f
 | Arithmetic and behaviour | jsdom driving the real `index.html` + `app.js` | Wrong totals, broken period logic, migration that reads a saved record differently |
 | Async storage | `fake-indexeddb`, plus one real-browser check | The IndexedDB path, which a jsdom pass does **not** exercise |
 | Layout and colour | `node serve.js` + a browser pane | Overflow, contrast, theme application |
+| Security | Crafted backup files through Import and From Drive, in a real browser | Script that runs, a store wiped by an empty file, a crash on a malformed record |
 
 ### How the jsdom harness works
 
@@ -574,6 +620,7 @@ These are runtime defences, verified by test, not just test cases:
 - **Load order is enforced.** `loadCommit()` validates each ticked payment's `entryId` against the entries that exist, so it must run strictly after `loadLedger()`; against an empty book every link looks broken and gets cleared.
 - **Every retired shape is read forward and verified equal.** The four removed split methods were checked against all six legacy shapes for identical totals and per-person shares.
 - **`allocateSen` is asserted to be lossless** everywhere it is used.
+- **A crafted backup is refused or neutralised.** The test file that ran its payload eighteen times before 23 September now runs it zero times, through both Import and From Drive; an emptied Drive file is refused rather than applied.
 
 ### Browser matrix
 
@@ -601,6 +648,8 @@ Safari's seven-day eviction of unused site storage is the most serious browser-s
 - [ ] `BACKUP_STORES` and `RECORD_KEYS` both contain every store a new module added
 - [ ] Contrast re-measured on any changed surface
 - [ ] No horizontal overflow at phone, tablet and desktop widths
+- [ ] No inline script or event handler added; the Content-Security-Policy still loads the page with no console violations
+- [ ] `SPEED_BUMPS` back to `true` in `guard.js`
 - [ ] **`?v=` bumped on every versioned asset in `index.html`**
 - [ ] Pushed to `main`, and the live site checked with a hard reload
 
@@ -622,6 +671,10 @@ The architecture trades a server for privacy and cost, and every serious risk be
 | R10 | Real financial data committed to a public repository | Low | Critical | `legacy-sqlite/data/` is in `.gitignore`; no keys remain in the tree; the Supabase URL and anon key were removed | Low |
 | R11 | The free FX endpoint changes or disappears | Medium | Low | A failed fetch is not an error — cached rates stand and the user types the figure | Low |
 | R12 | Scope creeps back toward a backend, repeating August | Medium | Medium | MS-3 is a gate: the decision is written and signed off before any code | Low |
+| R13 | **A crafted backup runs code in the page** — through Import or a tampered Drive copy | Low (was High until 23 Sep) | Critical | Content-Security-Policy with no inline script; `storedJson()` sanitising ids and `__proto__`; escaped output; `backupCheck()` before any restore | Low |
+| R14 | The user is talked into pasting code into the console | Low | High | Console warning; no app state on `window`; DevTools shortcuts blocked as a speed bump | Low–Medium — DevTools still opens from the browser menu |
+| R15 | An emptied or damaged Drive file wipes every store on pull | Low (was Medium) | Critical | `backupCheck()` now shared by Import and From Drive; refuses before anything is replaced | Low |
+| R16 | Records unencrypted at rest on a shared computer | Medium | High | Accepted: the operating-system account is the lock; optional passphrase on the export file is on the roadmap | Medium |
 
 ### The three that deserve a decision, not just a mitigation
 
@@ -698,6 +751,7 @@ After v1.0, the work splits into three groups: things worth building, things del
 | Yearly archive and prune | Keeps the working book small once the ledger is years deep | Low — `archive()` already writes the dated file |
 | Build-time version stamp | Removes the manual `?v=` bump, which is R6 | Low — a one-line release script |
 | Start-up store assertion | Converts R7 from silent data loss into a console error | Low |
+| Passphrase on the export file | Makes the backup safe to leave in Drive or on a USB stick (R16) | Medium — Web Crypto, and a forgotten passphrase is a lost backup, so it must stay optional |
 
 ### Deliberately not built, and why
 
@@ -722,7 +776,7 @@ What travels between them is the shell, the Drive save layer and the splitter's 
 
 ## Conclusion and approval
 
-MoneyFlow already works. Seven of eight modules are live, the ledger has been in daily use since August 2026, and the running cost is RM 0 a month. What this proposal asks for is not a build from nothing — it is twelve weeks to close the last two objectives and release a version that can be trusted with years of records rather than months.
+MoneyFlow already works. Seven of eight modules are live, the ledger has been in daily use since August 2026, the running cost is RM 0 a month, and since 23 September the app is hardened against the one attack a local-only app realistically faces — a file pretending to be a backup. What this proposal asks for is not a build from nothing — it is twelve weeks to close the last two objectives and release a version that can be trusted with years of records rather than months.
 
 The case rests on three things:
 
@@ -751,4 +805,25 @@ If Phase 4 is not approved, the recommendation is to do R1 and R6 anyway: prompt
 
 ### Sources
 
-Every figure in this proposal is taken from the MoneyFlow repository as it stands on 21 September 2026 — the module specifications in `docs/spec/` (`00-overview`, `M1`–`M7`), the operational notes in `docs/DEPLOY.md`, `docs/RUNNING.md` and `docs/DRIVE.md`, the source files `app.js`, `store.js`, `drive.js`, `style.css` and `index.html`, and 46 commits of git history from 18 August to 21 September 2026. No external source was consulted; the market comparisons in [Background and problem statement](#background-and-problem-statement) are stated from general knowledge and should be checked against current pricing before the document is shown outside the project.
+Every figure in this proposal is taken from the MoneyFlow repository as it stands on 23 September 2026 (commit `42e49f4`) — the module specifications in `docs/spec/` (`00-overview`, `M1`–`M7`), the operational notes in `docs/DEPLOY.md`, `docs/RUNNING.md` and `docs/DRIVE.md`, the source files `app.js`, `store.js`, `drive.js`, `guard.js`, `style.css` and `index.html`, and 48 commits of git history from 18 August to 23 September 2026. No external source was consulted; the market comparisons in [Background and problem statement](#background-and-problem-statement) are stated from general knowledge and should be checked against current pricing before the document is shown outside the project.
+
+## Glossary
+
+| Term | Meaning |
+| --- | --- |
+| **sen** | One hundredth of a ringgit. Every amount in MoneyFlow is stored as a whole number of sen |
+| **Basis point** | One hundredth of a percent. Every rate is stored in basis points — 18% is `1800` |
+| **SST** | Malaysia's Sales and Service Tax, 6% on restaurant food, charged on the food subtotal only |
+| **Service charge** | The 10% a restaurant adds to the food subtotal; not itself taxed |
+| **BNM** | Bank Negara Malaysia, which caps card interest at 18% a year and sets the minimum-payment rule |
+| **EPF** | Employees Provident Fund — mandatory retirement savings, 11% of salary from the employee |
+| **ASNB / ASB** | Amanah Saham Nasional Berhad and its Amanah Saham Bumiputera fund, paying a declared yearly dividend on the average monthly balance |
+| **FD** | Fixed deposit — simple interest within a placement, compounded on renewal |
+| **SPayLater** | Shopee's buy-now-pay-later instalment plan |
+| **50/30/20** | Needs / wants / save split of income, used as a yardstick in M4 |
+| **Avalanche / snowball** | Paying extra to the highest-rate card first, or to the smallest balance first |
+| **IndexedDB** | The browser's built-in database; MoneyFlow's primary store, ~3,034 MB on this origin |
+| **CSP** | Content-Security-Policy — a rule in the page that tells the browser which scripts it may run |
+| **SRI** | Subresource Integrity — a hash that makes the browser refuse a third-party file that has changed |
+| **`drive.file`** | The narrowest Google Drive permission: only files the app itself created |
+| **Derived value** | A figure computed from records at paint time. MoneyFlow stores none |
