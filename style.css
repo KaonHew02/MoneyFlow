@@ -2854,7 +2854,7 @@ tr.is-locked { animation: nudge .3s ease; }
 
 .commit-month {
     display: grid;
-    grid-template-columns: 34px minmax(0, 1fr) 122px 132px;
+    grid-template-columns: 34px minmax(0, 1fr) auto 122px 132px;
     gap: 12px;
     align-items: center;
     padding: 8px 12px;
@@ -2964,10 +2964,24 @@ tr.is-locked { animation: nudge .3s ease; }
 .commit-waive:hover { background: var(--track-2); color: var(--ink); }
 .commit-waive.is-on { color: var(--ink-2); }
 
+/* Which bank, and the button that pays from it — the Bill Splitter's settle
+   row, on the month being paid now. Every row keeps the cell, empty or not,
+   so the figures and flags to its right stay in one column down the list. */
+.commit-pay {
+    display: flex;
+    align-items: center;
+    justify-content: flex-end;
+    gap: 8px;
+    min-width: 0;
+}
+
 @media (max-width: 720px) {
     .commit-month { grid-template-columns: 34px minmax(0, 1fr) 104px; }
     .commit-end { grid-column: 2 / -1; justify-content: flex-start; }
     .commit-flag { text-align: left; }
+    /* Under the row, last — there is no room for it across a phone. */
+    .commit-pay { grid-column: 2 / -1; order: 1; flex-wrap: wrap; justify-content: flex-start; }
+    .commit-pay:empty { display: none; }
 }
 
 @media (max-width: 460px) {
