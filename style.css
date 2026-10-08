@@ -2798,12 +2798,17 @@ tr.is-locked { animation: nudge .3s ease; }
 .goal-add input[type="date"],
 .goal-add input[type="text"] { padding: 8px 10px; font-size: 12.5px; }
 
+/* Card Payoff asks which bank the payment left from — the Bill Splitter's
+   question — between the figure and the note. */
+.goal-add.has-from { grid-template-columns: 140px 128px auto minmax(0, 1fr) auto; }
+
 @media (max-width: 900px) {
     .bgt-row.is-plan { grid-template-columns: 38px minmax(0, 1fr) 110px 30px; }
     .bgt-row.is-plan .bgt-bucket { grid-column: 2 / 3; }
     .bgt-row.is-plan .bgt-pct { display: none; }
     .goal-fields { grid-template-columns: repeat(2, minmax(0, 1fr)); }
-    .goal-add { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); }
+    .goal-add,
+    .goal-add.has-from { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); }
     .goal-add button { grid-column: 1 / -1; justify-content: center; }
 }
 
@@ -4158,6 +4163,7 @@ button.stmt-row:hover .stmt-what b { color: var(--jade); }
     .money-input input, .money-input-sm input,
     .cat-name, .cat-sub-name, .split-item-label,
     .cat-look-row select, .acct-more select,
+    .settle-into,
     .purpose-row input,
     .goal-field select, .goal-field input[type="date"],
     .goal-field input.date-text,
@@ -4217,7 +4223,8 @@ button.stmt-row:hover .stmt-what b { color: var(--jade); }
     /* Both of these put a date box in the first of two columns, and a date
        box has a fixed amount to say: dd-mm-yyyy and a calendar. Below this
        there is not room for that beside anything else. */
-    .goal-add { grid-template-columns: minmax(0, 1fr); }
+    .goal-add,
+    .goal-add.has-from { grid-template-columns: minmax(0, 1fr); }
     .goal-add button { grid-column: auto; }
 
     /* Tables are the one thing that still has to scroll sideways — five

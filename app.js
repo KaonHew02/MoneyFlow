@@ -6421,11 +6421,20 @@ function cardAddPayment() {
     const sen = Math.max(0, toSen(parseFloat(raw) || 0));
     if (!sen) { if ($('cardPayAmount')) $('cardPayAmount').focus(); return; }
 
+    // Which bank it left from, as the Bill Splitter and the instalment
+    // schedule ask. A bank other than the usual one becomes the usual one, so
+    // next month's payment already has it picked.
+    const picker = $('cardPayFrom');
+    const picked = picker ? picker.value : '';
+    if (picked && picked !== card.account && accountById(picked)) card.account = picked;
+    if (picker) delete picker.dataset.touched;
+
     const payment = {
         id: 'cp' + (++cardState.seq),
         date: ($('cardPayDate') || {}).value || todayIso(),
         amount: String(raw),
         note: (($('cardPayNote') || {}).value || '').trim(),
+        account: card.account,
         entryId: '',
     };
     if (card.autoRecord) payment.entryId = cardWriteEntry(card, payment, sen);
@@ -6445,7 +6454,9 @@ function cardAddPayment() {
     renderCard();
     renderLedger();
     renderDash();
-    cardHint('Logged ' + money(fromSen(sen)) + (payment.entryId ? ' and recorded under Expenses.' : '.'));
+    cardHint('Logged ' + money(fromSen(sen)) +
+        (accountById(payment.account) ? ' from ' + accountName(payment.account) : '') +
+        (payment.entryId ? ' and recorded under Expenses.' : '.'));
 }
 
 function cardDropPayment(id) {
@@ -6471,7 +6482,8 @@ function cardDropPayment(id) {
 }
 
 function cardWriteEntry(card, payment, sen) {
-    if (!card.account) {
+    const from = payment.account || card.account;
+    if (!from) {
         cardHint('Logged — but there is no account set, so nothing was written to Expenses.');
         return '';
     }
@@ -6485,7 +6497,7 @@ function cardWriteEntry(card, payment, sen) {
         base: '', rate: '',
         date: payment.date,
         category: card.category, sub: '',
-        account: card.account, toAccount: '',
+        account: from, toAccount: '',
         note: cardName(card) + ' — card payment',
         created: stamp, updated: stamp,
     };
@@ -6753,6 +6765,22 @@ function paintCardPayments(book) {
     set('cardPaymentsTitle', card.id ? 'Payments — ' + cardName(card) : 'Payments');
     if (add) add.hidden = !card.id;
 
+    // The bank picker. Rebuilt on every paint so a new or closed account shows
+    // up. It follows the card's own account until it is picked by hand, and
+    // a hand-picked bank holds until it is paid from or another card opens.
+    const from = $('cardPayFrom');
+    if (from) {
+        const accounts = openAccounts();
+        if (from.dataset.card !== card.id) delete from.dataset.touched;
+        const held = from.dataset.touched ? from.value : card.account;
+        from.innerHTML = accounts.map((a, i) => '<option value="' + escapeHtml(a.id) + '">' +
+            escapeHtml(a.name.trim() || 'Account ' + (i + 1)) + '</option>').join('');
+        if (accounts.some((a) => a.id === held)) from.value = held;
+        from.dataset.card = card.id;
+        const field = $('cardPayFromField');
+        if (field) field.hidden = !accounts.length;
+    }
+
     const bar = $('cardProgressBar');
     if (bar) {
         bar.style.width = f.progress + '%';
@@ -6785,12 +6813,18 @@ function paintCardPayments(book) {
         .slice()
         .sort((a, b) => (a.date === b.date ? (a.id < b.id ? 1 : -1) : (a.date < b.date ? 1 : -1)))
         .forEach((p) => {
+            // The entry is asked first: if it was moved to another account
+            // from the statement, that is where it now says it came from.
+            const entry = p.entryId ? ledgerState.entries.find((e) => e.id === p.entryId) : null;
+            const via = accountById((entry && entry.account) || p.account);
+
             const row = document.createElement('div');
             row.className = 'goal-c';
             row.dataset.payment = p.id;
             row.innerHTML =
                 '<span class="goal-c-when">' + dayLabel(p.date) + '</span>' +
                 '<span class="goal-c-what">' + (p.note ? escapeHtml(p.note) : '<i>No note</i>') +
+                    (via ? ' · from ' + escapeHtml(via.name.trim() || 'Unnamed account') : '') +
                     (p.entryId ? ' · in Expenses' : '') + '</span>' +
                 '<b>' + money(fromSen(Math.max(0, toSen(parseFloat(p.amount) || 0)))) + '</b>' +
                 '<button type="button" class="split-x" data-drop-payment aria-label="Remove payment">' +
@@ -6998,6 +7032,7 @@ function loadCard() {
                 .map((p) => ({
                     id: String(p.id), date: p.date,
                     amount: String(p.amount || ''), note: String(p.note || ''),
+                    account: String(p.account || ''),
                     entryId: String(p.entryId || ''),
                 })),
             created: String(c.created || ''),
@@ -13788,6 +13823,9 @@ function startApp() {
 
     const cardPayAddBtn = $('cardPayAddBtn');
     if (cardPayAddBtn) cardPayAddBtn.addEventListener('click', cardAddPayment);
+
+    const cardPayFrom = $('cardPayFrom');
+    if (cardPayFrom) cardPayFrom.addEventListener('change', () => { cardPayFrom.dataset.touched = '1'; });
 
     const cardListHost = $('cardListBody');
     if (cardListHost) {
