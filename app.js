@@ -7847,8 +7847,8 @@ function growGuideLines(type) {
         // EPF mostly arrives by payslip, not by a transfer anyone makes: the
         // salary in Expenses is already what is left after it came off.
         const payslip = type !== 'epf' ? [] : [
-            ['Contributions', 'each payday, the two EPF lines on your payslip — yours and your employer\'s — ' +
-                'as two entries. In % mode the base is your gross salary, not what reached the bank'],
+            ['Contributions', 'each month, in RM, the amount KWSP tells you was credited — yours and your ' +
+                'employer\'s together. In % mode the base is your gross salary, not what reached the bank'],
         ];
         return [
             ['Opening balance', 'what your latest ' + who + ' statement says, with Started as the date it is from'],
@@ -8534,13 +8534,13 @@ function paintGrowContributions(book) {
     // An empty base box shows the figure it stands for, so leaving it empty
     // is a choice that can be seen rather than a blank that gets guessed at.
     const baseInput = $('growCBase');
-    if (baseInput) baseInput.placeholder = fallback.sen ? String(fromSen(fallback.sen)) : epf ? 'gross salary' : '0';
+    if (baseInput) baseInput.placeholder = fallback.sen ? fromSen(fallback.sen).toFixed(2) : epf ? 'gross salary' : '0';
 
     set('growCHint', !inv.id
         ? 'Nothing can be logged against a draft — save the investment first.'
         : unit === 'rm'
             ? epf
-                ? 'A flat amount — the EPF line on your payslip. Switch to % to work it out from your gross salary instead.'
+                ? 'A flat amount — what KWSP tells you was credited this month, yours and your employer\'s together.'
                 : 'A flat amount. Switch to % for anything worked out as a share — EPF at 11% of salary, for instance.'
             : typedBase
                 ? worked + comes + '.'
