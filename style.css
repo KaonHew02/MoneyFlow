@@ -2802,13 +2802,20 @@ tr.is-locked { animation: nudge .3s ease; }
    question — between the figure and the note. */
 .goal-add.has-from { grid-template-columns: 140px 128px auto minmax(0, 1fr) auto; }
 
+/* Five across only fits with the full sidebar beside it from here up. At
+   1024px the picker took its whole width and left the note 17px; below this
+   the row goes to two columns, as it does on a tablet. */
+@media (max-width: 1200px) {
+    .goal-add.has-from { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); }
+    .goal-add.has-from button { grid-column: 1 / -1; justify-content: center; }
+}
+
 @media (max-width: 900px) {
     .bgt-row.is-plan { grid-template-columns: 38px minmax(0, 1fr) 110px 30px; }
     .bgt-row.is-plan .bgt-bucket { grid-column: 2 / 3; }
     .bgt-row.is-plan .bgt-pct { display: none; }
     .goal-fields { grid-template-columns: repeat(2, minmax(0, 1fr)); }
-    .goal-add,
-    .goal-add.has-from { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); }
+    .goal-add { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); }
     .goal-add button { grid-column: 1 / -1; justify-content: center; }
 }
 

@@ -4826,6 +4826,8 @@ const newPlan = () => ({
 const commitDraft = () => commitState.draft || (commitState.draft = newPlan());
 const planById = (id) => commitState.plans.find((p) => p.id === id) || null;
 const planName = (plan) => (plan.name || '').trim() || 'Untitled plan';
+// Where a ticked payment is filed: money owed to you comes back as Income.
+const planBook = (plan) => (plan.direction === 'in' ? 'Income' : 'Expenses');
 
 /**
  * --------------------------------------------------------------------
@@ -5180,7 +5182,7 @@ function commitDropPlan(id) {
         'The plan and its ' + sums.paidCount + ' ticked ' +
         (sums.paidCount === 1 ? 'payment go' : 'payments go') + ' for good.' +
         (linked ? ' The ' + linked + (linked === 1 ? ' entry it wrote' : ' entries it wrote') +
-            ' into Expenses stay where they are — delete those there if you want them gone.' : '') +
+            ' into ' + planBook(plan) + ' stay where they are — delete those there if you want them gone.' : '') +
         ' To stop it counting without losing it, cancel it instead.',
         'Delete plan',
         () => {
@@ -5228,12 +5230,14 @@ function commitTogglePayment(n, account) {
     }
     const from = account || plan.account || '';
 
-    // "Payment 3 ticked from Maybank and recorded under Expenses."
-    const paidHint = (lead) => {
+    // "Payment 3 ticked from Maybank and recorded under Expenses." When an
+    // entry was due and none was written, commitWriteEntry has already said
+    // why, and that is the hint to leave up.
+    const sayPaid = (lead) => {
+        if (plan.autoRecord && !rec.entryId) return;
         const where = rec.account && accountById(rec.account)
             ? (plan.direction === 'in' ? ' into ' : ' from ') + accountName(rec.account) : '';
-        return lead + where + (rec.entryId
-            ? ' and recorded under ' + (plan.direction === 'in' ? 'Income.' : 'Expenses.') : '.');
+        commitHint(lead + where + (rec.entryId ? ' and recorded under ' + planBook(plan) + '.' : '.'));
     };
 
     // `row.paid`, not `rec.paid`: a month settled by the count has no record
@@ -5247,7 +5251,8 @@ function commitTogglePayment(n, account) {
         rec.date = '';
         rec.entryId = '';
         delete rec.account;
-        commitHint('Payment ' + n + ' un-ticked' + (row.entryId ? ' and taken back out of Expenses.' : '.'));
+        commitHint('Payment ' + n + ' un-ticked' +
+            (row.entryId ? ' and taken back out of ' + planBook(plan) + '.' : '.'));
     } else if (row.waived) {
         // It was written off and is now being ticked: the money moved after
         // all. The waiver comes off first, then it is an ordinary payment.
@@ -5256,7 +5261,7 @@ function commitTogglePayment(n, account) {
         rec.date = todayIso();
         rec.account = from;
         rec.entryId = plan.autoRecord ? commitWriteEntry(plan, row, from) : '';
-        commitHint(paidHint('Payment ' + n + ' is no longer waived — ticked as paid'));
+        sayPaid('Payment ' + n + ' is no longer waived — ticked as paid');
     } else if (n <= sums.ahead) {
         // Inside the "already paid" count, so ticking it back on means "yes,
         // that one was settled before I started tracking" — not "I paid it
@@ -5267,13 +5272,13 @@ function commitTogglePayment(n, account) {
         rec.entryId = '';
         if (rec.amount === undefined) delete plan.payments[n];
         commitHint('Payment ' + n + ' is back under the ' + sums.ahead +
-            ' you had already paid — nothing was written to Expenses.');
+            ' you had already paid — nothing was written to ' + planBook(plan) + '.');
     } else {
         rec.paid = true;
         rec.date = todayIso();
         rec.account = from;
         rec.entryId = plan.autoRecord ? commitWriteEntry(plan, row, from) : '';
-        commitHint(paidHint('Payment ' + n + ' ticked'));
+        sayPaid('Payment ' + n + ' ticked');
     }
 
     plan.updated = todayIso();
@@ -5324,7 +5329,7 @@ function commitWaivePayment(n) {
         rec.waived = true;
         commitHint('Payment ' + n + ' waived — ' + money(fromSen(row.amountSen)) +
             ' comes off what is left, and ' +
-            (undone ? 'the entry it wrote is out of Expenses.' : 'nothing went into Expenses.'));
+            (undone ? 'the entry it wrote is out of ' : 'nothing went into ') + planBook(plan) + '.');
     }
 
     plan.updated = todayIso();
@@ -5337,7 +5342,7 @@ function commitWaivePayment(n) {
 function commitWriteEntry(plan, row, account) {
     const from = account || plan.account;
     if (!from) {
-        commitHint('Ticked — but there is no account set, so nothing was written to Expenses.');
+        commitHint('Ticked — but there is no account set, so nothing was written to ' + planBook(plan) + '.');
         return '';
     }
 
@@ -5451,7 +5456,7 @@ function paintCommitForm(sums) {
 
     set('commitPaidCountHint', incoming
         ? 'Already had some of it back? Put the number of months here and they settle straight away — ' +
-          'nothing goes into your Expenses for them, since they came in before you started tracking.'
+          'nothing goes into your Income for them, since they came in before you started tracking.'
         : 'Picking this up part-way through? Put the number of months here and they settle straight away — ' +
           'nothing goes into your Expenses for them, since you paid them before you started tracking. ' +
           'Tick the months after that as you pay them.');
@@ -6454,6 +6459,9 @@ function cardAddPayment() {
     renderCard();
     renderLedger();
     renderDash();
+    // An entry was due and none was written: cardWriteEntry has already said
+    // why, and that is the hint to leave up.
+    if (card.autoRecord && !payment.entryId) return;
     cardHint('Logged ' + money(fromSen(sen)) +
         (accountById(payment.account) ? ' from ' + accountName(payment.account) : '') +
         (payment.entryId ? ' and recorded under Expenses.' : '.'));
