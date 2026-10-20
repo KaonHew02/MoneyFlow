@@ -7203,7 +7203,8 @@ const unitSen = (figure, unit, baseSen) => {
 };
 
 /** What the ledger says came in during a month. The default base for a
- *  percentage contribution, because "11% of salary" means that month's. */
+ *  percentage contribution on most holdings — EPF is the exception, and
+ *  `contribDefaultBase` says why. */
 function growIncomeIn(from, to) {
     return ledgerState.entries
         .filter((e) => e.type === 'income' && e.date >= from && e.date <= to)
@@ -7233,6 +7234,23 @@ function contribSen(c) {
 }
 
 const contribBaseSen = (c) => Math.max(0, toSen(parseFloat(c.base) || 0));
+
+/**
+ * What a percentage contribution is a share of when no base is typed.
+ *
+ * For most holdings that is the month's income in the ledger: "20% of what I
+ * earned". Not for EPF. EPF is worked out on gross salary, and the salary in
+ * the ledger is what reached the bank after EPF came off it, so 13% of that
+ * is simply the wrong figure. An EPF holding takes the gross salary used on
+ * its last percentage contribution instead, and with none, asks for one.
+ */
+function contribDefaultBase(inv, when) {
+    if (inv.type !== 'epf') return { sen: growMonthIncome(when), from: 'ledger' };
+    const last = inv.contributions
+        .filter((c) => c.unit === 'pct' && contribBaseSen(c) > 0)
+        .sort((a, b) => (a.date === b.date ? (a.id < b.id ? 1 : -1) : (a.date < b.date ? 1 : -1)))[0];
+    return last ? { sen: contribBaseSen(last), from: 'last' } : { sen: 0, from: '' };
+}
 
 /**
  * --------------------------------------------------------------------
@@ -7826,10 +7844,20 @@ function growGuideLines(type) {
 
     if (type === 'epf' || type === 'asb') {
         const who = type === 'epf' ? 'EPF' : 'ASNB';
+        // EPF mostly arrives by payslip, not by a transfer anyone makes: the
+        // salary in Expenses is already what is left after it came off.
+        const payslip = type !== 'epf' ? [] : [
+            ['Contributions', 'each payday, the two EPF lines on your payslip — yours and your employer\'s — ' +
+                'as two entries. In % mode the base is your gross salary, not what reached the bank'],
+        ];
         return [
             ['Opening balance', 'what your latest ' + who + ' statement says, with Started as the date it is from'],
-            ['Fed from', 'the Expenses category you file top-ups under — they are then read from there, ' +
-                'so you never type them twice'],
+            ...payslip,
+            ['Fed from', type === 'epf'
+                ? 'only for top-ups you pay yourself, such as i-Saraan — the Expenses category you file them ' +
+                  'under, so you never type them twice'
+                : 'the Expenses category you file top-ups under — they are then read from there, ' +
+                  'so you never type them twice'],
             ['Worth now', 'update it whenever a statement arrives; it is the only figure the app cannot work out'],
             ['Dividends & interest', 'when ' + who + ' announce the rate, put the rate in and leave the amount ' +
                 'empty — the ringgit is worked out from the balance you held that year'],
@@ -7988,13 +8016,17 @@ function growAddContribution() {
 
     const when = ($('growCDate') || {}).value || todayIso();
     // Whatever the base is at this moment is written down with it. The ledger
-    // is only the default; from here on the record stands on its own.
+    // (or, for EPF, last month's gross salary) is only the default; from here
+    // on the record stands on its own.
     const typedBase = Math.max(0, toSen(parseFloat(($('growCBase') || {}).value || '') || 0));
-    const baseSen = unit === 'pct' ? (typedBase || growMonthIncome(when)) : 0;
+    const baseSen = unit === 'pct' ? (typedBase || contribDefaultBase(inv, when).sen) : 0;
 
     if (unit === 'pct' && !baseSen) {
-        growHint('There is no income recorded for that month, so a percentage has nothing to be a ' +
-            'percentage of — put the figure it is a share of in the box beside it.');
+        if ($('growCBase')) $('growCBase').focus();
+        growHint(inv.type === 'epf'
+            ? 'Put your gross salary in the "of RM" box — the figure on your payslip before EPF comes off.'
+            : 'There is no income recorded for that month, so a percentage has nothing to be a ' +
+              'percentage of — put the figure it is a share of in the "of RM" box.');
         return;
     }
 
@@ -8491,24 +8523,40 @@ function paintGrowContributions(book) {
     if (baseWrap) baseWrap.hidden = unit !== 'pct';
 
     const when = ($('growCDate') || {}).value || todayIso();
-    const monthIncome = growMonthIncome(when);
+    const epf = inv.type === 'epf';
+    const fallback = contribDefaultBase(inv, when);
     const typedBase = Math.max(0, toSen(parseFloat(($('growCBase') || {}).value || '') || 0));
-    const baseSen = typedBase || monthIncome;
+    const baseSen = typedBase || fallback.sen;
     const figure = parseFloat(($('growCFigure') || {}).value || '') || 0;
+    const worked = fmt(figure, 0) + '% of ' + money(fromSen(baseSen));
+    const comes = ' is ' + money(fromSen(unitSen(figure, 'pct', baseSen)));
+
+    // An empty base box shows the figure it stands for, so leaving it empty
+    // is a choice that can be seen rather than a blank that gets guessed at.
+    const baseInput = $('growCBase');
+    if (baseInput) baseInput.placeholder = fallback.sen ? String(fromSen(fallback.sen)) : epf ? 'gross salary' : '0';
 
     set('growCHint', !inv.id
         ? 'Nothing can be logged against a draft — save the investment first.'
         : unit === 'rm'
-            ? 'A flat amount. Switch to % for anything worked out as a share — EPF at 11% of salary, for instance.'
-            : monthIncome && !typedBase
-                ? fmt(figure, 0) + '% of the ' + money(fromSen(monthIncome)) + ' the ledger has for ' +
-                  monthKeyLabel(monthOf(when)) + ' is ' + money(fromSen(unitSen(figure, 'pct', baseSen))) +
-                  '. Type your own figure beside it to use a different base.'
-                : typedBase
-                    ? fmt(figure, 0) + '% of ' + money(fromSen(typedBase)) + ' is ' +
-                      money(fromSen(unitSen(figure, 'pct', baseSen))) + '.'
-                    : 'No income is recorded for ' + monthKeyLabel(monthOf(when)) +
-                      ', so put the figure it is a percentage of in the box beside it.');
+            ? epf
+                ? 'A flat amount — the EPF line on your payslip. Switch to % to work it out from your gross salary instead.'
+                : 'A flat amount. Switch to % for anything worked out as a share — EPF at 11% of salary, for instance.'
+            : typedBase
+                ? worked + comes + '.'
+                : fallback.from === 'last'
+                    ? worked + ' — the gross salary you used last time —' + comes +
+                      '. Type a new one in the "of RM" box if it has changed.'
+                    : fallback.from === 'ledger' && fallback.sen
+                        ? fmt(figure, 0) + '% of the ' + money(fromSen(fallback.sen)) + ' the ledger has for ' +
+                          monthKeyLabel(monthOf(when)) + comes +
+                          '. Type your own figure in the "of RM" box to use a different base.'
+                        : epf
+                            ? 'EPF is a share of your gross salary: the figure on your payslip before EPF comes off. ' +
+                              'Put it in the "of RM" box. The salary in Expenses is what reached the bank after EPF, ' +
+                              'so it is not used here.'
+                            : 'No income is recorded for ' + monthKeyLabel(monthOf(when)) +
+                              ', so put the figure it is a percentage of in the "of RM" box.');
 
     host.innerHTML = '';
     if (!inv.id) return;

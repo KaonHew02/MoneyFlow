@@ -3059,7 +3059,7 @@ tr.is-locked { animation: nudge .3s ease; }
    and the button. The base only appears in per-cent mode. */
 .grow-add {
     display: grid;
-    grid-template-columns: 138px auto 118px 132px minmax(0, 1fr) auto;
+    grid-template-columns: 138px auto 118px 156px minmax(0, 1fr) auto;
     gap: 8px;
     align-items: center;
 }
@@ -3072,6 +3072,9 @@ tr.is-locked { animation: nudge .3s ease; }
 .grow-add input[type="text"] { padding: 8px 10px; font-size: 12.5px; }
 .grow-add .money-input-sm[hidden] { display: none; }
 .grow-add .money-input-sm .affix { white-space: nowrap; }
+/* "of RM" is about twice the width of the "RM" a small box is padded for, and
+   the figure typed after it ran underneath it. */
+.grow-add .money-input-sm.is-base input { padding-left: 52px; }
 
 @media (max-width: 900px) {
     .grow-add { grid-template-columns: 138px auto minmax(0, 1fr); }
@@ -3084,6 +3087,9 @@ tr.is-locked { animation: nudge .3s ease; }
     .grow-month { grid-template-columns: 34px minmax(0, 1fr) 46px; }
     .grow-month b { grid-column: 2 / 3; text-align: left; font-size: 11.5px; }
     .grow-add, .grow-add.is-earn { grid-template-columns: minmax(0, 1fr); }
+    /* On its own line the RM / % switch spans the row, and two buttons
+       hugging its left end read as half a control. */
+    .grow-add .seg.is-compact button { flex: 1 1 0; }
     .unit-input { flex-wrap: wrap; }
 }
 
