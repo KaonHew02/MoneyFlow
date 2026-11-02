@@ -19,6 +19,14 @@
  * worker notices, and a finance app quietly running old code is worse than
  * one that takes a second longer to open.
  *
+ * "The network" has to mean the server, not the browser's own HTTP cache.
+ * Pages sends every file with a ten-minute max-age, so a plain fetch of the
+ * page was answered from that cache for ten minutes after a push — the old
+ * index.html, asking for the old ?v= scripts. Anything without a ?v= stamp is
+ * therefore fetched `no-cache`: always asked of the server, which answers a
+ * cheap "304, unchanged" when it is. Stamped files keep the HTTP cache, since
+ * a new version arrives under a new address anyway.
+ *
  * Copies are kept by path, ignoring the ?v= stamp. index.html is the one place
  * that stamp is bumped, so this file does not have to be touched alongside it:
  * a new `app.js?v=22` replaces the kept `app.js?v=21` rather than piling up
@@ -86,13 +94,16 @@ self.addEventListener('fetch', (event) => {
     const ours = url.origin === self.location.origin;
     if (!ours && !req.url.startsWith(ICON_FONT)) return;
 
-    event.respondWith(networkFirst(req, event));
+    // A navigation cannot be refetched with new options as it stands; `new
+    // Request` turns its mode into same-origin and keeps its redirect mode.
+    const ask = ours && !url.searchParams.has('v') ? new Request(req, { cache: 'no-cache' }) : req;
+    event.respondWith(networkFirst(req, ask, event));
 });
 
-async function networkFirst(req, event) {
+async function networkFirst(req, ask, event) {
     const cache = await caches.open(CACHE);
     try {
-        const res = await fetch(req);
+        const res = await fetch(ask);
         // Only whole, readable answers are kept. A 404 or an opaque response
         // kept here would be served back offline as if it were the app.
         if (res.ok && res.type !== 'opaque') {
