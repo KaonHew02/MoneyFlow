@@ -5484,9 +5484,8 @@ function paintCommitForm(sums) {
         ? 'Write an income entry every time I tick a payment'
         : 'Write an expense every time I tick a payment');
     set('commitLinkHint', incoming
-        ? 'Off by default: money coming back from a loan is your own capital returning, not income, ' +
-          'and counting it as income would inflate a year of earnings. Turn it on and pick the ' +
-          'category yourself if you want it in the book anyway.'
+        ? 'Ticking a payment files it under Income, in the category you pick; un-ticking takes it ' +
+          'back out. Turn it off if you would rather not count a loan coming back as income.'
         : 'Ticking a payment files it under Expenses; un-ticking takes it back out. Nothing is written twice.');
     set('commitLinkSummary', !auto || !auto.checked ? 'Off'
         : !plan.account ? 'No account set'
@@ -13703,14 +13702,8 @@ function startApp() {
             // pickers are rebuilt rather than repainted.
             if (seg.id === 'commitDirection') {
                 readCommitForm();
-                // Money coming back from a loan is not income, so an incoming
-                // plan starts with the link off. Only while it is still a
-                // draft — flipping a saved plan must not undo its own setting.
-                const fresh = commitDraft();
-                if (!fresh.id) {
-                    fresh.autoRecord = fresh.direction === 'out';
-                    if ($('commitAuto')) $('commitAuto').checked = fresh.autoRecord;
-                }
+                // Both directions start with the link on, so flipping leaves
+                // the switch wherever it was put.
                 buildCommitOptions();
                 renderCommit();
             }

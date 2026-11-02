@@ -135,10 +135,11 @@ and a category. Ticking a payment writes one ledger entry; un-ticking removes
 it again. Set once per plan, not once per payment.
 
 - `out` plans default the switch **on**, to the **Instalment** category.
-- `in` plans default it **off**. Money coming back from a loan is not income —
-  it is your own capital returning — and quietly inflating a year of income
-  would be the worse default. Turn it on and choose the category if you want it
-  recorded anyway.
+- `in` plans default it **on** too, writing an **income** entry in the category
+  picked. The first cut defaulted it off — a loan coming back is your own
+  capital, not earnings — but a repayment ticked as received and then missing
+  from the book read as a bug. Turn it off to keep repayments out of income.
+  Saved plans keep whatever they were set to.
 
 `Instalment` is seeded into the category list if it is not there, because the
 module needs somewhere to file. Retire it like any other category and it stays
