@@ -12647,6 +12647,9 @@ function paintAppTitle(key) {
 function openSheet(focusBackup) {
     const sheet = $('moreSheet');
     if (!sheet) return;
+    // Belt and braces: whatever the resize events did or did not say, the
+    // sheet is never opened without its Drive and file buttons in it.
+    placeBackup();
     sheet.hidden = false;
     document.body.classList.add('has-sheet');
     if (focusBackup) {
@@ -12737,10 +12740,15 @@ function wireAppMode() {
     });
 
     // Turning a tablet, or dragging a window narrow, crosses the line both ways.
-    window.matchMedia('(max-width: 760px)').addEventListener('change', () => {
+    // The media query's own change event is not always sent — an emulated
+    // screen size changed without one — so a plain resize checks too. Both
+    // are cheap: placeBackup moves nothing unless the block is on the wrong side.
+    const replace = () => {
         placeBackup();
         if (!appIsPhone()) closeSheet();
-    });
+    };
+    window.matchMedia('(max-width: 760px)').addEventListener('change', replace);
+    window.addEventListener('resize', replace);
 
     placeBackup();
     const on = document.querySelector('#tabs button.is-on');
