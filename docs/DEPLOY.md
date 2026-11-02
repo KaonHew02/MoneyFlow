@@ -111,7 +111,25 @@ browser is a cleared ledger.
 there are no keys left to leak — but `legacy-sqlite/data/` holds your real
 figures and is in `.gitignore`. Leave it there.
 
-**If you ever want it on your phone**, that is Option C again — and now it is a
-rebuild, not a rewiring. The piece that was never written is still the same
-one: whatever connects the modules to a data layer instead of to
-`localStorage`.
+**On an iPhone** (added 2026-11-02) it installs as a home-screen app: open the
+Pages URL in **Safari**, tap Share → **Add to Home Screen**. It gets its own
+icon, opens full-screen with no address bar, and opens with no signal, because
+`sw.js` keeps a copy of the app's files. `manifest.webmanifest`, `pwa.js` and
+`icons/` are what make it installable.
+
+Two things to know before you trust it with real figures:
+
+- **The home-screen app has its own storage, separate from Safari.** What you
+  typed in a Safari tab is not in the installed app. Move it across with
+  Export / Import, or with the Drive buttons.
+- It is the same one-device ledger as everywhere else. Phone and PC do not
+  sync each other; Drive is how a copy gets from one to the other.
+
+A native App Store build (Capacitor or Flutter) was considered and set aside:
+both need a Mac to build and a US$99/year Apple Developer account, and Flutter
+means rewriting `app.js` from scratch.
+
+**If you ever want live sync between phone and PC**, that is Option C again —
+and now it is a rebuild, not a rewiring. The piece that was never written is
+still the same one: whatever connects the modules to a data layer instead of
+to `localStorage`.
