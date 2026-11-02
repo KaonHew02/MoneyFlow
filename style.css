@@ -101,6 +101,7 @@
     --topbar:        rgba(255, 255, 255, .86);
     --backdrop:      rgba(6, 38, 29, .48);
     --scroll-shadow: rgba(12, 45, 36, .12);
+    --veil:          rgba(240, 248, 244, .62);   /* the frost over the app while it boots */
 
     /* --------------------------------------------------------------------
        The dark half.
@@ -213,6 +214,7 @@
     --topbar:        rgba(13, 22, 19, .86);
     --backdrop:      rgba(0, 0, 0, .66);
     --scroll-shadow: rgba(0, 0, 0, .42);
+    --veil:          rgba(13, 22, 19, .62);
 
     /* Already a dark app, so the column only has to separate itself from the
        page behind it rather than invert against it. */
@@ -4314,4 +4316,242 @@ button.stmt-row:hover .stmt-what b { color: var(--jade); }
 @keyframes mf-toast {
     from { opacity: 0; transform: translate(-50%, 16px); }
     to   { opacity: 1; transform: translate(-50%, 0); }
+}
+
+/* --------------------------------------------------------------------------
+   The boot screen.
+   Asked for on 2026-11-02, after a flight-booking app's "Searching flights":
+   the screen behind goes to frosted glass, a boarding pass sits in the middle
+   and a plane takes off from it, flies a loop round it and lands back on it.
+   Here the pass is a ledger card in the hero's greens and the plane is the
+   coin out of the logo, spinning as it goes.
+
+   The loop is a tilted ring seen from just above: the coin passes *behind*
+   the card across the top, shrinking as it goes away, and *in front* across
+   the bottom, growing as it comes near. That is the whole trick — scale for
+   distance and z-index for which side of the card it is on. The z-index only
+   ever changes while the coin is clear of the card's edge, or the coin would
+   be seen to jump through it.
+
+   The keyframes for the loop were generated, not hand-written: an ellipse
+   swept anticlockwise from the coin's seat on the card, eased out of the seat
+   and back into it. The card's own tilt is what puts the seat at 58px, 14px.
+
+   One cycle is 2.4s and the coin is back on the card by 63% of it — app.js
+   holds the screen until that first landing, so a fast start still shows one
+   whole loop rather than a coin that leaves and never comes back.
+   -------------------------------------------------------------------------- */
+.boot {
+    position: fixed;
+    inset: 0;
+    /* Over everything the app draws (the undo bar is 120), under the red
+       trouble bar guard.js puts up — a boot that failed has to be able to
+       say so. */
+    z-index: 200;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    padding: 24px 16px;
+    background: var(--veil);
+    -webkit-backdrop-filter: blur(22px) saturate(1.25);
+    backdrop-filter: blur(22px) saturate(1.25);
+    text-align: center;
+    transition: opacity .42s ease, visibility 0s linear .42s;
+    /* The safety net: if app.js never runs to take this down, it takes itself
+       down rather than leave the page locked behind frosted glass. */
+    animation: boot-give-up .42s ease 10s forwards;
+}
+
+/* No frost to be had: an opaque page reads as a splash, a see-through one
+   with sharp content under it reads as a glitch. */
+@supports not ((backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px))) {
+    .boot { background: var(--canvas); }
+}
+
+.boot.is-leaving {
+    opacity: 0;
+    visibility: hidden;
+}
+
+.boot.is-leaving .boot-scene {
+    transform: scale(.94) translateY(-6px);
+}
+
+@keyframes boot-give-up {
+    to { opacity: 0; visibility: hidden; }
+}
+
+.boot-scene {
+    position: relative;
+    width: 280px;
+    height: 200px;
+    transition: transform .42s ease;
+}
+
+.boot-card {
+    position: absolute;
+    left: 50%;
+    top: 50%;
+    z-index: 2;
+    width: 176px;
+    height: 104px;
+    margin: -52px 0 0 -88px;
+    border-radius: 14px;
+    background: var(--paper);
+    box-shadow: 0 2px 6px rgba(10, 45, 35, .08), 0 18px 36px rgba(10, 45, 35, .14);
+    overflow: visible;
+    transform: perspective(700px) rotateX(14deg) rotateY(12deg) rotate(-4deg);
+}
+
+/* The dark top of the pass. Two pale dashes stand in for the name on it. */
+.boot-band {
+    position: relative;
+    height: 36px;
+    border-radius: 14px 14px 0 0;
+    background: linear-gradient(135deg, var(--hero-a), var(--hero-mid) 60%, var(--hero-b));
+}
+
+.boot-band::before,
+.boot-band::after {
+    content: "";
+    position: absolute;
+    left: 14px;
+    height: 5px;
+    border-radius: 3px;
+    background: rgba(255, 255, 255, .55);
+}
+
+.boot-band::before { top: 11px; width: 54px; }
+.boot-band::after  { top: 21px; width: 32px; background: rgba(255, 255, 255, .3); }
+
+/* The tear-off stub, a shade darker and lifted at its far corner, the way
+   the pass in the reference curls up off the table. */
+.boot-stub {
+    position: absolute;
+    right: 0;
+    bottom: 0;
+    width: 52px;
+    height: 40px;
+    border-radius: 8px 14px 0 0;
+    background: linear-gradient(160deg, var(--hero-mid), var(--hero-b));
+    transform: skewY(-7deg);
+    transform-origin: 0 100%;
+}
+
+.boot-body {
+    position: relative;
+    display: flex;
+    flex-direction: column;
+    gap: 9px;
+    height: 68px;
+    padding: 16px 70px 0 14px;
+}
+
+/* The perforation down the stub's edge. */
+.boot-body::before {
+    content: "";
+    position: absolute;
+    top: 8px;
+    bottom: 8px;
+    right: 52px;
+    border-left: 2px dashed var(--line-strong);
+}
+
+/* Ledger rows, with a sheen running along them — the one part of the screen
+   that still says "working" when motion is turned off. */
+.boot-line {
+    height: 6px;
+    border-radius: 3px;
+    background: linear-gradient(90deg, var(--track) 30%, var(--paper-2) 50%, var(--track) 70%) 0 0 / 300% 100%;
+    animation: boot-sheen 1.6s linear infinite;
+}
+
+.boot-line:nth-child(2) { width: 78%; }
+.boot-line:nth-child(3) { width: 52%; }
+
+@keyframes boot-sheen {
+    from { background-position: 100% 0; }
+    to   { background-position: 0 0; }
+}
+
+/* A zero-sized point at the card's centre that the coin is carried around. */
+.boot-orbit {
+    position: absolute;
+    left: 50%;
+    top: 50%;
+    z-index: 3;
+    width: 0;
+    height: 0;
+    transform: translate(58px, 14px);
+    animation: boot-loop 2.4s linear infinite;
+}
+
+.boot-coin {
+    display: block;
+    margin: -15px 0 0 -15px;
+    filter: drop-shadow(0 3px 4px rgba(90, 60, 10, .28));
+    /* Linear, so it is face-on (a whole half-turn) just as it passes closest,
+       at 43.5% — eased, it went past the viewer edge-on. */
+    animation: boot-spin 2.4s linear infinite;
+}
+
+@keyframes boot-loop {
+    0%     { transform: translate(58px, 14px) scale(1); z-index: 3; }
+    8%     { transform: translate(58px, 14px) scale(1.000); z-index: 3; }
+    9.9%   { transform: translate(62.2px, 15px) scale(1.013); z-index: 3; }
+    11.8%  { transform: translate(77.8px, 13.9px) scale(1.032); z-index: 3; }
+    13.8%  { transform: translate(101.4px, 3.7px) scale(1.019); z-index: 3; }
+    15.7%  { transform: translate(116px, -15.5px) scale(0.955); z-index: 1; }
+    17.6%  { transform: translate(110.1px, -32.6px) scale(0.878); z-index: 1; }
+    19.5%  { transform: translate(96.2px, -48.8px) scale(0.803); z-index: 1; }
+    21.5%  { transform: translate(74.9px, -63.2px) scale(0.737); z-index: 1; }
+    23.4%  { transform: translate(46.7px, -74px) scale(0.688); z-index: 1; }
+    25.3%  { transform: translate(13.4px, -79.5px) scale(0.662); z-index: 1; }
+    27.2%  { transform: translate(-22.2px, -78.7px) scale(0.666); z-index: 1; }
+    29.2%  { transform: translate(-56.6px, -70.9px) scale(0.702); z-index: 1; }
+    31.1%  { transform: translate(-86px, -56.7px) scale(0.767); z-index: 1; }
+    33%    { transform: translate(-106.9px, -37.3px) scale(0.856); z-index: 1; }
+    34.9%  { transform: translate(-117.2px, -14.7px) scale(0.960); z-index: 1; }
+    36.8%  { transform: translate(-115.7px, 8.6px) scale(1.067); z-index: 3; }
+    38.8%  { transform: translate(-103.1px, 30px) scale(1.166); z-index: 3; }
+    40.7%  { transform: translate(-81.2px, 47.7px) scale(1.247); z-index: 3; }
+    42.6%  { transform: translate(-53px, 60.1px) scale(1.304); z-index: 3; }
+    44.5%  { transform: translate(-21.8px, 66.7px) scale(1.334); z-index: 3; }
+    46.5%  { transform: translate(12.7px, 64.2px) scale(1.316); z-index: 3; }
+    48.4%  { transform: translate(43.4px, 51.2px) scale(1.239); z-index: 3; }
+    50.3%  { transform: translate(60.5px, 35.4px) scale(1.145); z-index: 3; }
+    52.2%  { transform: translate(64.9px, 23.2px) scale(1.068); z-index: 3; }
+    54.2%  { transform: translate(62.6px, 16.6px) scale(1.022); z-index: 3; }
+    56.1%  { transform: translate(59.3px, 14.3px) scale(1.004); z-index: 3; }
+    58%    { transform: translate(58px, 14px) scale(1.000); z-index: 3; }
+    60.5%  { transform: translate(58px, 11px) scale(1.07); z-index: 3; }
+    63%    { transform: translate(58px, 14px) scale(1); z-index: 3; }
+    100%   { transform: translate(58px, 14px) scale(1); z-index: 3; }
+}
+
+/* Two turns in the air, none on the card. */
+@keyframes boot-spin {
+    0%, 9%    { transform: perspective(240px) rotateY(0); }
+    55%, 100% { transform: perspective(240px) rotateY(720deg); }
+}
+
+.boot-title {
+    margin: 4px 0 0;
+    color: var(--ink);
+    font-size: 17px;
+    font-weight: 700;
+    letter-spacing: -.01em;
+}
+
+.boot-sub {
+    margin: 4px 0 0;
+    color: var(--ink-3);
+    font-size: 13px;
+}
+
+/* Motion off: the coin stays in its seat and only the sheen moves. */
+@media (prefers-reduced-motion: reduce) {
+    .boot-orbit,
+    .boot-coin { animation: none; }
 }

@@ -13772,9 +13772,44 @@ function enhanceDateInputs(root) {
     (root || document).querySelectorAll('input[type="date"]').forEach(enhanceDateInput);
 }
 
+/**
+ * Lifts the boot screen (index.html, styled at the end of style.css) once the
+ * app is wired underneath it.
+ *
+ * Not before the coin has landed back on the card, though. Off a warm disk the
+ * app is ready in a few dozen milliseconds, and a screen that flashes up and
+ * is gone before anything on it has moved reads as a flicker, not as a
+ * loading screen. The wait is measured off the coin's own animation, so it is
+ * the first landing whenever the screen happened to be painted — and it is
+ * no wait at all when motion is turned off and the coin never leaves.
+ */
+const BOOT_LANDED_MS = 2400 * 0.63;
+
+function liftBootScreen() {
+    const veil = document.getElementById('bootScreen');
+    if (!veil) return;
+
+    const loop = veil.querySelector('.boot-orbit');
+    const flight = loop && loop.getAnimations ? loop.getAnimations()[0] : null;
+    const wait = flight ? Math.max(0, BOOT_LANDED_MS - (flight.currentTime || 0)) : 0;
+
+    setTimeout(() => {
+        veil.classList.add('is-leaving');
+        // Gone from the page once it has faded, so nothing is left lying over
+        // the app to catch a tap or be read out by a screen reader.
+        setTimeout(() => veil.remove(), 450);
+    }, wait);
+}
+
 document.addEventListener('DOMContentLoaded', () => {
-    if (MFStore.initSync(storeReport)) startApp();
-    else MFStore.init(storeReport).then(startApp);
+    // Lifted however the start went. A step that throws leaves the steps
+    // around it wired — Export first of all — and they are no use to anyone
+    // behind frosted glass.
+    if (MFStore.initSync(storeReport)) {
+        try { startApp(); } finally { liftBootScreen(); }
+    } else {
+        MFStore.init(storeReport).then(startApp).finally(liftBootScreen);
+    }
 });
 
 /**
