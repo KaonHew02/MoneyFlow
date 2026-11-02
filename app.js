@@ -11029,9 +11029,59 @@ function onLedgerStatementClick(event) {
 }
 
 function ledgerDelete(id) {
+    const at = ledgerState.entries.findIndex((e) => e.id === id);
+    if (at < 0) return;
+    const entry = ledgerState.entries[at];
+
     ledgerState.entries = ledgerState.entries.filter((e) => e.id !== id);
     if (ledgerState.editing === id) ledgerClearForm();
     renderLedger();
+
+    // The × sits a thumb's width from the figure on a phone, and it deletes
+    // on the first tap. Asking "are you sure?" every time would be a toll on
+    // every deliberate delete to guard against the rare slip; an Undo for a
+    // few seconds catches the slip and costs the deliberate one nothing.
+    // Amounts are kept as strings; fmt needs the number or "62.3" stays so.
+    const what = entry.note || 'the entry';
+    const amount = parseFloat(entry.amount) || 0;
+    const figure = entry.currency && entry.currency !== BASE_CURRENCY
+        ? entry.currency + ' ' + fmt(amount) : money(amount);
+    showUndo('Deleted ' + what + ' · ' + figure, () => {
+        if (ledgerState.entries.some((e) => e.id === entry.id)) return;
+        ledgerState.entries.splice(Math.min(at, ledgerState.entries.length), 0, entry);
+        renderLedger();
+    });
+}
+
+/**
+ * One bar along the bottom, saying what just went and offering it back.
+ * A second delete replaces the first bar rather than stacking — the newest
+ * slip is the one being caught.
+ */
+let undoTimer = null;
+
+function showUndo(text, undo) {
+    let bar = $('undoBar');
+    if (!bar) {
+        bar = document.createElement('div');
+        bar.id = 'undoBar';
+        bar.className = 'undo-bar';
+        bar.setAttribute('role', 'status');
+        bar.innerHTML = '<span></span><button type="button">Undo</button>';
+        document.body.appendChild(bar);
+    }
+
+    const hide = () => { bar.hidden = true; clearTimeout(undoTimer); };
+    bar.querySelector('span').textContent = text;
+    bar.querySelector('button').onclick = () => { hide(); undo(); };
+
+    // Restarting the animation needs the bar off the page for one frame.
+    bar.hidden = true;
+    void bar.offsetWidth;
+    bar.hidden = false;
+
+    clearTimeout(undoTimer);
+    undoTimer = setTimeout(hide, 6000);
 }
 
 /** Clicks in the day list: edit an entry, or drop it. */
@@ -12555,6 +12605,150 @@ function loadNav() {
 
 /**
  * ====================================================================
+ * APP MODE — the phone layout
+ * --------------------------------------------------------------------
+ * Below 760px MoneyFlow stops being a web page laid out narrow and is
+ * laid out the way a phone app is: the screen's name large at the top, a
+ * tab bar along the bottom, and everything else in a sheet that slides
+ * up from it. The CSS does nearly all of it. What needs script is the
+ * title, the sheet, and where the Drive and file buttons live.
+ *
+ * Those buttons are moved, not copied. Copies would need wiring twice and
+ * would drift; the one `.backup` block goes into the sheet on a phone and
+ * back into the top bar on anything wider, and keeps its listeners both
+ * ways.
+ * ====================================================================
+ */
+const appIsPhone = () => window.matchMedia('(max-width: 760px)').matches;
+
+function placeBackup() {
+    const backup = document.querySelector('.backup');
+    const sheet = $('sheetBackup');
+    const topbar = document.querySelector('.topbar');
+    if (!backup || !sheet || !topbar) return;
+
+    const home = appIsPhone() ? sheet : topbar;
+    if (backup.parentElement !== home) home.appendChild(backup);
+}
+
+function paintAppTitle(key) {
+    const tab = document.querySelector(`#tabs button[data-module="${key}"] span`);
+    if (tab) set('appTitle', tab.textContent);
+
+    document.querySelectorAll('#tabbar button').forEach((btn) => {
+        const more = (btn.dataset.more || '').split(' ');
+        btn.classList.toggle('is-on', btn.dataset.module === key || more.includes(key));
+    });
+    document.querySelectorAll('.sheet-tiles button').forEach((btn) => {
+        btn.classList.toggle('is-on', btn.dataset.module === key);
+    });
+}
+
+function openSheet(focusBackup) {
+    const sheet = $('moreSheet');
+    if (!sheet) return;
+    sheet.hidden = false;
+    document.body.classList.add('has-sheet');
+    if (focusBackup) {
+        const head = $('sheetBackupHead');
+        if (head) head.scrollIntoView({ block: 'start' });
+    }
+}
+
+function closeSheet() {
+    const sheet = $('moreSheet');
+    if (!sheet || sheet.hidden) return;
+    sheet.hidden = true;
+    document.body.classList.remove('has-sheet');
+}
+
+/** Choosing a screen on a phone starts it at the top, as a tab does. */
+function goTo(key) {
+    showModule(key);
+    closeSheet();
+    window.scrollTo(0, 0);
+}
+
+/**
+ * The + in the tab bar: a blank expense with the keyboard already up.
+ *
+ * It starts as "Spent" whatever the form was left on — the last entry being
+ * a salary is no reason for the next coffee to be filed as income. A half-
+ * finished edit is let go rather than saved: Cancel already promised that
+ * leaving an edit leaves the entry as it was.
+ *
+ * The focus has to happen inside the tap itself. iOS only raises the
+ * keyboard for a focus it can trace back to a finger.
+ */
+function quickAdd() {
+    closeSheet();
+    showModule('ledger');
+
+    if (ledgerState.editing) ledgerClearForm();
+    if ($('ledgerType') && ledgerFormType() !== 'expense') {
+        setSegment($('ledgerType'), 'expense');
+        syncLedgerForm();
+    }
+
+    const form = $('ledger-form');
+    if (form && form.classList.contains('is-folded')) {
+        const fold = form.querySelector('.card-fold');
+        if (fold) fold.click();
+    }
+    if (form) form.scrollIntoView({ block: 'start' });
+
+    const field = $('ledgerAmount');
+    if (field) field.focus({ preventScroll: true });
+}
+
+function wireAppMode() {
+    const date = new Date().toLocaleDateString('en-MY', { weekday: 'long', day: 'numeric', month: 'long' });
+    set('appDate', date);
+
+    const tabbar = $('tabbar');
+    if (tabbar) {
+        tabbar.addEventListener('click', (event) => {
+            const btn = event.target.closest('button');
+            if (!btn) return;
+            if (btn.id === 'tabMore') openSheet(false);
+            else if (btn.id === 'tabAdd') quickAdd();
+            else if (btn.dataset.module) goTo(btn.dataset.module);
+        });
+    }
+
+    const sheet = $('moreSheet');
+    if (sheet) {
+        sheet.addEventListener('click', (event) => {
+            // A tap on the dimmed page behind the card closes it, as on iOS.
+            if (event.target === sheet) { closeSheet(); return; }
+            const btn = event.target.closest('.sheet-tiles button[data-module]');
+            if (btn) goTo(btn.dataset.module);
+        });
+    }
+
+    const appSync = $('appSync');
+    if (appSync) appSync.addEventListener('click', () => openSheet(true));
+
+    const moreClose = $('moreClose');
+    if (moreClose) moreClose.addEventListener('click', closeSheet);
+
+    document.addEventListener('keydown', (event) => {
+        if (event.key === 'Escape') closeSheet();
+    });
+
+    // Turning a tablet, or dragging a window narrow, crosses the line both ways.
+    window.matchMedia('(max-width: 760px)').addEventListener('change', () => {
+        placeBackup();
+        if (!appIsPhone()) closeSheet();
+    });
+
+    placeBackup();
+    const on = document.querySelector('#tabs button.is-on');
+    paintAppTitle(on ? on.dataset.module : 'dash');
+}
+
+/**
+ * ====================================================================
  * WIRING
  * ====================================================================
  */
@@ -12607,6 +12801,7 @@ function showModule(key) {
     document.querySelectorAll('#tabs button').forEach((btn) => {
         btn.classList.toggle('is-on', btn.dataset.module === key);
     });
+    paintAppTitle(key);
 
     MODULES[key].render();
 }
@@ -14450,6 +14645,8 @@ function startApp() {
             closeDrawer();
         });
     }
+
+    wireAppMode();
 
     // A chevron on every card heading, and whichever ones were folded away last
     // time folded again. Before the modules paint, so nothing flashes open.

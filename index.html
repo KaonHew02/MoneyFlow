@@ -18,17 +18,17 @@
          Adding a new outside address (a CDN, an API) means adding it here,
          or it fails with a CSP line in the console and nothing on screen. -->
     <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' https://accounts.google.com/gsi/; style-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/ https://accounts.google.com/gsi/; font-src 'self' https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/; img-src 'self' data:; connect-src 'self' https://www.googleapis.com https://open.er-api.com https://accounts.google.com/gsi/; frame-src https://accounts.google.com/; object-src 'none'; base-uri 'none'; form-action 'none'">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
     <meta name="description" content="MoneyFlow — track the money you spend, plan the month ahead and watch it grow. Track. Plan. Grow.">
     <meta name="theme-color" content="#e8f4ee">
     <title>MoneyFlow — Understand Your Money. Manage Your Future.</title>
-    <link rel="icon" href="logo-icon.svg?v=21">
+    <link rel="icon" href="logo-icon.svg?v=22">
     <!-- Installable: Safari → Share → Add to Home Screen gives an icon, a
          full-screen window with no address bar, and (through sw.js) a launch
          that works with no signal. The manifest carries no ?v= — its address
          is part of the installed app's identity. -->
     <link rel="manifest" href="manifest.webmanifest">
-    <link rel="apple-touch-icon" href="icons/icon-180.png?v=21">
+    <link rel="apple-touch-icon" href="icons/icon-180.png?v=22">
     <meta name="mobile-web-app-capable" content="yes">
     <meta name="apple-mobile-web-app-capable" content="yes">
     <meta name="apple-mobile-web-app-title" content="MoneyFlow">
@@ -50,7 +50,12 @@
          one, which is merely out of date rather than broken.
          Bump this on any change to the files below. It is the one thing here
          that has to be remembered by hand. -->
-    <link rel="stylesheet" href="style.css?v=21">
+    <link rel="stylesheet" href="style.css?v=22">
+    <!-- Two designs, kept apart: style.css is the web layout, phone.css the
+         app layout, and the second only applies on a phone-sized screen. It
+         comes after, so where both say something about the same element the
+         phone's word is the last one. 760px matches appIsPhone() in app.js. -->
+    <link rel="stylesheet" href="phone.css?v=22" media="(max-width: 760px)">
 </head>
 <body>
 
@@ -64,7 +69,7 @@
 
     <aside class="sidebar" id="sidebar">
         <a class="brand" href="#" aria-label="MoneyFlow — Understand Your Money. Manage Your Future.">
-            <img src="logo-dark.svg?v=21" alt="MoneyFlow">
+            <img src="logo-dark.svg?v=22" alt="MoneyFlow">
         </a>
         <p class="tagline">Track. Plan. Grow.</p>
         <nav class="tabs" id="tabs">
@@ -98,6 +103,17 @@
         <button type="button" class="nav-toggle" id="navToggle"
                 aria-controls="sidebar" aria-expanded="false">
             <i class="bi bi-list"></i><span id="navToggleLabel">Menu</span>
+        </button>
+
+        <!-- Phones only: the screen's name, large, the way an app heads a
+             page — and one button for the Drive and file controls, which
+             live in the More sheet there rather than as five icons in a row. -->
+        <div class="app-title">
+            <span class="app-eyebrow" id="appDate"></span>
+            <h1 id="appTitle">Dashboard</h1>
+        </div>
+        <button type="button" class="app-sync" id="appSync" aria-label="Backup and sync">
+            <i class="bi bi-cloud-check"></i>
         </button>
 
         <div class="backup">
@@ -2395,6 +2411,58 @@
     </main>
 
     </div><!-- .shell -->
+
+    <!-- Phones only: the sidebar becomes a tab bar along the bottom, where a
+         thumb already is. The middle of it is not a screen but the one thing
+         done most often on a phone — writing down what was just spent — so it
+         is one tap from anywhere. Bill Split keeps a tab because it is the one
+         used at a restaurant table, phone in hand; the planner and the other
+         three are one tap further, in the More sheet. -->
+    <nav class="tabbar" id="tabbar" aria-label="Sections">
+        <button type="button" data-module="dash" class="is-on">
+            <i class="bi bi-house-door"></i><i class="bi bi-house-door-fill"></i><span>Home</span>
+        </button>
+        <button type="button" data-module="ledger">
+            <i class="bi bi-wallet2"></i><i class="bi bi-wallet-fill"></i><span>Expenses</span>
+        </button>
+        <button type="button" class="tab-add" id="tabAdd" aria-label="Add an expense">
+            <i class="bi bi-plus-lg"></i>
+        </button>
+        <button type="button" data-module="split">
+            <i class="bi bi-people"></i><i class="bi bi-people-fill"></i><span>Split</span>
+        </button>
+        <button type="button" id="tabMore" data-more="budget commit card grow">
+            <i class="bi bi-grid"></i><i class="bi bi-grid-fill"></i><span>More</span>
+        </button>
+    </nav>
+</div>
+
+<!-- The More sheet: the four modules without a tab, and the Drive and file
+     controls. Those are not copies — app.js moves the one .backup block in
+     here on a phone and back to the top bar on anything wider, so every
+     button keeps the listeners it was wired with. -->
+<div class="sheet" id="moreSheet" hidden>
+    <div class="sheet-card" role="dialog" aria-modal="true" aria-labelledby="moreTitle">
+        <span class="sheet-grip" aria-hidden="true"></span>
+        <h2 id="moreTitle">More</h2>
+        <div class="sheet-tiles">
+            <button type="button" data-module="budget">
+                <i class="bi bi-pie-chart-fill"></i><span>Planner</span>
+            </button>
+            <button type="button" data-module="commit">
+                <i class="bi bi-calendar2-check-fill"></i><span>Instalments</span>
+            </button>
+            <button type="button" data-module="card">
+                <i class="bi bi-credit-card-2-front-fill"></i><span>Card Payoff</span>
+            </button>
+            <button type="button" data-module="grow">
+                <i class="bi bi-graph-up-arrow"></i><span>Grow</span>
+            </button>
+        </div>
+        <h3 id="sheetBackupHead">Backup &amp; sync</h3>
+        <div class="sheet-backup" id="sheetBackup"></div>
+        <button type="button" class="sheet-done" id="moreClose">Done</button>
+    </div>
 </div>
 
 <!-- Import replaces what is here, so it asks first — and says exactly what is
@@ -2433,7 +2501,7 @@
         <section class="data-block">
             <h3><i class="bi bi-google"></i>The second copy</h3>
             <p class="data-sub" id="driveWhen">&mdash;</p>
-            <p class="data-note">Drive holds a <em>copy</em>, and so does an exported file &mdash; the same file either way. Nothing leaves this browser unless you press one of the buttons in the top bar, and MoneyFlow works with no account at all.</p>
+            <p class="data-note">Drive holds a <em>copy</em>, and so does an exported file &mdash; the same file either way. Nothing leaves this browser unless you press one of the Drive or Export buttons, and MoneyFlow works with no account at all.</p>
         </section>
 
         <div class="dialog-actions">
@@ -2448,13 +2516,13 @@
      with them — which is why they load last. -->
 <!-- First, and before any script that can fail. What it does and why it is
      a file rather than inline: guard.js. -->
-<script src="guard.js?v=21"></script>
+<script src="guard.js?v=22"></script>
 
-<script src="store.js?v=21"></script>
-<script src="app.js?v=21"></script>
+<script src="store.js?v=22"></script>
+<script src="app.js?v=22"></script>
 <script src="https://accounts.google.com/gsi/client" async defer></script>
-<script src="drive-config.js?v=21"></script>
-<script src="drive.js?v=21"></script>
-<script src="pwa.js?v=21"></script>
+<script src="drive-config.js?v=22"></script>
+<script src="drive.js?v=22"></script>
+<script src="pwa.js?v=22"></script>
 </body>
 </html>

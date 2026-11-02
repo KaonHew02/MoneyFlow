@@ -117,6 +117,11 @@ icon, opens full-screen with no address bar, and opens with no signal, because
 `sw.js` keeps a copy of the app's files. `manifest.webmanifest`, `pwa.js` and
 `icons/` are what make it installable.
 
+The two designs are kept apart: **`style.css` is the web layout** a computer
+sees, and **`phone.css` is the app layout** — bottom tab bar, a + for a new
+expense, slide-up sheets — which only a screen 760px wide or less loads. A
+change to one cannot move anything in the other.
+
 Two things to know before you trust it with real figures:
 
 - **The home-screen app has its own storage, separate from Safari.** What you

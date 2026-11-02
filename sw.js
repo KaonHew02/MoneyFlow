@@ -37,6 +37,7 @@ const SHELL = [
     './',
     'index.html',
     'style.css',
+    'phone.css',
     'guard.js',
     'store.js',
     'app.js',

@@ -4258,3 +4258,60 @@ button.stmt-row:hover .stmt-what b { color: var(--jade); }
     .kpi { padding: 13px 14px; }
     .kpi-band-head { margin-bottom: 7px; }
 }
+
+/* ==========================================================================
+   Phone-only parts, hidden on anything wider
+   ==========================================================================
+   The phone layout lives in phone.css, and only a phone-sized screen ever
+   loads it. The header title, the sync button and the tab bar are in the
+   page for it, so here — where the web layout is — they are put away.
+   ========================================================================== */
+.app-title,
+.app-sync,
+.tabbar { display: none; }
+
+/* The Undo bar after an entry is deleted. Not phone-only: a slip of the
+   mouse deletes as surely as a slip of the thumb. */
+.undo-bar {
+    position: fixed;
+    left: 50%;
+    bottom: 24px;
+    z-index: 120;
+    display: flex;
+    align-items: center;
+    gap: 14px;
+    width: max-content;
+    max-width: calc(100vw - 32px);
+    padding: 10px 10px 10px 18px;
+    border-radius: 16px;
+    background: var(--nav);
+    color: var(--nav-ink);
+    font-size: 14px;
+    box-shadow: 0 10px 30px rgba(0, 0, 0, .28);
+    transform: translateX(-50%);
+    animation: mf-toast .28s cubic-bezier(.2, .9, .25, 1) both;
+}
+
+.undo-bar span {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.undo-bar button {
+    flex: 0 0 auto;
+    padding: 8px 14px;
+    border: 0;
+    border-radius: 10px;
+    background: rgba(255, 255, 255, .1);
+    color: var(--mint);
+    font: inherit;
+    font-weight: 700;
+    cursor: pointer;
+}
+
+@keyframes mf-toast {
+    from { opacity: 0; transform: translate(-50%, 16px); }
+    to   { opacity: 1; transform: translate(-50%, 0); }
+}
