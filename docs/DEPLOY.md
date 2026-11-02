@@ -122,6 +122,10 @@ sees, and **`phone.css` is the app layout** — bottom tab bar, a + for a new
 expense, slide-up sheets — which only a screen 760px wide or less loads. A
 change to one cannot move anything in the other.
 
+Both come in English, Bahasa Melayu and 中文 (added 2026-11-02): the box in the
+top bar on a computer, the Language row under **More** on a phone. `i18n.js`
+and `lang/` do it; see [LANGUAGES.md](LANGUAGES.md).
+
 Two things to know before you trust it with real figures:
 
 - **The home-screen app has its own storage, separate from Safari.** What you

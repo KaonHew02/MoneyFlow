@@ -22,13 +22,13 @@
     <meta name="description" content="MoneyFlow — track the money you spend, plan the month ahead and watch it grow. Track. Plan. Grow.">
     <meta name="theme-color" content="#e8f4ee">
     <title>MoneyFlow — Understand Your Money. Manage Your Future.</title>
-    <link rel="icon" href="logo-icon.svg?v=24">
+    <link rel="icon" href="logo-icon.svg?v=25">
     <!-- Installable: Safari → Share → Add to Home Screen gives an icon, a
          full-screen window with no address bar, and (through sw.js) a launch
          that works with no signal. The manifest carries no ?v= — its address
          is part of the installed app's identity. -->
     <link rel="manifest" href="manifest.webmanifest">
-    <link rel="apple-touch-icon" href="icons/icon-180.png?v=24">
+    <link rel="apple-touch-icon" href="icons/icon-180.png?v=25">
     <meta name="mobile-web-app-capable" content="yes">
     <meta name="apple-mobile-web-app-capable" content="yes">
     <meta name="apple-mobile-web-app-title" content="MoneyFlow">
@@ -50,12 +50,18 @@
          one, which is merely out of date rather than broken.
          Bump this on any change to the files below. It is the one thing here
          that has to be remembered by hand. -->
-    <link rel="stylesheet" href="style.css?v=24">
+    <link rel="stylesheet" href="style.css?v=25">
     <!-- Two designs, kept apart: style.css is the web layout, phone.css the
          app layout, and the second only applies on a phone-sized screen. It
          comes after, so where both say something about the same element the
          phone's word is the last one. 760px matches appIsPhone() in app.js. -->
-    <link rel="stylesheet" href="phone.css?v=24" media="(max-width: 760px)">
+    <link rel="stylesheet" href="phone.css?v=25" media="(max-width: 760px)">
+    <!-- English, Bahasa Melayu or 中文. Up here, before the body exists, so it
+         is already watching when the first words are drawn — see i18n.js.
+         It runs ahead of guard.js, so a failure in it would not get the red
+         bar; it would leave the page in English, which works. Nothing else
+         depends on it. Its VERSION has to match the ?v= above. -->
+    <script src="i18n.js?v=25"></script>
 </head>
 <body>
 
@@ -104,7 +110,7 @@
 
     <aside class="sidebar" id="sidebar">
         <a class="brand" href="#" aria-label="MoneyFlow — Understand Your Money. Manage Your Future.">
-            <img src="logo-dark.svg?v=24" alt="MoneyFlow">
+            <img src="logo-dark.svg?v=25" alt="MoneyFlow">
         </a>
         <p class="tagline">Track. Plan. Grow.</p>
         <nav class="tabs" id="tabs">
@@ -150,6 +156,18 @@
         <button type="button" class="app-sync" id="appSync" aria-label="Backup and sync">
             <i class="bi bi-cloud-check"></i>
         </button>
+
+        <!-- The language. Its own names stay in their own script whatever is
+             picked (translate="no"), so someone who cannot read the screen
+             can still find their way back. Phones get buttons in More instead. -->
+        <label class="lang-pick" title="Language">
+            <i class="bi bi-translate"></i>
+            <select id="langPick" aria-label="Language">
+                <option value="en" translate="no">English</option>
+                <option value="ms" translate="no">Bahasa Melayu</option>
+                <option value="zh" translate="no">中文</option>
+            </select>
+        </label>
 
         <div class="backup">
             <!-- There is no Save button in MoneyFlow, so there is nothing to
@@ -293,7 +311,7 @@
                             <b id="dashFlowIn">RM 0.00</b>
                         </div>
                         <div class="tally-cell">
-                            <span>Expenses</span>
+                            <span data-i18n="Expenses (total)">Expenses</span>
                             <b id="dashFlowOut">RM 0.00</b>
                         </div>
                         <div class="tally-cell is-total">
@@ -2494,6 +2512,12 @@
                 <i class="bi bi-graph-up-arrow"></i><span>Grow</span>
             </button>
         </div>
+        <h3>Language</h3>
+        <div class="sheet-lang" translate="no">
+            <button type="button" data-lang="en">English</button>
+            <button type="button" data-lang="ms">Bahasa Melayu</button>
+            <button type="button" data-lang="zh">中文</button>
+        </div>
         <h3 id="sheetBackupHead">Backup &amp; sync</h3>
         <div class="sheet-backup" id="sheetBackup"></div>
         <button type="button" class="sheet-done" id="moreClose">Done</button>
@@ -2551,13 +2575,13 @@
      with them — which is why they load last. -->
 <!-- First, and before any script that can fail. What it does and why it is
      a file rather than inline: guard.js. -->
-<script src="guard.js?v=24"></script>
+<script src="guard.js?v=25"></script>
 
-<script src="store.js?v=24"></script>
-<script src="app.js?v=24"></script>
+<script src="store.js?v=25"></script>
+<script src="app.js?v=25"></script>
 <script src="https://accounts.google.com/gsi/client" async defer></script>
-<script src="drive-config.js?v=24"></script>
-<script src="drive.js?v=24"></script>
-<script src="pwa.js?v=24"></script>
+<script src="drive-config.js?v=25"></script>
+<script src="drive.js?v=25"></script>
+<script src="pwa.js?v=25"></script>
 </body>
 </html>

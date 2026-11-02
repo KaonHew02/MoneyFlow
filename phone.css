@@ -419,6 +419,35 @@
         font-size: 13px;
     }
 
+    /* The language: three buttons, each name in its own script. The topbar's
+       select has no room up there next to the screen's name. */
+    .lang-pick { display: none; }
+
+    .sheet-lang {
+        display: grid;
+        grid-template-columns: repeat(3, minmax(0, 1fr));
+        gap: 10px;
+    }
+
+    .sheet-lang button {
+        min-height: 50px;
+        padding: 6px 8px;
+        border: 0;
+        border-radius: 14px;
+        background: var(--paper-2);
+        color: var(--ink);
+        font: inherit;
+        font-size: 14px;
+        font-weight: 650;
+        line-height: 1.2;
+        cursor: pointer;
+    }
+
+    .sheet-lang button.is-on {
+        background: var(--jade);
+        color: var(--on-jade);
+    }
+
     .sheet-done {
         width: 100%;
         min-height: 52px;

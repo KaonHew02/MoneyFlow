@@ -11285,6 +11285,9 @@ function emptyRow(message, span) {
 
 /** Copies `text`, then flashes the outcome on the button that asked for it. */
 function copySummary(btn, text, idleLabel) {
+    // The summary never touches the page, so i18n.js cannot see it there —
+    // it is handed over to be put in the reader's language line by line.
+    if (window.MFI18n) text = window.MFI18n.lines(text);
     const idle = '<i class="bi bi-clipboard"></i> ' + idleLabel;
     const done = (ok) => {
         btn.innerHTML = ok
