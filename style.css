@@ -236,6 +236,14 @@
 
 html { -webkit-text-size-adjust: 100%; }
 
+/* A double tap never zooms the app; a pinch still does, for anyone who needs
+   the page larger. The viewport tag cannot do this, because iOS has ignored
+   user-scalable and maximum-scale since iOS 10.
+   On every element rather than on html, because WebKit starts touch-action
+   afresh at each element that scrolls, so a rule on the root never reaches
+   the inside of a sheet or a list. */
+* { touch-action: manipulation; }
+
 body {
     margin: 0;
     background: var(--canvas);
