@@ -19,3 +19,24 @@
         });
     });
 })();
+
+/**
+ * No zooming, the way a phone app does not zoom.
+ *
+ * iOS ignores user-scalable and maximum-scale for gestures, and the one CSS
+ * value that stops a double tap (touch-action: manipulation, in style.css) is
+ * also the one that allows a pinch, so the pinch is refused here.
+ *
+ * Touch screens only: a trackpad pinch on a computer is left alone.
+ */
+(function () {
+    if (!('ontouchstart' in window)) return;
+
+    ['gesturestart', 'gesturechange', 'gestureend'].forEach(function (name) {
+        document.addEventListener(name, function (event) { event.preventDefault(); });
+    });
+
+    document.addEventListener('touchmove', function (event) {
+        if (event.touches.length > 1 && event.cancelable) event.preventDefault();
+    }, { passive: false });
+})();
