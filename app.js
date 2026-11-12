@@ -9187,13 +9187,19 @@ function accountBalances() {
     return balances;
 }
 
-/** Account rows are user-shaped, so they are read back before any rebuild. */
+/**
+ * Account rows are user-shaped, so they are read back before any rebuild.
+ *
+ * The amount box is not read here. It shows the balance *now*, and that moves
+ * every time an entry is recorded — reading it back as the opening balance on
+ * the next repaint would undo the entry. `onAccountBalanceType` turns what is
+ * typed into an opening balance at the moment it is typed, and nowhere else.
+ */
 function readLedgerAccounts() {
     document.querySelectorAll('#ledgerAccounts .bgt-row').forEach((row) => {
         const account = accountById(row.dataset.cat);
         if (!account) return;
         account.name     = row.querySelector('.bgt-label').value;
-        account.opening  = row.querySelector('.bgt-amount').value;
         const type       = row.querySelector('.acct-type').value;
         if (type !== TYPE_EDIT) account.type = type;
         // The picker's last option opens the editor instead of naming a
@@ -9205,10 +9211,44 @@ function readLedgerAccounts() {
     });
 }
 
+/** The balance box's text for a figure in sen: blank for nothing, so the
+ *  placeholder shows, and never more than two decimals. */
+const balanceBoxValue = (sen) => (sen ? String(fromSen(sen)) : '');
+
+/**
+ * Typing what an account holds now — the figure the bank app shows. The book
+ * keeps an opening balance and lets every entry move it, so the opening is
+ * worked back from the figure: whatever the entries already did is taken off
+ * it. The entries stay exactly as they are, and none of the month's totals
+ * change, because no entry was written.
+ */
+function onAccountBalanceType(event) {
+    const input = event.target.closest('.bgt-amount');
+    if (!input) return;
+    const account = accountById(input.closest('.bgt-row').dataset.cat);
+    if (!account) return;
+
+    const openingSen = toSen(parseFloat(account.opening) || 0);
+    const movedSen   = (accountBalances()[account.id] || 0) - openingSen;
+    const wantedSen  = toSen(parseFloat(input.value) || 0);
+    account.opening  = balanceBoxValue(wantedSen - movedSen);
+}
+
+/** Every repaint can move a balance — an entry saved, edited or deleted — so
+ *  the boxes follow, except the one being typed in. */
+function syncAccountBalanceBoxes(balances) {
+    document.querySelectorAll('#ledgerAccounts .bgt-row').forEach((row) => {
+        const input = row.querySelector('.bgt-amount');
+        if (!input || input === document.activeElement) return;
+        input.value = balanceBoxValue(balances[row.dataset.cat] || 0);
+    });
+}
+
 function buildLedgerAccounts() {
     const host = $('ledgerAccounts');
     if (!host) return;
     host.innerHTML = '';
+    const balances = accountBalances();
 
     ledgerState.accounts.forEach((account, index) => {
         const row = document.createElement('div');
@@ -9228,7 +9268,8 @@ function buildLedgerAccounts() {
                 typeOptions(account.type) + '</select>' +
             '<div class="money-input money-input-sm"><span class="affix">' +
                 escapeHtml(currencySymbol(account.currency)) + '</span>' +
-                '<input type="number" class="bgt-amount" step="10" placeholder="0" inputmode="decimal"></div>' +
+                '<input type="number" class="bgt-amount" step="0.01" placeholder="0" inputmode="decimal"' +
+                ' aria-label="Balance now" title="Balance now"></div>' +
             '<button type="button" class="split-x" data-remove-account aria-label="Remove account">' +
                 '<i class="bi bi-x-lg"></i></button>' +
 
@@ -9245,7 +9286,7 @@ function buildLedgerAccounts() {
         const label = row.querySelector('.bgt-label');
         label.value = account.name;
         label.placeholder = 'Account ' + (index + 1);
-        row.querySelector('.bgt-amount').value = account.opening;
+        row.querySelector('.bgt-amount').value = balanceBoxValue(balances[account.id] || 0);
 
         host.appendChild(row);
     });
@@ -10408,6 +10449,7 @@ function paintLedgerBalances(book) {
     set('ledgerWorth', signed(assetsSen - owingSen));
     set('ledgerWorthNote', ledgerState.accounts.length +
         (ledgerState.accounts.length === 1 ? ' account' : ' accounts'));
+    syncAccountBalanceBoxes(book.balances);
 
     ledgerState.types.forEach(({ id: key, label }) => {
         const inGroup = ledgerState.accounts.filter((a) => a.type === key);
@@ -14460,6 +14502,8 @@ function startApp() {
         // own purpose before anything reads the row.
         ledgerAccounts.addEventListener('change', onAccountTypePick);
         ledgerAccounts.addEventListener('change', onAccountPurposePick);
+        // Ahead of the repaint too, so the balance it paints is the one typed.
+        ledgerAccounts.addEventListener('input', onAccountBalanceType);
         ledgerAccounts.addEventListener('input', renderLedger);
         ledgerAccounts.addEventListener('change', renderLedger);
         ledgerAccounts.addEventListener('click', onLedgerAccountsClick);
@@ -14490,6 +14534,20 @@ function startApp() {
         }
     };
     if (editAccounts) editAccounts.addEventListener('click', () => accountEditor());
+
+    // Reading a statement against the bank app is when a balance turns out to
+    // be wrong, so the statement leads straight to that account's box.
+    const statementEdit = $('ledgerStatementEdit');
+    if (statementEdit) statementEdit.addEventListener('click', () => {
+        const row = ledgerState.statement &&
+            document.querySelector('#ledgerAccounts .bgt-row[data-cat="' + ledgerState.statement + '"]');
+        if (!row) return;
+        accountEditor(true);
+        const box = row.querySelector('.bgt-amount');
+        box.focus({ preventScroll: true });
+        box.select();
+        row.scrollIntoView({ block: 'center', behavior: 'smooth' });
+    });
 
     const addAccount = $('ledgerAddAccount');
     if (addAccount) {

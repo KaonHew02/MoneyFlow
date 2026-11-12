@@ -22,13 +22,13 @@
     <meta name="description" content="MoneyFlow — track the money you spend, plan the month ahead and watch it grow. Track. Plan. Grow.">
     <meta name="theme-color" content="#e8f4ee">
     <title>MoneyFlow — Understand Your Money. Manage Your Future.</title>
-    <link rel="icon" href="logo-icon.svg?v=27">
+    <link rel="icon" href="logo-icon.svg?v=28">
     <!-- Installable: Safari → Share → Add to Home Screen gives an icon, a
          full-screen window with no address bar, and (through sw.js) a launch
          that works with no signal. The manifest carries no ?v= — its address
          is part of the installed app's identity. -->
     <link rel="manifest" href="manifest.webmanifest">
-    <link rel="apple-touch-icon" href="icons/icon-180.png?v=27">
+    <link rel="apple-touch-icon" href="icons/icon-180.png?v=28">
     <meta name="mobile-web-app-capable" content="yes">
     <meta name="apple-mobile-web-app-capable" content="yes">
     <meta name="apple-mobile-web-app-title" content="MoneyFlow">
@@ -50,18 +50,18 @@
          one, which is merely out of date rather than broken.
          Bump this on any change to the files below. It is the one thing here
          that has to be remembered by hand. -->
-    <link rel="stylesheet" href="style.css?v=27">
+    <link rel="stylesheet" href="style.css?v=28">
     <!-- Two designs, kept apart: style.css is the web layout, phone.css the
          app layout, and the second only applies on a phone-sized screen. It
          comes after, so where both say something about the same element the
          phone's word is the last one. 760px matches appIsPhone() in app.js. -->
-    <link rel="stylesheet" href="phone.css?v=27" media="(max-width: 760px)">
+    <link rel="stylesheet" href="phone.css?v=28" media="(max-width: 760px)">
     <!-- English, Bahasa Melayu or 中文. Up here, before the body exists, so it
          is already watching when the first words are drawn — see i18n.js.
          It runs ahead of guard.js, so a failure in it would not get the red
          bar; it would leave the page in English, which works. Nothing else
          depends on it. Its VERSION has to match the ?v= above. -->
-    <script src="i18n.js?v=27"></script>
+    <script src="i18n.js?v=28"></script>
 </head>
 <body>
 
@@ -110,7 +110,7 @@
 
     <aside class="sidebar" id="sidebar">
         <a class="brand" href="#" aria-label="MoneyFlow — Understand Your Money. Manage Your Future.">
-            <img src="logo-dark.svg?v=27" alt="MoneyFlow">
+            <img src="logo-dark.svg?v=28" alt="MoneyFlow">
         </a>
         <p class="tagline">Track. Plan. Grow.</p>
         <nav class="tabs" id="tabs">
@@ -699,6 +699,9 @@
                             <h3 id="ledgerStatementTitle">&mdash;</h3>
                             <div class="card-actions">
                                 <span class="card-note" id="ledgerStatementNote">&mdash;</span>
+                                <button type="button" class="ghost-btn" id="ledgerStatementEdit">
+                                    <i class="bi bi-pencil"></i> Edit balance
+                                </button>
                                 <button type="button" class="ghost-btn" id="ledgerStatementClose">
                                     <i class="bi bi-x-lg"></i> Close
                                 </button>
@@ -730,7 +733,7 @@
                                     aria-expanded="false" aria-controls="ledgerPurposeEdit">
                                 <i class="bi bi-bookmark"></i> Purposes
                             </button>
-                            <span class="hint">Opening balance is what each account held before your first entry here. Every entry moves the balance from there.</span>
+                            <span class="hint">Type what each account holds right now &mdash; the figure your bank app shows, with a minus for a card you owe on. Every entry you record moves it from there.</span>
                         </div>
 
                         <!-- What sort of place the money sits in. The balance panels group
@@ -783,7 +786,7 @@
                     </div>
                     <div class="cat-list" id="categoryList"></div>
                     <p class="hint" id="categoryListHint">Rename anything here and the new name follows into every entry already filed under it &mdash; the record points at the category, not at its name. The bucket is what keeps the 50/30/20 reading honest, and it is the same list the Planner plans against, and you can add, rename or retire a category from either place. Anything with entries behind it cannot be deleted; retire it with the eye instead and its history stays intact.</p>
-                    <p class="hint" id="categoryMethodHint" hidden>A payment method is an account: choosing one is what moves its balance, which is why cash and a credit card cannot be the same entry. Opening balance, kind and currency live on the Accounts card above &mdash; this is for naming them.</p>
+                    <p class="hint" id="categoryMethodHint" hidden>A payment method is an account: choosing one is what moves its balance, which is why cash and a credit card cannot be the same entry. Balance, kind and currency live on the Accounts card above &mdash; this is for naming them.</p>
                 </section>
                 </div>
 
@@ -2575,13 +2578,13 @@
      with them — which is why they load last. -->
 <!-- First, and before any script that can fail. What it does and why it is
      a file rather than inline: guard.js. -->
-<script src="guard.js?v=27"></script>
+<script src="guard.js?v=28"></script>
 
-<script src="store.js?v=27"></script>
-<script src="app.js?v=27"></script>
+<script src="store.js?v=28"></script>
+<script src="app.js?v=28"></script>
 <script src="https://accounts.google.com/gsi/client" async defer></script>
-<script src="drive-config.js?v=27"></script>
-<script src="drive.js?v=27"></script>
-<script src="pwa.js?v=27"></script>
+<script src="drive-config.js?v=28"></script>
+<script src="drive.js?v=28"></script>
+<script src="pwa.js?v=28"></script>
 </body>
 </html>
