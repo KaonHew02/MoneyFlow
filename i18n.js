@@ -1,6 +1,6 @@
 /**
  * ====================================================================
- * MoneyFlow — the page in English, Bahasa Melayu or 中文
+ * MoneyFlow — the page in English or 中文
  * --------------------------------------------------------------------
  * app.js writes every word on screen in English, and it keeps doing so:
  * fifteen thousand lines of it build their sentences out of figures, names
@@ -9,7 +9,7 @@
  *
  * So the translating happens one step later, on the page itself. Each piece
  * of text that lands on screen is looked up in the dictionary for the
- * language picked — lang/ms.js, lang/zh.js, keyed by the English — and
+ * language picked — lang/zh.js, keyed by the English — and
  * swapped for its translation. A MutationObserver does it for everything
  * app.js draws afterwards, so a screen redrawn on every keystroke stays in
  * the reader's language without app.js knowing there is more than one.
@@ -41,7 +41,6 @@
     /** The languages on offer, by the code `<html lang>` and the files use. */
     var LANGS = {
         en: { name: 'English',       html: 'en' },
-        ms: { name: 'Bahasa Melayu', html: 'ms' },
         zh: { name: '中文',           html: 'zh-Hans' },
     };
 
@@ -375,8 +374,9 @@
             var code = localStorage.getItem(KEY);
             if (code && LANGS[code]) return code;
         } catch (err) { /* private window: fall through to the browser's own */ }
+        // Bahasa Melayu was offered until v30. A phone still holding "ms"
+        // finds no such language above and lands here, in English.
         var nav = String(navigator.language || '').toLowerCase();
-        if (nav.indexOf('ms') === 0) return 'ms';
         if (nav.indexOf('zh') === 0) return 'zh';
         return 'en';
     }
@@ -402,7 +402,7 @@
     }
 
     /** Matches the ?v= in index.html — bump the two together. */
-    var VERSION = '29';
+    var VERSION = '30';
 
     function apply() {
         var code = current;

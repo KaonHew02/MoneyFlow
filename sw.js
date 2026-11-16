@@ -48,7 +48,6 @@ const SHELL = [
     'phone.css',
     'guard.js',
     'i18n.js',
-    'lang/ms.js',
     'lang/zh.js',
     'store.js',
     'app.js',

@@ -419,13 +419,13 @@
         font-size: 13px;
     }
 
-    /* The language: three buttons, each name in its own script. The topbar's
+    /* The language: two buttons, each name in its own script. The topbar's
        select has no room up there next to the screen's name. */
     .lang-pick { display: none; }
 
     .sheet-lang {
         display: grid;
-        grid-template-columns: repeat(3, minmax(0, 1fr));
+        grid-template-columns: repeat(2, minmax(0, 1fr));
         gap: 10px;
     }
 
