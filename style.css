@@ -2934,6 +2934,9 @@ tr.is-locked { animation: nudge .3s ease; }
     white-space: nowrap;
 }
 
+/* "Paid", with nothing in Expenses behind it. */
+.commit-month-id small.is-warn { color: var(--amber); font-weight: 600; }
+
 .commit-amount { text-align: right; font-variant-numeric: tabular-nums; }
 
 /* A figure typed over the schedule is a fact, not a default — it says so. */

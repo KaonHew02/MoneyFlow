@@ -5228,7 +5228,7 @@ function commitTogglePayment(n, account) {
         const picker = $('commitAccount');
         if (picker) picker.value = account;
     }
-    const from = account || plan.account || '';
+    const from = commitAccountFor(account, plan.account);
 
     // "Payment 3 ticked from Maybank and recorded under Expenses." When an
     // entry was due and none was written, commitWriteEntry has already said
@@ -5339,8 +5339,74 @@ function commitWaivePayment(n) {
     renderDash();
 }
 
-function commitWriteEntry(plan, row, account) {
-    const from = account || plan.account;
+/**
+ * Put a payment that reads "paid" but has nothing in Expenses into Expenses.
+ *
+ * A tick writes nothing when the plan's switch is off, and an entry deleted
+ * in Expenses leaves the tick behind — either way the month said paid while
+ * no record was written and no account moved. The row now says "Not in
+ * Expenses yet" and offers this. It is dated the day the payment was ticked, not
+ * today, so it lands in the month the money actually moved. Asking for the
+ * record is also the answer to whether you want them, so the switch goes on
+ * and the next tick writes its own.
+ */
+function commitRecordPayment(n, account) {
+    const plan = commitDraft();
+    if (!plan.id) return;
+
+    const sums = planCompute(plan);
+    const row = sums.rows.find((r) => r.n === n);
+    if (!row || !row.paid || row.caughtUp) return;
+
+    const rec = plan.payments[n] || (plan.payments[n] = {});
+    if (rec.entryId && ledgerState.entries.some((e) => e.id === rec.entryId)) return;
+    delete commitState.payFrom[plan.id + ':' + n];
+
+    const from = commitAccountFor(account, rec.account, plan.account);
+    if (account && account !== plan.account && accountById(account)) {
+        plan.account = account;
+        const picker = $('commitAccount');
+        if (picker) picker.value = account;
+    }
+
+    // The form is read back on every repaint, so the box is ticked with it,
+    // or the next repaint would switch it straight off again.
+    const switchedOn = !plan.autoRecord;
+    plan.autoRecord = true;
+    const auto = $('commitAuto');
+    if (auto) auto.checked = true;
+
+    rec.paid = true;
+    if (!isIsoDate(rec.date)) rec.date = todayIso();
+    rec.account = from;
+    rec.entryId = commitWriteEntry(plan, row, from, rec.date);
+
+    if (rec.entryId) {
+        commitHint('Payment ' + n + ' is now in ' + planBook(plan) + '.' +
+            (switchedOn ? ' Payments you tick from now on go in by themselves.' : ''));
+    }
+
+    plan.updated = todayIso();
+    saveCommit();
+    renderCommit();
+    renderLedger();
+    renderDash();
+}
+
+/**
+ * The account a payment is filed against: the first one asked for that is
+ * still in the book, or else the first open one. An id that is no longer
+ * there is worse than none — the entry would be written, shown, and then
+ * dropped the next time the app opened, because an entry has to point at a
+ * real account to load.
+ */
+function commitAccountFor(...ids) {
+    const real = ids.find((id) => id && accountById(id));
+    return real || (openAccounts()[0] || {}).id || '';
+}
+
+function commitWriteEntry(plan, row, account, date) {
+    const from = commitAccountFor(account, plan.account);
     if (!from) {
         commitHint('Ticked — but there is no account set, so nothing was written to ' + planBook(plan) + '.');
         return '';
@@ -5354,7 +5420,7 @@ function commitWriteEntry(plan, row, account) {
         amount: String(fromSen(row.amountSen)),
         currency: BASE_CURRENCY,
         base: '', rate: '',
-        date: stamp,
+        date: isIsoDate(date) ? date : stamp,
         category: plan.category, sub: '',
         account: from, toAccount: '',
         note: planName(plan) + ' — payment ' + row.n + ' of ' + plan.months,
@@ -5570,11 +5636,22 @@ function paintCommitSchedule(sums) {
         // would bury the one that matters; the tick still pays any of them.
         const payable = plan.id && !plan.cancelled && !row.closed &&
             (row.status === 'overdue' || row.status === 'due' || (sums.next && sums.next.n === row.n));
-        let pay = '';
-        if (payable) {
-            const held = commitState.payFrom[plan.id + ':' + row.n] || plan.account;
+
+        // Ticked by hand, and nothing in Expenses behind it: the plan's switch
+        // was off, or the entry was deleted there since. Until now the only
+        // word of it was a hint beside the Save button — a screen away on a
+        // phone — so a month read "paid" while no record was written and no
+        // account moved. The row says so itself, and offers to put it in.
+        // Caught-up months stay out on purpose: they were settled before any
+        // of this was tracked, and are not this month's money.
+        const unrecorded = !!plan.id && row.paid && !row.caughtUp && !entry;
+
+        // Which bank, asked on the row: the same question the Bill Splitter
+        // asks when a debt is settled.
+        const picker = () => {
+            const held = commitState.payFrom[plan.id + ':' + row.n] || row.account || plan.account;
             const pick = accounts.some((a) => a.id === held) ? held : (accounts[0] || {}).id;
-            pay = (accounts.length
+            return accounts.length
                 ? '<label class="settle-into-field"><span>' + (incoming ? 'Received into' : 'Paid from') + '</span>' +
                   '<select class="settle-into commit-pay-from" data-n="' + row.n + '" aria-label="' +
                   (incoming ? 'Which account payment ' + row.n + ' came into'
@@ -5583,9 +5660,19 @@ function paintCommitSchedule(sums) {
                       (a.id === pick ? ' selected' : '') + '>' +
                       escapeHtml(a.name.trim() || 'Account ' + (i + 1)) + '</option>').join('') +
                   '</select></label>'
-                : '') +
+                : '';
+        };
+
+        let pay = '';
+        if (payable) {
+            pay = picker() +
                 '<button type="button" class="ghost-btn is-small" data-pay="' + row.n + '">' +
                 '<i class="bi bi-check-lg"></i> ' + (incoming ? 'Mark received' : 'Mark paid') + '</button>';
+        } else if (unrecorded) {
+            pay = picker() +
+                '<button type="button" class="ghost-btn is-small" data-record="' + row.n + '" ' +
+                'aria-label="Add payment ' + row.n + ' to Expenses">' +
+                '<i class="bi bi-journal-plus"></i> Add to Expenses</button>';
         }
 
         line.innerHTML =
@@ -5595,11 +5682,21 @@ function paintCommitSchedule(sums) {
                 '<i class="bi ' + look.icon + '"></i></button>' +
             '<div class="commit-month-id">' +
                 '<b>' + monthKeyLabel(monthOf(row.due)) + '</b>' +
-                '<small>#' + row.n + ' · due ' + dayLabel(row.due) +
-                    (row.paid && row.paidOn ? ' · paid ' + dayShort(row.paidOn) + via : '') +
-                    (row.waived ? ' · waived' + (row.waivedOn ? ' ' + dayShort(row.waivedOn) : '') : '') +
-                    (row.entryId ? (incoming ? ' · in Income' : ' · in Expenses')
-                        : row.caughtUp ? ' · caught up' : '') + '</small>' +
+                // One span a piece. Run together, the translator read the whole
+                // line as one sentence and matched "{0} in {1}" across it, so
+                // 中文 put "收入：" at the front and "到期" at the end.
+                '<small><span>#' + row.n + ' · due ' + dayLabel(row.due) + '</span>' +
+                    (row.paid && row.paidOn
+                        ? '<span> · paid ' + dayShort(row.paidOn) + '</span>' + (via ? '<span>' + via + '</span>' : '')
+                        : '') +
+                    (row.waived
+                        ? '<span> · waived' + (row.waivedOn ? ' ' + dayShort(row.waivedOn) : '') + '</span>'
+                        : '') +
+                    (entry ? '<span>' + (incoming ? ' · in Income' : ' · in Expenses') + '</span>'
+                        : row.caughtUp ? '<span> · caught up</span>' : '') +
+                '</small>' +
+                // A line of its own: the end of the one above is cut off on a phone.
+                (unrecorded ? '<small class="is-warn">Not in Expenses yet</small>' : '') +
             '</div>' +
             '<div class="commit-pay">' + pay + '</div>' +
             '<div class="money-input money-input-sm' + (row.override ? ' is-set' : '') + '">' +
@@ -14360,12 +14457,16 @@ function startApp() {
     const commitMonths = $('commitMonthsList');
     if (commitMonths) {
         commitMonths.addEventListener('click', (event) => {
-            const btn = event.target.closest('button[data-tick], button[data-waive], button[data-pay]');
+            const btn = event.target.closest('button[data-tick], button[data-waive], button[data-pay], button[data-record]');
             if (!btn) return;
             if (btn.dataset.waive) { commitWaivePayment(Number(btn.dataset.waive)); return; }
             // The tick and "Mark paid" are the same act; on a row with a bank
             // picker, both pay from whatever it says.
             const picker = btn.closest('.commit-month').querySelector('.commit-pay-from');
+            if (btn.dataset.record) {
+                commitRecordPayment(Number(btn.dataset.record), picker ? picker.value : '');
+                return;
+            }
             commitTogglePayment(Number(btn.dataset.tick || btn.dataset.pay), picker ? picker.value : '');
         });
         // `change`, not `input`: repainting mid-keystroke would take the caret.
