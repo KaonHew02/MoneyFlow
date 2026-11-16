@@ -3104,6 +3104,8 @@ const DEFAULT_CATEGORIES = [
       hint: 'Freelance, part-time, a small business', subs: [] },
     { id: 'refund',        label: 'Refund',         bucket: 'income', icon: 'bi-arrow-counterclockwise', tone: 'jade',
       hint: 'Claims, returns, money coming back', subs: [] },
+    { id: 'repayment',     label: 'Friend repayment', bucket: 'income', icon: 'bi-person-check', tone: 'jade',
+      hint: 'A friend paying back what you lent', subs: [] },
     { id: 'gift',          label: 'Angpao',         bucket: 'income', icon: 'bi-envelope-heart', tone: 'rose',
       hint: 'Gifts and angpao', subs: [] },
     { id: 'other-in',      label: 'Other',          bucket: 'income', icon: 'bi-three-dots',   tone: 'slate',
@@ -3134,7 +3136,11 @@ const seedCategories = () => DEFAULT_CATEGORIES.map((cat) => ({
  * renamed keeps its name.
  */
 const INSTALMENT_CATEGORY = 'instalment';
-const REQUIRED_CATEGORIES = [INSTALMENT_CATEGORY];
+// Where an "Owed to me" instalment files each payment that comes back. It
+// used to fall to the first income category, which is Salary — and a friend
+// paying back a loan is not pay.
+const REPAYMENT_CATEGORY = 'repayment';
+const REQUIRED_CATEGORIES = [INSTALMENT_CATEGORY, REPAYMENT_CATEGORY];
 
 const categoryById = (id) => categoryState.list.find((c) => c.id === id) || null;
 
@@ -5074,6 +5080,9 @@ function buildCommitOptions() {
         });
         if (held && Array.from(cats.options).some((o) => o.value === held)) cats.value = held;
         else if (plan.direction === 'out' && categoryById(INSTALMENT_CATEGORY)) cats.value = INSTALMENT_CATEGORY;
+        else if (plan.direction === 'in' && Array.from(cats.options).some((o) => o.value === REPAYMENT_CATEGORY)) {
+            cats.value = REPAYMENT_CATEGORY;
+        }
     }
 }
 
@@ -5894,9 +5903,39 @@ function saveCommit() {
             seq: commitState.seq,
             filter: commitState.filter,
             editing: commitState.editing,
+            repaymentMoved: !!commitState.repaymentMoved,
             plans: commitState.plans,
         }));
     } catch (err) { /* unreachable: storeWrite swallows it and reports it */ }
+}
+
+/**
+ * Once, for a book started before Friend repayment existed. An "Owed to me"
+ * plan left on Salary was never a choice: Salary was simply first in the
+ * list. The plan moves across, and so do the entries it wrote that still say
+ * Salary — an entry re-filed by hand since is left where it was put. Kept to
+ * one go by `repaymentMoved`, so Salary picked on purpose later stays put.
+ */
+function commitMoveRepayments() {
+    if (!categoryById(REPAYMENT_CATEGORY)) return false;
+    let moved = false;
+
+    commitState.plans
+        .filter((p) => p.direction === 'in' && (p.category === 'salary' || !p.category))
+        .forEach((p) => {
+            p.category = REPAYMENT_CATEGORY;
+            moved = true;
+            Object.values(p.payments).forEach((rec) => {
+                const entry = rec.entryId && ledgerState.entries.find((e) => e.id === rec.entryId);
+                if (!entry || entry.type !== 'income') return;
+                if (entry.category !== 'salary' && entry.category) return;
+                entry.category = REPAYMENT_CATEGORY;
+                entry.sub = '';
+            });
+        });
+
+    if (moved) saveLedger();
+    return moved;
 }
 
 /** The stored copy is untrusted. A payment numbered past the end of the term,
@@ -5905,7 +5944,12 @@ function saveCommit() {
 function loadCommit() {
     let saved = null;
     try { saved = storedJson(COMMIT_KEY); } catch (err) { saved = null; }
-    if (!saved || !Array.isArray(saved.plans)) { commitState.draft = newPlan(); return; }
+    if (!saved || !Array.isArray(saved.plans)) {
+        // A new book: every plan in it starts on Friend repayment already.
+        commitState.repaymentMoved = true;
+        commitState.draft = newPlan();
+        return;
+    }
 
     commitState.seq = Number(saved.seq) || 0;
     commitState.filter = saved.filter === 'all' ? 'all' : 'live';
@@ -5967,6 +6011,14 @@ function loadCommit() {
     const open = commitState.plans.find((p) => p.id === saved.editing);
     commitState.draft = open || newPlan();
     commitState.editing = open ? open.id : null;
+
+    // After the entry links are checked, so only entries that exist are moved.
+    commitState.repaymentMoved = !!saved.repaymentMoved;
+    if (!commitState.repaymentMoved) {
+        commitMoveRepayments();
+        commitState.repaymentMoved = true;
+        saveCommit();
+    }
 }
 
 /**

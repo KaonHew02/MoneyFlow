@@ -402,7 +402,7 @@
     }
 
     /** Matches the ?v= in index.html — bump the two together. */
-    var VERSION = '30';
+    var VERSION = '31';
 
     function apply() {
         var code = current;

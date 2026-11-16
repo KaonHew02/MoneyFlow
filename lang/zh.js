@@ -712,6 +712,8 @@ MFI18n.add("zh", {
     "Freelance, part-time, a small business": "自由职业、兼职、小生意",
     "Refund": "退款",
     "Claims, returns, money coming back": "报销、退货、退回的钱",
+    "Friend repayment": "朋友还款",
+    "A friend paying back what you lent": "朋友归还你借出的钱",
     "Angpao": "红包",
     "Gifts and angpao": "礼物和红包",
     "Anything else that came in": "其他进账",
